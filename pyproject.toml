@@ -1,0 +1,29 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ai-os"
+version = "0.1.0"
+description = "AI-OS: A modular AI operating system for research, planning, execution, and memory."
+readme = "README.md"
+requires-python = ">=3.12"
+license = { file = "LICENSE" }
+authors = [
+    { name = "Yash Mahajan" }
+]
+
+dependencies = [
+    "typer[all]>=0.12",
+    "rich>=13.7",
+    "pydantic>=2.0",
+    "python-dotenv>=1.0",
+    "PyYAML>=6.0"
+]
+
+[project.scripts]
+aios = "src.cli.main:app"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["src*"]
