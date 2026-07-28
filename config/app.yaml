@@ -1,0 +1,7 @@
+name: AI-OS
+version: 0.1.0
+environment: development
+workspace: ../workspace
+logs: ../logs
+# app.yaml lives inside config/, so "." = this config directory itself.
+config: .

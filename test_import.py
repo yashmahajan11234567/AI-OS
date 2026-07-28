@@ -1,0 +1,1 @@
+import sys; sys.path.insert(0, r'C:\Development\AI-OS\src'); from aios.config.loader import load_config; print('loader OK')

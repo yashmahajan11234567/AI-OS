@@ -1,0 +1,319 @@
+"""
+Retry Manager for AI-OS Hermes Kernel.
+
+Manages retry budgets and policies for services to prevent infinite retry loops.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import logging
+from dataclasses import dataclass, field
+from datetime import datetime, timezone
+from enum import Enum
+from typing import Any, Callable, Optional
+
+from aios.events.bus import get_event_bus
+from aios.events.types import (
+    RetryBudgetExhausted,
+    RetryScheduled,
+    RetryExecuted,
+    TaskFailed,
+    TaskRetryRequested,
+)
+
+logger = logging.getLogger(__name__)
+
+
+class RetryStrategy(str, Enum):
+    """Retry strategy types."""
+
+    FIXED = "fixed"
+    EXPONENTIAL = "exponential"
+    LINEAR = "linear"
+    FIBONACCI = "fibonacci"
+
+
+@dataclass
+class RetryPolicy:
+    """Configuration for retry behavior."""
+
+    max_retries: int = 3
+    base_delay_ms: int = 1000
+    max_delay_ms: int = 60000
+    strategy: RetryStrategy = RetryStrategy.EXPONENTIAL
+    jitter: bool = True
+    retryable_exceptions: tuple[type[Exception], ...] = (Exception,)
+    non_retryable_exceptions: tuple[type[Exception], ...] = ()
+
+
+@dataclass
+class RetryAttempt:
+    """Record of a retry attempt."""
+
+    attempt: int
+    task_id: str
+    service: str
+    error: str
+    error_type: str
+    delay_ms: int
+    timestamp: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+    succeeded: bool = False
+
+
+@dataclass
+class RetryBudget:
+    """Tracks remaining retries for a task."""
+
+    task_id: str
+    service: str
+    policy: RetryPolicy
+    attempts: list[RetryAttempt] = field(default_factory=list)
+
+    @property
+    def remaining(self) -> int:
+        """Number of retries remaining."""
+        return max(0, self.policy.max_retries - len(self.attempts))
+
+    @property
+    def exhausted(self) -> bool:
+        """True if no retries remain."""
+        return len(self.attempts) >= self.policy.max_retries
+
+    def record_attempt(self, error: Exception, error_type: str) -> RetryAttempt:
+        attempt_num = len(self.attempts) + 1
+        delay = self._calculate_delay(attempt_num)
+
+        attempt = RetryAttempt(
+            attempt=attempt_num,
+            task_id=self.task_id,
+            service=self.service,
+            error=str(error),
+            error_type=error_type,
+            delay_ms=delay,
+        )
+        self.attempts.append(attempt)
+        return attempt
+
+    def _calculate_delay(self, attempt: int) -> int:
+        policy = self.policy
+        if policy.strategy == RetryStrategy.FIXED:
+            delay = policy.base_delay_ms
+        elif policy.strategy == RetryStrategy.LINEAR:
+            delay = policy.base_delay_ms * attempt
+        elif policy.strategy == RetryStrategy.EXPONENTIAL:
+            delay = policy.base_delay_ms * (2 ** (attempt - 1))
+        elif policy.strategy == RetryStrategy.FIBONACCI:
+            a, b = 1, 1
+            for _ in range(attempt - 1):
+                a, b = b, a + b
+            delay = policy.base_delay_ms * a
+        else:
+            delay = policy.base_delay_ms
+
+        delay = min(delay, policy.max_delay_ms)
+        if policy.jitter:
+            import random
+            delay = int(delay * (0.5 + random.random()))
+
+        return delay
+
+
+class RetryManager:
+    """
+    Manages retry budgets and executes retries for services.
+
+    Features:
+    - Per-task retry budgets
+    - Configurable retry policies per service
+    - Automatic retry scheduling
+    - Integration with Root Cause Analyzer on budget exhaustion
+    """
+
+    def __init__(self):
+        self._event_bus = get_event_bus()
+        self._policies: dict[str, RetryPolicy] = {}
+        self._budgets: dict[str, RetryBudget] = {}
+        self._default_policy = RetryPolicy()
+
+    def set_policy(self, service: str, policy: RetryPolicy) -> None:
+        """Set retry policy for a service."""
+        self._policies[service] = policy
+        logger.info(f"Set retry policy for {service}: {policy}")
+
+    def get_policy(self, service: str) -> RetryPolicy:
+        """Get retry policy for a service."""
+        return self._policies.get(service, self._default_policy)
+
+    def create_budget(self, task_id: str, service: str, policy: RetryPolicy | None = None) -> RetryBudget:
+        """Create a retry budget for a task."""
+        policy = policy or self.get_policy(service)
+        budget = RetryBudget(task_id=task_id, service=service, policy=policy)
+        key = f"{task_id}:{service}"
+        self._budgets[key] = budget
+        return budget
+
+    def get_budget(self, task_id: str, service: str) -> RetryBudget | None:
+        """Get retry budget for a task."""
+        key = f"{task_id}:{service}"
+        return self._budgets.get(key)
+
+    def retry_budget_exhausted(self, task_id: str, service: str, budget: RetryBudget) -> None:
+        """Handle retry budget exhaustion."""
+        key = f"{task_id}:{service}"
+        if key in self._budgets:
+            del self._budgets[key]
+        logger.warning(f"Retry budget exhausted for task {task_id}: {budget}")
+        # Optionally, publish an event
+        self._event_bus.publish(
+            RetryBudgetExhausted(
+                source_service="retry_manager",
+                correlation_id=task_id,
+                payload={
+                    "task_id": task_id,
+                    "service": service,
+                    "max_retries": budget.policy.max_retries,
+                    "attempts": len(budget.attempts),
+                },
+            )
+        )
+
+    async def execute_with_retry(
+        self,
+        task_id: str,
+        service: str,
+        func: Callable[..., Any],
+        policy: RetryPolicy | None = None,
+        *args,
+        **kwargs,
+    ) -> Any:
+        """
+        Execute a function with retry logic.
+
+        Args:
+            task_id: Unique task identifier
+            service: Service name for policy lookup
+            func: Async function to execute
+            policy: Optional override policy
+            *args: Positional arguments for func
+            **kwargs: Keyword arguments for func
+
+        Returns:
+            Result of the function call
+
+        Raises:
+            The last exception if all retries exhausted
+        """
+        policy = policy or self.get_policy(service)
+        budget = self.create_budget(task_id, service, policy)
+
+        last_exception: Exception | None = None
+
+        # Initial attempt + retries = max_retries + 1 total attempts
+        for attempt_num in range(policy.max_retries + 1):
+            try:
+                result = await func(*args, **kwargs)
+                # Success - mark the last attempt as succeeded if there were retries
+                if budget.attempts:
+                    budget.attempts[-1].succeeded = True
+                return result
+            except Exception as e:
+                last_exception = e
+                error_type = type(e).__name__
+
+                # Check if exception is retryable
+                if isinstance(e, policy.non_retryable_exceptions):
+                    logger.info(f"Non-retryable exception {error_type} for task {task_id}")
+                    raise
+
+                if not isinstance(e, policy.retryable_exceptions):
+                    logger.info(f"Exception {error_type} not in retryable list for task {task_id}")
+                    raise
+
+                # Record the attempt
+                if attempt_num < policy.max_retries:
+                    attempt = budget.record_attempt(e, error_type)
+
+                    # Publish retry scheduled event
+                    self._event_bus.publish(
+                        RetryScheduled(
+                            source_service="retry_manager",
+                            correlation_id=task_id,
+                            payload={
+                                "task_id": task_id,
+                                "service": service,
+                                "retry_count": attempt.attempt,
+                                "delay_ms": attempt.delay_ms,
+                            },
+                        )
+                    )
+
+                    # Wait before retry
+                    await asyncio.sleep(attempt.delay_ms / 1000.0)
+
+                    # Publish retry executed event
+                    self._event_bus.publish(
+                        RetryExecuted(
+                            source_service="retry_manager",
+                            correlation_id=task_id,
+                            payload={
+                                "task_id": task_id,
+                                "service": service,
+                                "retry_count": attempt.attempt,
+                            },
+                        )
+                    )
+                else:
+                    # Max retries reached
+                    break
+
+        # All retries exhausted
+        self.retry_budget_exhausted(task_id, service, budget)
+
+        # Publish task failed event
+        self._event_bus.publish(
+            TaskFailed(
+                source_service="retry_manager",
+                correlation_id=task_id,
+                payload={
+                    "task_id": task_id,
+                    "service": service,
+                    "error": str(last_exception),
+                    "error_type": type(last_exception).__name__,
+                    "retryable": True,
+                    "retry_count": policy.max_retries,
+                },
+            )
+        )
+
+        raise last_exception
+
+
+# Global retry manager instance
+_global_retry_manager: RetryManager | None = None
+
+
+def get_retry_manager() -> RetryManager:
+    """Get or create the global retry manager."""
+    global _global_retry_manager
+    if _global_retry_manager is None:
+        _global_retry_manager = RetryManager()
+    return _global_retry_manager
+
+
+def set_retry_manager(manager: RetryManager) -> None:
+    """Set the global retry manager."""
+    global _global_retry_manager
+    _global_retry_manager = manager
+
+
+__all__ = [
+    "RetryManager",
+    "RetryPolicy",
+    "RetryStrategy",
+    "RetryBudget",
+    "RetryAttempt",
+    "get_retry_manager",
+    "set_retry_manager",
+]
+
