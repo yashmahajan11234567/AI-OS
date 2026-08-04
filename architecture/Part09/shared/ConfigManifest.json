@@ -1,0 +1,83 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://ai-os.internal/shared/ConfigManifest.json",
+  "title": "Configuration Manifest",
+  "description": "Schema for versioned, immutable configuration manifests used by the Configuration and Feature Flag System.",
+  "type": "object",
+  "properties": {
+    "manifestId": {
+      "type": "string",
+      "format": "uuid",
+      "description": "Unique identifier for this manifest (UUIDv7)"
+    },
+    "version": {
+      "type": "string",
+      "pattern": "^\\d+\\.\\d+\\.\\d+$",
+      "description": "Semantic version of this configuration manifest"
+    },
+    "timestamp": {
+      "type": "string",
+      "format": "date-time",
+      "description": "ISO 8601 timestamp of manifest creation"
+    },
+    "cryptographicHash": {
+      "type": "string",
+      "description": "Cryptographic hash of this manifest for integrity verification"
+    },
+    "values": {
+      "type": "object",
+      "description": "Key-value configuration pairs",
+      "additionalProperties": true
+    },
+    "featureFlags": {
+      "type": "array",
+      "description": "Feature flag definitions referencing the shared FeatureFlagSchema",
+      "items": {
+        "$ref": "FeatureFlagSchema.json"
+      }
+    },
+    "schemaReferences": {
+      "type": "array",
+      "description": "References to JSON Schemas for validating specific sections",
+      "items": {
+        "type": "object",
+        "properties": {
+          "section": { "type": "string" },
+          "schema": { "type": "string", "format": "uri" }
+        },
+        "required": ["section", "schema"]
+      }
+    },
+    "metadata": {
+      "type": "object",
+      "description": "Audit trail and administrative metadata",
+      "properties": {
+        "creator": { "type": "string" },
+        "approver": { "type": "string" },
+        "changeReason": { "type": "string", "maxLength": 2048 },
+        "tenantId": { "type": "string" }
+      },
+      "required": ["creator", "changeReason"]
+    },
+    "dependencies": {
+      "type": "object",
+      "description": "Prerequisite manifests or feature flags",
+      "properties": {
+        "requiredManifests": {
+          "type": "array",
+          "items": { "type": "string", "format": "uuid" }
+        },
+        "requiredFlags": {
+          "type": "array",
+          "items": { "type": "string" }
+        }
+      }
+    },
+    "tags": {
+      "type": "array",
+      "description": "User-defined labels for organization and filtering",
+      "items": { "type": "string" }
+    }
+  },
+  "required": ["manifestId", "version", "timestamp", "cryptographicHash", "values", "metadata"]
+}

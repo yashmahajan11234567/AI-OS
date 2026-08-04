@@ -1,0 +1,58 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://ai-os.internal/shared/ProvisioningContract.json",
+  "title": "Provisioning Contract",
+  "description": "Contract for infrastructure provisioning operations in AI-OS",
+  "type": "object",
+  "required": ["operation", "manifestId", "timestamp"],
+  "properties": {
+    "operation": {
+      "type": "string",
+      "enum": ["provision", "deprovision", "reconcile", "validate", "status"]
+    },
+    "manifestId": {
+      "type": "string",
+      "format": "uuid",
+      "description": "UUIDv7 identifier of the infrastructure manifest to operate on"
+    },
+    "timestamp": {
+      "type": "string",
+      "format": "date-time",
+      "description": "Timestamp of the provisioning request"
+    },
+    "parameters": {
+      "type": "object",
+      "description": "Operation-specific parameters",
+      "additionalProperties": true
+    },
+    "options": {
+      "type": "object",
+      "description": "Operation options and flags",
+      "properties": {
+        "force": {
+          "type": "boolean",
+          "default": false,
+          "description": "Force operation even if conflicts detected"
+        },
+        "validateOnly": {
+          "type": "boolean",
+          "default": false,
+          "description": "Only validate, do not execute"
+        },
+        "dryRun": {
+          "type": "boolean",
+          "default": false,
+          "description": "Simulate operation without making changes"
+        },
+        "timeoutSeconds": {
+          "type": "integer",
+          "minimum": 1,
+          "default": 300,
+          "description": "Operation timeout in seconds"
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
+}

@@ -1,0 +1,88 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://ai-os.internal/shared/VersionPolicy.json",
+  "title": "Version Policy",
+  "description": "Schema for version policies that define version constraints, compatibility rules, and update policies.",
+  "type": "object",
+  "required": ["policyId", "version", "rules"],
+  "properties": {
+    "policyId": {
+      "type": "string",
+      "format": "uuid",
+      "description": "Unique identifier for this version policy (UUIDv7)"
+    },
+    "version": {
+      "type": "string",
+      "pattern": "^\\d+\\.\\d+\\.\\d+$",
+      "description": "Semantic version of this version policy"
+    },
+    "name": {
+      "type": "string",
+      "description": "Human-readable name for this version policy"
+    },
+    "description": {
+      "type": "string",
+      "description": "Detailed description of what this version policy governs"
+    },
+    "rules": {
+      "type": "array",
+      "description": "Array of version rules",
+      "items": {
+        "type": "object",
+        "required": ["constraint", "action"],
+        "properties": {
+          "constraint": {
+            "type": "object",
+            "required": ["type", "value"],
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": ["versionRange", "exactVersion", "semverRange", "compatibility"],
+                "description": "Type of version constraint"
+              },
+              "value": {
+                "type": "string",
+                "description": "The constraint value (e.g., '^1.2.3', '>=2.0.0 <3.0.0', etc.)"
+              }
+            },
+            "additionalProperties": false
+          },
+          "action": {
+            "type": "string",
+            "enum": ["allow", "deny", "warn", "require-approval"],
+            "description": "Action to take when constraint is matched"
+          },
+          "description": {
+            "type": "string",
+            "description": "Human-readable description of this rule"
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    "defaultAction": {
+      "type": "string",
+      "enum": ["allow", "deny", "warn", "require-approval"],
+      "default": "allow",
+      "description": "Default action when no rules match"
+    },
+    "metadata": {
+      "type": "object",
+      "description": "Audit trail and administrative metadata",
+      "properties": {
+        "creator": {
+          "type": "string"
+        },
+        "approver": {
+          "type": "string"
+        },
+        "changeReason": {
+          "type": "string",
+          "maxLength": 2048
+        }
+      },
+      "required": ["creator", "changeReason"]
+    }
+  },
+  "additionalProperties": false
+}

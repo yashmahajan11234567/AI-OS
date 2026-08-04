@@ -1,0 +1,168 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://ai-os.internal/shared/DeploymentManifest.json",
+  "title": "Deployment Manifest",
+  "description": "Schema for deployment manifests that declare the desired state of AI-OS infrastructure for deployment.",
+  "type": "object",
+  "required": ["manifestId", "version", "timestamp", "infrastructureContract", "resources", "security"],
+  "properties": {
+    "manifestId": {
+      "type": "string",
+      "format": "uuid",
+      "description": "Unique identifier for this manifest (UUIDv7)"
+    },
+    "version": {
+      "type": "string",
+      "pattern": "^\\d+\\.\\d+\\.\\d+$",
+      "description": "Semantic version of this deployment manifest"
+    },
+    "timestamp": {
+      "type": "string",
+      "format": "date-time",
+      "description": "ISO 8601 timestamp of manifest creation"
+    },
+    "infrastructureContract": {
+      "type": "object",
+      "required": ["contractId", "version"],
+      "description": "Reference to the infrastructure contract this manifest targets",
+      "properties": {
+        "contractId": {
+          "type": "string",
+          "description": "Identifier of the infrastructure contract"
+        },
+        "version": {
+          "type": "string",
+          "pattern": "^\\d+\\.\\d+\\.\\d+$",
+          "description": "Version of the infrastructure contract"
+        }
+      },
+      "additionalProperties": false
+    },
+    "resources": {
+      "type": "object",
+      "description": "Specification of compute, memory, storage, networking, and GPU resources",
+      "additionalProperties": {
+        "type": "object",
+        "required": ["allocation", "limit", "unit"],
+        "properties": {
+          "allocation": {
+            "type": "string",
+            "enum": ["guaranteed", "bestEffort"]
+          },
+          "limit": {
+            "type": "number",
+            "exclusiveMinimum": 0
+          },
+          "unit": {
+            "type": "string",
+            "enum": ["cores", "bytes", "bps", "iops"]
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    "security": {
+      "type": "object",
+      "required": ["authentication", "authorization", "encryption"],
+      "description": "Security configuration",
+      "properties": {
+        "authentication": {
+          "type": "string",
+          "enum": ["mutualTLS", "jwt", "apiKey", "certificate"]
+        },
+        "authorization": {
+          "type": "string"
+        },
+        "encryption": {
+          "type": "object",
+          "required": ["inTransit", "atRest"],
+          "properties": {
+            "inTransit": {
+              "type": "string",
+              "enum": ["none", "TLS1.2", "TLS1.3"]
+            },
+            "atRest": {
+              "type": "string",
+              "enum": ["none", "AES128-GCM", "AES256-GCM", "CHACHA20-POLY1305"]
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    "networking": {
+      "type": "object",
+      "description": "Network topology, security groups, and connectivity specifications",
+      "additionalProperties": true
+    },
+    "storage": {
+      "type": "object",
+      "description": "Volume specifications, file system types, and encryption settings",
+      "additionalProperties": true
+    },
+    "compute": {
+      "type": "object",
+      "description": "CPU allocation, memory allocation, and processor feature requirements",
+      "additionalProperties": true
+    },
+    "labels": {
+      "type": "object",
+      "description": "Key-value pairs for identification and selection",
+      "additionalProperties": {
+        "type": "string"
+      }
+    },
+    "annotations": {
+      "type": "object",
+      "description": "Non-identifying metadata for tooling and automation",
+      "additionalProperties": {
+        "type": "string"
+      }
+    },
+    "dependencies": {
+      "type": "object",
+      "description": "List of required infrastructure manifests or services with version constraints",
+      "additionalProperties": {
+        "type": "object",
+        "required": ["versionConstraint"],
+        "properties": {
+          "versionConstraint": {
+            "type": "string",
+            "description": "SemVer version constraint for this dependency"
+          },
+          "optional": {
+            "type": "boolean",
+            "default": false
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    "cryptographicHash": {
+      "type": "string",
+      "description": "Cryptographic hash of this manifest for integrity verification"
+    },
+    "metadata": {
+      "type": "object",
+      "description": "Audit trail and administrative metadata",
+      "properties": {
+        "creator": {
+          "type": "string"
+        },
+        "approver": {
+          "type": "string"
+        },
+        "changeReason": {
+          "type": "string",
+          "maxLength": 2048
+        },
+        "tenantId": {
+          "type": "string"
+        }
+      },
+      "required": ["creator", "changeReason"]
+    }
+  },
+  "additionalProperties": false
+}

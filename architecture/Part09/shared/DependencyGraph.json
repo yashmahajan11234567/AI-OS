@@ -1,0 +1,88 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "DependencyGraph",
+  "type": "object",
+  "required": ["nodes", "edges"],
+  "properties": {
+    "nodes": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["nodeId", "nodeType"],
+        "properties": {
+          "nodeId": {
+            "type": "string",
+            "description": "Unique identifier for the dependency node"
+          },
+          "nodeType": {
+            "type": "string",
+            "description": "Type of the dependency node (resource, service, etc.)"
+          },
+          "properties": {
+            "type": "object",
+            "additionalProperties": true,
+            "description": "Additional properties specific to the node type"
+          },
+          "metadata": {
+            "type": "object",
+            "description": "Metadata associated with the node"
+          }
+        }
+      },
+      "description": "Nodes in the dependency graph"
+    },
+    "edges": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["edgeId", "sourceNode", "targetNode", "dependencyType"],
+        "properties": {
+          "edgeId": {
+            "type": "string",
+            "description": "Unique identifier for the dependency edge"
+          },
+          "sourceNode": {
+            "type": "string",
+            "description": "Identifier of the source node"
+          },
+          "targetNode": {
+            "type": "string",
+            "description": "Identifier of the target node"
+          },
+          "dependencyType": {
+            "type": "string",
+            "description": "Type of dependency relationship"
+          },
+          "isOptional": {
+            "type": "boolean",
+            "description": "Whether this dependency is optional"
+          },
+          "weight": {
+            "type": "number",
+            "minimum": 0,
+            "description": "Weight or strength of the dependency relationship"
+          },
+          "conditions": {
+            "type": "array",
+            "items": {"type": "string"},
+            "description": "Conditions under which this dependency applies"
+          },
+          "metadata": {
+            "type": "object",
+            "description": "Metadata associated with the edge"
+          }
+        }
+      },
+      "description": "Edges representing dependencies in the graph"
+    },
+    "graphProperties": {
+      "type": "object",
+      "additionalProperties": true,
+      "description": "Properties of the dependency graph as a whole"
+    },
+    "metadata": {
+      "type": "object",
+      "description": "Metadata associated with the dependency graph"
+    }
+  }
+}

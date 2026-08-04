@@ -1,0 +1,51 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "LifecycleTransition",
+  "type": "object",
+  "required": ["transitionId", "name", "description", "fromState", "toState"],
+  "properties": {
+    "transitionId": {
+      "type": "string",
+      "description": "Unique identifier for the lifecycle transition"
+    },
+    "name": {
+      "type": "string",
+      "description": "Human-readable transition name"
+    },
+    "description": {
+      "type": "string",
+      "description": "Detailed description of the lifecycle transition"
+    },
+    "fromState": {
+      "type": "string",
+      "description": "Identifier of the source lifecycle state"
+    },
+    "toState": {
+      "type": "string",
+      "description": "Identifier of the target lifecycle state"
+    },
+    "preconditions": {
+      "type": "array",
+      "items": {"type": "string"},
+      "description": "Conditions that must be met before transition can execute"
+    },
+    "postconditions": {
+      "type": "array",
+      "items": {"type": "string"},
+      "description": "Conditions that must be met after transition completes"
+    },
+    "isRollbackSupported": {
+      "type": "boolean",
+      "description": "Whether this transition supports automatic rollback"
+    },
+    "timeoutSeconds": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "Maximum time allowed for transition execution in seconds"
+    },
+    "metadata": {
+      "type": "object",
+      "description": "Additional transition metadata"
+    }
+  }
+}

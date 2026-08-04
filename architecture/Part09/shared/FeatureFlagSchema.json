@@ -1,0 +1,129 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://ai-os.internal/shared/FeatureFlagSchema.json",
+  "title": "Feature Flag Definition",
+  "description": "Schema for individual feature flag definitions within a Configuration Manifest. Referenced from ConfigManifest.json via $ref.",
+  "type": "object",
+  "properties": {
+    "id": {
+      "type": "string",
+      "format": "uuid",
+      "description": "Unique identifier for the feature flag (UUIDv7)"
+    },
+    "name": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 256,
+      "pattern": "^[a-zA-Z][a-zA-Z0-9._-]*$",
+      "description": "Programmatic name of the feature flag"
+    },
+    "description": {
+      "type": "string",
+      "maxLength": 1024,
+      "description": "Human-readable description of the feature flag's purpose"
+    },
+    "owner": {
+      "type": "string",
+      "description": "Team or individual responsible for this feature flag"
+    },
+    "enabled": {
+      "type": "boolean",
+      "description": "Whether the feature flag is currently enabled"
+    },
+    "type": {
+      "type": "string",
+      "enum": ["boolean", "multivariate", "experiment"],
+      "description": "Type of feature flag determining evaluation behavior"
+    },
+    "variants": {
+      "type": "object",
+      "description": "Variant definitions for multivariate flags",
+      "additionalProperties": {
+        "type": "object",
+        "properties": {
+          "name": { "type": "string" },
+          "description": { "type": "string" },
+          "payload": { "type": "object" }
+        },
+        "required": ["name"]
+      }
+    },
+    "defaultVariant": {
+      "type": "string",
+      "description": "Default variant when no targeting rules match"
+    },
+    "rolloutPercentage": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 100,
+      "description": "Percentage of evaluation contexts for which this flag is enabled"
+    },
+    "targetingRules": {
+      "type": "array",
+      "description": "Rules for targeting specific evaluation contexts",
+      "items": {
+        "type": "object",
+        "properties": {
+          "attribute": { "type": "string" },
+          "operator": {
+            "type": "string",
+            "enum": ["equals", "not_equals", "in", "not_in", "contains", "matches", "greater_than", "less_than", "starts_with", "ends_with"]
+          },
+          "value": {},
+          "enabled": { "type": "boolean" },
+          "variant": { "type": "string" }
+        },
+        "required": ["attribute", "operator", "value"]
+      }
+    },
+    "prerequisites": {
+      "type": "array",
+      "description": "List of feature flags that must be enabled before this flag takes effect",
+      "items": {
+        "type": "object",
+        "properties": {
+          "flagId": { "type": "string", "format": "uuid" },
+          "requiredState": { "type": "boolean" }
+        },
+        "required": ["flagId"]
+      }
+    },
+    "environmentRestrictions": {
+      "type": "array",
+      "description": "Environments where this flag may be evaluated",
+      "items": { "type": "string" }
+    },
+    "schedule": {
+      "type": "object",
+      "description": "Scheduled activation and expiration",
+      "properties": {
+        "activateAt": { "type": "string", "format": "date-time" },
+        "expireAt": { "type": "string", "format": "date-time" },
+        "timezone": { "type": "string" }
+      }
+    },
+    "tags": {
+      "type": "array",
+      "description": "User-defined labels for organization and filtering",
+      "items": { "type": "string" }
+    },
+    "metadata": {
+      "type": "object",
+      "description": "Additional metadata",
+      "properties": {
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" },
+        "createdBy": { "type": "string" }
+      }
+    }
+  },
+  "required": ["id", "name", "enabled", "type"],
+  "allOf": [
+    {
+      "if": { "properties": { "type": { "const": "multivariate" } } },
+      "then": {
+        "required": ["variants", "defaultVariant"]
+      }
+    }
+  ]
+}

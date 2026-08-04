@@ -1,0 +1,69 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "LifecyclePolicy",
+  "type": "object",
+  "required": ["policyId", "name", "description", "version", "rules"],
+  "properties": {
+    "policyId": {
+      "type": "string",
+      "description": "Unique identifier for the lifecycle policy"
+    },
+    "name": {
+      "type": "string",
+      "description": "Human-readable policy name"
+    },
+    "description": {
+      "type": "string",
+      "description": "Detailed policy description"
+    },
+    "version": {
+      "type": "string",
+      "description": "Policy version following semantic versioning"
+    },
+    "rules": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["ruleId", "description", "condition", "action"],
+        "properties": {
+          "ruleId": {
+            "type": "string",
+            "description": "Unique identifier for the rule"
+          },
+          "description": {
+            "type": "string",
+            "description": "Human-readable rule description"
+          },
+          "condition": {
+            "type": "string",
+            "description": "Boolean expression to evaluate"
+          },
+          "action": {
+            "type": "string",
+            "enum": ["allow", "deny", "warn", "require"],
+            "description": "Action to take when condition matches"
+          },
+          "parameters": {
+            "type": "object",
+            "additionalProperties": true,
+            "description": "Parameters for rule evaluation"
+          }
+        }
+      },
+      "description": "Ordered list of lifecycle policy rules"
+    },
+    "appliesTo": {
+      "type": "array",
+      "items": {"type": "string"},
+      "description": "List of resource types or lifecycle states this policy applies to"
+    },
+    "evaluationOrder": {
+      "type": "number",
+      "description": "Order in which this policy should be evaluated (lower first)"
+    },
+    "metadata": {
+      "type": "object",
+      "description": "Additional policy metadata"
+    }
+  }
+}
