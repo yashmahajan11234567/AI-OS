@@ -4,7 +4,7 @@
 
 This document serves as the authoritative source for all engineering and architectural principles used throughout the AI-OS (Artificial Intelligence Operating System). It explains the principles that guided the architectural decisions captured in the frozen Architecture Specification (Parts 1-15), providing the rationale and philosophy behind the system's design.
 
-While the Architecture Specification defines what AI-OS **must** be (the normative requirements), this document explains why those requirements were chosen and the principles that inform both the specification and its implementations.
+While the Architecture Specification defines what AI-OS **MUST** be (the normative requirements), this document explains why those requirements were chosen and the principles that inform both the specification and its implementations.
 
 ## Table of Contents
 1. [Purpose](#purpose)
@@ -15,7 +15,7 @@ While the Architecture Specification defines what AI-OS **must** be (the normati
 6. [Engineering Philosophy](#engineering-philosophy)
 7. [Design Principles](#design-principles)
 8. [System Design Principles](#system-design-principles)
-9. [Software Engineering Principles](#software-engineering-principles)
+9. [AI-OS Software Engineering Principles](#ai-os-software-engineering-principles)
 10. [AI Engineering Principles](#ai-engineering-principles)
 11. [Event-Driven Principles](#event-driven-principles)
 12. [Human Governance Principles](#human-governance-principles)
@@ -73,7 +73,7 @@ This document is intended for:
 
 ## Relationship to the Architecture Specification
 
-The AI-OS Architecture Specification (Parts 1-15) defines the **normative requirements**—what AI-OS must be to be considered compliant. This document defines the **philosophical foundation**—why those requirements exist and the principles that inform them.
+The AI-OS Architecture Specification (Parts 1-15) defines the **normative requirements**—what AI-OS MUST be to be considered compliant. This document defines the **philosophical foundation**—why those requirements exist and the principles that inform them.
 
 - **Specification**: Prescriptive, frozen, versioned, compliance-focused
 - **Engineering Principles**: Descriptive, explanatory, philosophy-focused, guidance-oriented
@@ -94,16 +94,16 @@ By strictly separating the stable orchestration kernel (Hermes) containing exact
 Making the EventBus the sole inter-component communication mechanism (post-initialization) isn't just about loose coupling—it's about creating an observable, traceable, and replayable system where every action leaves an immutable audit trail with correlation/causation IDs, enabling distributed tracing, replay debugging, and compliance verification.
 
 ### 4. **Specification/Implementation Separation for Technological Neutrality**
-AI-OS **must** distinguish between what the system must be (the frozen Architecture Specification Parts 1-15) from how it is built (any implementation) to enable technological neutrality and ensure the architecture can outlive any particular technology stack while maintaining conformance guarantees.
+AI-OS **MUST** distinguish between what the system must be (the frozen Architecture Specification Parts 1-15) from how it is built (any implementation) to enable technological neutrality and ensure the architecture can outlive any particular technology stack while maintaining conformance guarantees.
 
 ### 5. **Human-Governed AI through Council Governance**
-AI agents in AI-OS **must not** operate in isolation—they function within governance structures (CouncilManager, FinalJudge) that provide human oversight, accountability, and ethical boundaries, recognizing that ultimate responsibility for engineering outcomes remains with humans while enabling appropriate agent autonomy levels.
+AI agents in AI-OS **MUST NOT** operate in isolation—they function within governance structures (CouncilManager, FinalJudge) that provide human oversight, accountability, and ethical boundaries, recognizing that ultimate responsibility for engineering outcomes remains with humans while enabling appropriate agent autonomy levels.
 
 ### 6. **Ecosystem-Centric Evolution through Versioned Extension Points**
 Rather than attempting to build all capabilities centrally, AI-OS fosters ecosystems (Skills, MCP, Repository) through explicitly permitted, versioned extension points that enable distributed innovation while maintaining architectural integrity through governance models and compatibility guarantees.
 
 ### 7. **Validation-First Execution as Foundational Safety Principle**
-All agentic operations **must** undergo rigorous validation (pre-execution, during-execution, post-execution) through the Validation Architecture to prevent harmful actions, ensure goal alignment, and maintain system integrity—recognizing that autonomous systems require stronger safety boundaries than human-directed ones.
+All agentic operations **MUST** undergo rigorous validation (pre-execution, during-execution, post-execution) through the Validation Architecture to prevent harmful actions, ensure goal alignment, and maintain system integrity—recognizing that autonomous systems require stronger safety boundaries than human-directed ones.
 
 ### Architecture Philosophy Relationship Diagram
 
@@ -156,16 +156,16 @@ graph TD
 The engineering philosophy of AI-OS extends the architectural philosophy into practical development principles specific to AI-OS implementation:
 
 ### 1. **AI-OS Principle of Least Power**
-Use the least powerful abstraction capable of solving a problem within the AI-OS architecture. This promotes simplicity, testability, and reduces unintended consequences. In AI-OS, this **must** favor event-driven communication over direct service calls (Part 2), declarative four-layer configuration over imperative setup (Part 8), and well-defined, versioned extension points over unrestricted access to internals (Part 9).
+Use the least powerful abstraction capable of solving a problem within the AI-OS architecture. This promotes simplicity, testability, and reduces unintended consequences specific to autonomous systems. In AI-OS, this **MUST** favor event-driven communication over direct service calls (Part 2), declarative four-layer configuration over imperative setup (Part 8), and well-defined, versioned extension points over unrestricted access to internals (Part 9).
 
 ### 2. **AI-OS Explicit Over Implicit**
 Make assumptions, dependencies, and behaviors explicit rather than relying on implicit conventions or hidden state. This is why AI-OS **requires** explicit event schemas with versioning (Part 2), declared service dependencies in `depends_on` (Part 4), and immutable events with both correlation_id (workflow trace) and causation_id (direct cause) (Parts 2, 12).
 
 ### 3. **AI-OS Fail Fast, Fail Safely**
-Detect and handle failures as early as possible while ensuring failure states don't corrupt system integrity or create unsafe conditions. AI-OS **must** achieve this through event-based failure handling (not exceptions across boundaries) (Part 4: BaseService), configurable retry budgets per operation type (Part 3: RetryManager), workflow checkpointing for deterministic recovery (Part 3: CheckpointManager), and integration with RootCauseManager for intelligent failure classification (Part 3).
+Detect and handle failures as early as possible while ensuring failure states don't corrupt system integrity or create unsafe conditions. AI-OS **MUST** achieve this through event-based failure handling (not exceptions across boundaries) (Part 4: BaseService), configurable retry budgets per operation type (Part 3: RetryManager), workflow checkpointing for deterministic recovery (Part 3: CheckpointManager), and integration with RootCauseManager for intelligent failure classification (Part 3).
 
 ### 4. **AI-OS Optimize for Maintainability, Not Just Performance**
-While performance matters, long-term maintainability is prioritized through clear BaseService contracts (Part 4), modular design with loose coupling (Parts 3-7), comprehensive documentation aligned with implementation, and strict adherence to architectural invariants (see Architecture Invariants section). Performance optimizations **must not** violate architectural principles or create tight coupling.
+While performance matters, long-term maintainability is prioritized through clear BaseService contracts (Part 4), modular design with loose coupling (Parts 3-7), comprehensive documentation aligned with implementation, and strict adherence to architectural invariants (see Architecture Invariants section). Performance optimizations **MUST NOT** violate architectural principles or create tight coupling.
 
 ### 5. **AI-OS Design for Evolution, Not Just Current Needs**
 Anticipate how the system will need to change and design extension points, semantic versioning mechanisms, and compatibility guarantees that allow evolution without breaking existing implementations. This is evident in AI-OS's semantic versioning for events/configurations/APIs (Parts 2, 8), formal deprecation periods with migration paths (Part 0: ADR Process), and governed extension points (Skills, MCP, Repository, etc.) (Part 9).
@@ -174,7 +174,7 @@ Anticipate how the system will need to change and design extension points, seman
 Implement observability from the start, not as an afterthought. AI-OS **requires** structured logging with correlation IDs (Part 10), metrics export (Part 10), distributed tracing (Part 10), and health checks (Part 10) in every component to enable data-driven improvement rather than opinion-based changes, as specified in Part 10: Observability & Telemetry.
 
 ### 7. **AI-OS Secure by Default, Not by Exception**
-Apply security principles consistently across the system rather than treating security as an add-on feature. AI-OS **must** implement least privilege access through CapabilityManager mediation (Part 3), input validation and sanitization at boundaries (Parts 2, 3, 8), protection of sensitive data through encryption and access controls (Parts 3, 12), and regular security assessments as foundational practices, aligned with Part 12: Security & Safety.
+Apply security principles consistently across the system rather than treating security as an add-on feature. AI-OS **MUST** implement least privilege access through CapabilityManager mediation (Part 3), input validation and sanitization at boundaries (Parts 2, 3, 8), protection of sensitive data through encryption and access controls (Parts 3, 12), and regular security assessments as foundational practices, aligned with Part 12: Security & Safety.
 
 ### Engineering Philosophy Relationship Diagram
 
@@ -228,41 +228,41 @@ graph TD
 These principles guide the detailed design of AI-OS components and interfaces, realized in specific Architecture Specification parts:
 
 ### 1. **AI-OS Consistency Over Flexibility**
-Prefer consistent patterns and interfaces across the system over highly flexible but inconsistent designs. AI-OS **must** achieve this through BaseService contracts (Part 4), standardized event patterns with schema versioning (Part 2), and uniform four-layer configuration access (Part 8).
+Prefer consistent patterns and interfaces across the system over highly flexible but inconsistent designs. AI-OS **MUST** achieve this through BaseService contracts (Part 4), standardized event patterns with schema versioning (Part 2), and uniform four-layer configuration access (Part 8).
 
 ### 2. **AI-OS Clear Ownership and Responsibility**
-Every piece of functionality **must** have a clear owner responsible for its lifecycle, behavior, and evolution. In AI-OS:
+Every piece of functionality **MUST** have a clear owner responsible for its lifecycle, behavior, and evolution. In AI-OS:
 - Hermes Kernel owns Core Managers (Part 3)
 - Engineering Services own specific SDLC concerns (Parts 5-6)
 - Capability Facade Services translate events to manager calls (Part 7)
 - Ecosystems (Skills, MCP, Repository) govern their respective domains (Part 13)
 
 ### 3. **AI-OS Simple Interfaces, Complex Internals**
-Prefer simple, well-defined interfaces that hide complex internal implementations to enable independent evolution and substitution. AI-OS managers **must** provide clean accessor interfaces (global singleton getters/setters) while hiding complex internal state and algorithms, as specified in Part 3.4 (Global Singleton Accessors).
+Prefer simple, well-defined interfaces that hide complex internal implementations to enable independent evolution and substitution. AI-OS managers **MUST** provide clean accessor interfaces (global singleton getters/setters) while hiding complex internal state and algorithms, as specified in Part 3.4 (Global Singleton Accessors).
 
 ### 4. **AI-OS Composition Over Inheritance**
-Favor composing behavior from smaller, focused components over deep inheritance hierarchies. AI-OS ecosystems **must** enable this through:
+Favor composing behavior from smaller, focused components over deep inheritance hierarchies. AI-OS ecosystems **MUST** enable this through:
 - Skill chaining and conditional workflows (Part 9)
 - MCP capability composition (Part 10)
 - Repository workflow templates and component libraries (Part 13)
 - Rather than deep inheritance hierarchies that increase coupling
 
 ### 5. **AI-OS Visibility of State and Behavior**
-Make system state and behavior visible through standardized interfaces rather than hiding them behind opaque abstractions. AI-OS **must** achieve this through:
+Make system state and behavior visible through standardized interfaces rather than hiding them behind opaque abstractions. AI-OS **MUST** achieve this through:
 - Structured logging with correlation IDs (Part 10)
 - Metrics emission and tracing (Part 10)
 - Event tracing and replay capabilities (Part 2)
 - Queryable state managers (StateManager in Part 1, MemoryManager in Part 3)
 
 ### 6. **AI-OS Predictable Lifecycles**
-Define clear, predictable lifecycles for all components that enable reliable initialization, operation, and shutdown. AI-OS **must** implement:
+Define clear, predictable lifecycles for all components that enable reliable initialization, operation, and shutdown. AI-OS **MUST** implement:
 - BaseService lifecycle (INITIALIZING → RUNNING → SHUTTING_DOWN → TERMINATED) (Part 4)
 - Topological initialization/shutdown based on `depends_on` declarations (Part 4)
 - Kernel lifecycle management (Part 1)
 - Agent lifecycle state machines (AIAgencyService in Part 4 of AI Agency doc)
 
 ### 7. **AI-OS Error Transparency**
-Make errors visible, informative, and actionable rather than hiding or swallowing them. AI-OS **must** emit failure events with detailed information through the EventBus, preserve error context for root cause analysis, and never allow exceptions to cross service boundaries, as specified in:
+Make errors visible, informative, and actionable rather than hiding or swallowing them. AI-OS **MUST** emit failure events with detailed information through the EventBus, preserve error context for root cause analysis, and never allow exceptions to cross service boundaries, as specified in:
 - Explicit Failure Handling via Events (ADR 009)
 - BaseService on_error() requirements (Part 4)
 - Failure event types (Part 2)
@@ -322,14 +322,14 @@ graph TD
 These principles govern the overall architecture and system-level design decisions, realized in specific Architecture Specification parts:
 
 ### 1. **AI-OS Layered Architecture with Clear Boundaries**
-Organize the system into well-defined layers with explicit contracts governing interactions between layers. AI-OS **must** enforce this through architectural invariants:
+Organize the system into well-defined layers with explicit contracts governing interactions between layers. AI-OS **MUST** enforce this through architectural invariants:
 - **Kernel Layer** (Hermes): EventBus, StateManager, WorkflowManager, ResourceManager (Part 1)
 - **Platform Layer**: Engineering Services, Capability Managers, Service Framework (Parts 3-7)
 - **Extension Points Layer**: Skills, MCP, Repository, Custom Events, Memory Backends (Parts 9-13)
-AI-OS **must not** allow layers to violate their contracts (e.g., Kernel accessing service logic directly).
+AI-OS **MUST NOT** allow layers to violate their contracts (e.g., Kernel accessing service logic directly).
 
 ### 2. **AI-OS Orchestration-Centric Design**
-Design the system around a central orchestration capability (the Hermes Kernel) that manages lifecycles, coordinates activities, and provides infrastructure services without containing domain logic. AI-OS **must**:
+Design the system around a central orchestration capability (the Hermes Kernel) that manages lifecycles, coordinates activities, and provides infrastructure services without containing domain logic. AI-OS **MUST**:
 - Keep the Hermes Kernel as pure orchestrator (Part 1)
 - Manage lifecycles through BaseService contracts (Part 4)
 - Coordinate activities through EventBus communication (Part 2)
@@ -337,7 +337,7 @@ Design the system around a central orchestration capability (the Hermes Kernel) 
 - Contain exactly 4 Core Components and 9 Core Managers (Fixed Component Counts constraint)
 
 ### 3. **AI-OS State Externalization**
-Keep component state externalized in appropriate managers rather than embedding it in components to enable persistence, sharing, and centralized management. AI-OS **must**:
+Keep component state externalized in appropriate managers rather than embedding it in components to enable persistence, sharing, and centralized management. AI-OS **MUST**:
 - Use StateManager for workflow/session state with scoping (Part 1)
 - Use MemoryManager for five-tier memory system (Working, Claude, Engineering Intelligence, Obsidian, Graphify) (Part 3)
 - Use StorageManager for structured data persistence with schema validation (Part 3)
@@ -345,7 +345,7 @@ Keep component state externalized in appropriate managers rather than embedding 
 - Never embed persistent state in service components
 
 ### 4. **AI-OS Resource Awareness**
-Design components to be aware of and respectful of system resources through formal quota mechanisms. AI-OS **must**:
+Design components to be aware of and respectful of system resources through formal quota mechanisms. AI-OS **MUST**:
 - Coordinate with ResourceManager for CPU, memory, token, and tool quotas (Part 1)
 - Implement resource reservation and release mechanisms
 - Monitor usage and enforce limits through ResourceManager
@@ -353,7 +353,7 @@ Design components to be aware of and respectful of system resources through form
 - Track LLM token consumption through ModelRouter (Part 3)
 
 ### 5. **AI-OS Deterministic Behavior Where Possible**
-While accommodating necessary nondeterminism (especially in AI components), strive for deterministic behavior in orchestration, state management, and infrastructure components. AI-OS **must**:
+While accommodating necessary nondeterminism (especially in AI components), strive for deterministic behavior in orchestration, state management, and infrastructure components. AI-OS **MUST**:
 - Implement deterministic initialization and shutdown sequences (Part 1)
 - Ensure predictable state transitions through finite state machines
 - Maintain deterministic recovery procedures through checkpointing
@@ -361,7 +361,7 @@ While accommodating necessary nondeterminism (especially in AI components), stri
 - Keep core orchestration deterministic while allowing AI components appropriate nondeterminism
 
 ### 6. **AI-OS Scalability Through Distribution**
-Design for horizontal scaling and distribution from the start, even if initial implementations are single-process. AI-OS **must**:
+Design for horizontal scaling and distribution from the start, even if initial implementations are single-process. AI-OS **MUST**:
 - Design loose coupling through EventBus communication (Part 2)
 - Prepare for distributed EventBus through language-neutral event contracts
 - Enable microservices deployment through well-defined service boundaries (Parts 5-7)
@@ -370,7 +370,7 @@ Design for horizontal scaling and distribution from the start, even if initial i
 - Maintain technology neutrality to allow different deployment targets
 
 ### 7. **AI-OS Recovery-Oriented Design**
-Assume failures will happen and design recovery mechanisms into the system from the beginning. AI-OS **must**:
+Assume failures will happen and design recovery mechanisms into the system from the beginning. AI-OS **MUST**:
 - Implement workflow execution snapshots through CheckpointManager (Part 3)
 - Configurable retry budgets with exponential backoff through RetryManager (Part 3)
 - Automatic failure classification and recovery routing through RootCauseManager (Part 3)
@@ -378,125 +378,136 @@ Assume failures will happen and design recovery mechanisms into the system from 
 - Health checks and monitoring for early failure detection (Part 10)
 - Failure handling through events, not exceptions crossing boundaries (ADR 009)
 
-## Software Engineering Principles
+## AI-OS Software Engineering Principles
 
-These principles apply to traditional software engineering practices within AI-OS development, realized in specific Architecture Specification parts:
+These principles apply to AI-OS specific software engineering practices that ensure architectural integrity while developing components, realized in specific Architecture Specification parts:
 
 ### 1. **AI-OS Test-Driven Development (TDD) with Validation-First**
-Write tests before implementation to ensure testability, clarify requirements, and prevent implementation gaps. AI-OS **must** combine TDD with validation-first execution where:
-- Unit tests validate individual component behavior (aligned with Part 4 Service Framework)
-- Integration tests validate component interactions through EventBus (Part 2)
-- Validation tests ensure conformance to specification requirements (Part 11: Validation Architecture)
-- Infrastructure component tests are especially critical as failures can have system-wide effects
-- Test evidence **must** be stored in appropriate memory tiers for audit and learning (Part 3: MemoryManager)
+Write tests before implementation to ensure testability, clarify requirements, and prevent implementation gaps specific to AI-OS autonomous systems. AI-OS **MUST** combine TDD with validation-first execution where:
+- Unit tests validate individual Hermetic component behavior (aligning with Part 4 Service Framework contracts)
+- Integration tests validate component interactions through EventBus semantics (Part 2)
+- Validation tests ensure conformance to Architecture Specification requirements (Part 11: Validation Architecture)
+- Infrastructure component tests are especially critical as failures can propagate system-wide Effects in autonomous operations
+- Test evidence **MUST** be stored in appropriate MemoryManager tiers (Part 3) for audit traceability and agent learning preservation
 
 ### 2. **AI-OS Continuous Integration and Validation**
-Integrate changes frequently and validate against the specification regularly to prevent architectural drift and ensure ongoing conformance. AI-OS **must**:
-- Run validation pipeline on every commit (pre-commit validation)
-- Validate against Architecture Specification Parts 1-15 regularly
-- Use conformance levels (L1-L4) to apply appropriate rigor (Part 11: Validation Architecture)
-- Prevent architectural erosion through disciplined development and conformance checking
-- Feed validation results into LearningService for continuous improvement (Part 6)
+Integrate changes frequently and validate against the specification regularly to prevent architectural drift and ensure ongoing conformance. AI-OS **MUST**:
+- Run validation pipeline on every commit (pre-commit validation) enforcing architectural principles
+- Validate against Architecture Specification Parts 1-15 regularly with conformance levels (Part 11: Validation Architecture)
+- Use conformance levels (L1-L4) to apply appropriate validation rigor based on component criticality (Part 11)
+- Prevent architectural erosion through disciplined development and continuous conformance checking
+- Feed validation results into LearningService for continuous improvement and principle adherence tracking (Part 6)
+- Treat validation failures as blocking issues requiring immediate architectural review (Part 11)
 
 ### 3. **AI-OS Technical Debt Awareness with Architectural Integrity Focus**
-Track and repay technical debt deliberately rather than allowing it to accumulate, with special focus on architectural debt. AI-OS **must**:
-- Distinguish between regular technical debt and architectural debt (violations of principles/invariants)
-- Prevent architectural erosion that undermines foundational principles
-- Use Architecture Decision Records (ADRs) to document and manage intentional deviations (Part 0)
-- Implement automated conformance checking to detect architectural drift early
-- Prioritize repayment of architectural debt over convenience features
-- Store technical debt assessments in Engineering Intelligence memory for team awareness (Part 3)
+Track and repay technical debt deliberately rather than allowing it to accumulate, with special focus on architectural debt that violates AI-OS principles and invariants. AI-OS **MUST**:
+- Distinguish between regular technical debt and architectural debt (violations of principles/invariants documented in this specification)
+- Prevent architectural erosion that undermines foundational Hermes Kernel stability and Hermes Core Manager contracts
+- Use Architecture Decision Records (ADRs) to document and manage intentional deviations from principles (Part 0)
+- Implement automated conformance checking against Architecture Specification Parts 1-15 to detect architectural drift early
+- Prioritize repayment of architectural debt over convenience features that compromise systemic integrity
+- Store technical debt assessments in Engineering Intelligence memory (Part 3: MemoryType.ENGINEERING) for organizational learning and team awareness
+- Treat unresolved architectural debt as blocking conformance issues requiring ARB review (Part 0)
 
 ### 4. **AI-OS Code Clarity Over Cleverness with Self-Documenting Code**
-Prioritize code that is easy to understand, maintain, and modify over clever implementations that save a few lines but increase cognitive load. AI-OS **must**:
-- Write self-documenting code with clear intent and meaningful names
-- Follow AI-OS coding standards and style guides (defined in ecosystem documentation)
-- Refactor regularly to prevent technical debt accumulation
-- Document complex algorithms and non-obvious behavior that violates the "obviousness" principle
-- Ensure documentation stays close to code to reduce drift (keeping it in Obsidian memory when appropriate)
-- Prioritize clarity that enables ecosystem contributors to understand and extend components
+Prioritize code that is easy to understand, maintain, and modify over clever implementations that save a few lines but increase cognitive load in AI-OS autonomous systems. AI-OS **MUST**:
+- Write self-documenting code with clear intent and meaningful names that reflect AI-OS behavioral contracts and service interfaces
+- Follow AI-OS coding standards and style guides that enforce Hermes Kernel interface contracts (defined in ecosystem documentation)
+- Refactor regularly to prevent technical debt accumulation while preserving architectural principles and invariants
+- Document complex algorithms and non-obvious behavior that violates the "obviousness" principle in AI-OS agent decision-making contexts
+- Ensure documentation stays close to code to reduce drift (keeping architectural knowledge in Obsidian memory, Part 3: MemoryType.OBSIDIAN)
+- Prioritize clarity that enables ecosystem contributors to understand and extend AI-OS components through versioned extension points (Part 9)
+- Use language-agnostic pseudocode or diagrams when illustrating AI-OS behavioral contracts to maintain technology neutrality
 
 ### 5. **AI-OS Defensive Programming with Behavioral Contracts**
-Use preconditions, postconditions, and invariants to define clear behavioral contracts and validate assumptions at runtime. AI-OS **must**:
-- Define clear contracts for all interfaces (event schemas, service APIs, extension points)
-- Validate assumptions through validation mechanisms rather than assuming correctness
-- Implement comprehensive error handling and edge case coverage
-- Use BaseService contracts to enforce preconditions/postconditions for services (Part 4)
-- Validate event schemas and payloads at boundaries (Part 2: Event System)
-- Never allow exceptions to cross service boundaries - convert to failure events (ADR 009)
+Use preconditions, postconditions, and invariants to define clear behavioral contracts and validate assumptions at runtime in AI-OS autonomous systems. AI-OS **MUST**:
+- Define clear behavioral contracts for all Hermes Kernel interfaces (event schemas, service APIs, extension points, manager contracts)
+- Validate assumptions through explicit validation mechanisms rather than assuming correctness of internal or external states
+- Implement comprehensive error handling and edge case coverage that preserves system stability during autonomous operations
+- Use BaseService contracts to enforce preconditions/postconditions for all services, ensuring Hermes Kernel orchestration integrity (Part 4)
+- Validate event schemas and payloads at all consumption boundaries using Hermes EventBus validation mechanisms (Part 2)
+- Never allow exceptions to cross service boundaries - convert all exceptions to typed failure events for uniform handling (ADR 009)
+- Apply behavioral contracts to AI agent decision-making processes to ensure alignment with architectural principles and safety constraints
 
 ### 6. **AI-OS Dependency Management with Loose Coupling**
-Explicitly manage dependencies, prefer loose coupling, and avoid hidden or implicit dependencies that create fragile systems. AI-OS **must**:
-- Declare service dependencies explicitly through `depends_on` arrays (Part 4: Service Framework)
-- Ensure dependency graphs are acyclic for deterministic initialization
-- Prefer EventBus communication over direct service calls for loose coupling (Part 2)
-- Use CapabilityManager for tool/skill/MCP resolution rather than direct instantiation (Part 3)
-- Avoid hidden dependencies through global state or singleton patterns beyond defined accessors
-- Make all cross-component communication explicit through defined interfaces
+Explicitly manage AI-OS dependencies, prefer loose coupling through defined interfaces, and avoid hidden or implicit dependencies that create fragile autonomous systems. AI-OS **MUST**:
+- Declare service dependencies explicitly through `depends_on` arrays in Hermes Kernel service definitions (Part 4: Service Framework)
+- Ensure dependency graphs are acyclic for deterministic Hermes Kernel initialization and shutdown sequences
+- Prefer EventBus communication over direct service calls for loose coupling, observability, and failure isolation (Part 2)
+- Use CapabilityManager for tool/skill/MCP resolution rather than direct instantiation to enforce permission mediation (Part 3)
+- Avoid hidden dependencies through global state or singleton patterns beyond defined Hermes Manager accessors
+- Make all cross-component communication explicit through Hermes-defined interfaces (event schemas, service APIs, extension point contracts)
+- Treat dependency violations as architectural defects requiring conformance remediation (Part 11)
 
 ### 7. **AI-OS Documentation as First-Class Citizen with Living Documents**
-Treat documentation with the same importance as code—keep it accurate, up-to-date, and aligned with implementation. AI-OS **must**:
-- Maintain documentation near the code it describes to reduce drift
-- Update documentation as part of the definition of done for changes
-- Treat architectural documentation (like this document) as legal documents defining what the system must be
-- Keep implementation documentation aligned with actual code behavior
-- Store documentation in appropriate memory tiers (Obsidian for architectural knowledge, Engineering Intelligence for learned patterns)
-- Use documentation to enable ecosystem contributors to understand extension points and contracts
+Treat documentation with the same importance as Hermes Kernel source code—keep it accurate, up-to-date, and aligned with implementation through disciplined practices. AI-OS **MUST**:
+- Maintain documentation near the Hermes Component it describes in the architecture/ directory to reduce drift between specification and understanding
+- Update documentation as part of the definition of done for changes, treating doc updates as non-optional engineering work
+- Treat architectural documentation (like this ENGINEERING_PRINCIPLES.md) as legal documents defining what the AI-OS system must be, conforming to Parts 1-15
+- Keep implementation documentation aligned with actual Hermes Service behavior through validation-gated updates
+- Store documentation in appropriate MemoryManager tiers: architectural knowledge in Obsidian memory (Part 3: MemoryType.OBSIDIAN), learned patterns in Engineering Intelligence (Part 3: MemoryType.ENGINEERING)
+- Use documentation to enable ecosystem contributors to understand and implement against AI-OS extension point contracts (Part 9) and Hermes Manager interfaces
+- Validate documentation accuracy through conformance checking in the validation pipeline (Part 11)
 
 ## AI Engineering Principles
 
 These principles are specific to engineering AI systems and AI-OS's approach to autonomous agentic behavior, realized in specific Architecture Specification parts:
 
 ### 1. **AI-OS Goal-Driven Execution Engine**
-Focus on enabling systems to pursue high-level engineering goals rather than merely executing predefined tasks. AI-OS **must**:
-- Accept high-level engineering goals (e.g., "implement user authentication with OAuth 2.0") (Part 6: PlanningService)
-- Decompose goals into actionable work through AI-powered planning (Part 6: PlanningService & AIAgencyService)
-- Dynamically adapt plans based on intermediate results and feedback (Part 6: PlanningService)
-- Continue until goal validation criteria are met or intervention requested (Part 11: Validation Architecture & Part 12: FinalJudge)
-- Store goal state and progress in Working Memory for active reasoning (Part 3: MemoryManager)
+Focus on enabling AI-OS systems to pursue high-level engineering goals through autonomous agentic behavior rather than merely executing predefined tasks. AI-OS **MUST**:
+- Accept high-level engineering goals expressed in natural language (e.g., "implement user authentication with OAuth 2.0") through PlanningService interfaces (Part 6)
+- Decompose goals into actionable, validated work through AI-powered planning cycles involving PlanningService and AIAgencyService (Part 6)
+- Dynamically adapt execution plans based on intermediate validation results, environmental feedback, and obstacle detection (Part 6: PlanningService)
+- Continue autonomous execution until goal validation criteria are met through Validation Architecture or human intervention is requested via FinalJudge (Parts 11 & 12)
+- Store goal state, progress traces, and intermediate reasoning in Working Memory for active agent reasoning and potential rollback (Part 3: MemoryManager)
+- Treat goal misalignment or validation failure as architectural events requiring conformance review (Part 11)
 
 ### 2. **AI-OS Autonomous Agentic Behavior with Boundaries**
-Provide configurable levels of agent autonomy while maintaining clear boundaries and oversight mechanisms. AI-OS **must**:
-- Support autonomous agent operation with self-looping, reflection, and adaptive planning (Part 14: Goal-Driven Execution & Agentic Systems)
-- Enable self-initiated task creation based on goal progress and obstacle detection (Part 14)
-- Facilitate inter-agent collaboration and negotiation for complex objectives (Part 4: CouncilManager & Part 6: Engineering Services)
-- Enforce resource-aware operation with automatic quota management via ResourceManager (Part 1)
-- Maintain environment awareness and context preservation across sessions (Part 3: MemoryManager)
-- Provide human oversight capabilities through Council mechanisms and FinalJudge (Part 12)
-- Ensure human judgment ultimately supersedes AI agent decisions in matters of safety, ethics, and strategic direction
+Provide configurable levels of agent autonomy while maintaining clear Hermes Kernel-enforced boundaries and oversight mechanisms. AI-OS **MUST**:
+- Support autonomous agent operation with self-looping, reflection, and adaptive planning through Hermes AgentManager interfaces (Part 14: Goal-Driven Execution & Agentic Systems)
+- Enable self-initiated task creation based on goal progress validation and obstacle detection through AIAgencyService (Part 14)
+- Facilitate inter-agent collaboration and negotiation for complex objectives through CouncilManager consensus and Engineering Services coordination (Part 4 & Part 6)
+- Enforce resource-aware operation with automatic quota management via Hermes ResourceManager, preventing resource exhaustion in autonomous systems (Part 1)
+- Maintain environment awareness and context preservation across sessions through Hermes MemoryManager working memory tiers (Part 3)
+- Provide human oversight capabilities through Hermes Council mechanisms and FinalJudge validation gates (Part 12)
+- Ensure human judgment ultimately supersedes AI agent decisions in matters of safety, ethics, and strategic direction through FinalJudge veto authority (Part 12)
+- Treat boundary violations as architectural events requiring conformance review and potential escalation to human oversight (Part 11 & Part 12)
 
 ### 3. **AI-OS Continuous Learning and Improvement through Learning Architecture**
-Design systems to learn from experience, extract patterns, and improve over time. AI-OS **must**:
-- Capture structured experience data from completed workflows (Part 6: LearningService)
-- Extract patterns through statistical analysis, sequence mining, association rule learning, and clustering (Part 6)
-- Consolidate generalizable principles into Engineering Intelligence memory (Part 3: MemoryType.ENGINEERING)
-- Resolve contradictory knowledge through conflict resolution mechanisms (Part 6)
-- Track knowledge confidence and implement decay mechanisms for outdated information (Part 6)
-- Generate skill templates from recurring patterns for ecosystem sharing (Part 9: Skills Ecosystem)
-- Trigger model improvements based on accumulated experience (Part 6 & Part 3: ModelRouter)
-- Propose architecture evolution from systemic patterns (Part 6 & Part 15: Future Directions)
+Design AI-OS systems to learn from autonomous agent experience, extract generalizable principles, and improve over time through governed learning architectures. AI-OS **MUST**:
+- Capture structured experience data from completed Hermes workflows through LearningService event ingestion (Part 6)
+- Extract patterns through statistical analysis, sequence mining, association rule learning, and clustering applied to agent execution traces (Part 6)
+- Consolidate generalizable AI-OS engineering principles into Engineering Intelligence memory for organizational learning (Part 3: MemoryType.ENGINEERING)
+- Resolve contradictory knowledge through Hermes LearningService conflict resolution mechanisms prioritizing recent validation evidence (Part 6)
+- Track knowledge confidence scores and implement automated decay mechanisms for outdated information based on validation outcomes (Part 6)
+- Generate versioned Skill templates from recurring patterns for ecosystem sharing through Skills Ecosystem governance (Part 9)
+- Trigger Hermes ModelRouter improvements based on accumulated validation-confirmed experience data (Part 6 & Part 3)
+- Propose Architecture Specification evolution from validated systemic patterns through Architecture Review Board processes (Part 6 & Part 15)
+- Treat learning system violations as architectural events requiring conformance review (Part 11)
 
 ### 4. **AI-OS Validation-First Execution as Foundational Practice**
-Subject all AI agent actions to rigorous validation before, during, and after execution. AI-OS **must**:
-- Perform pre-execution validation of plans, resource availability, and safety constraints (Part 11: Validation Architecture)
-- Conduct continuous verification during execution (process and intermediate results) (Part 11)
-- Execute post-execution validation against goal criteria and quality standards (Part 11)
-- Implement automatic rollback or correction when validation fails (Part 11)
-- Maintain audit trail of all validation attempts and outcomes (Part 11)
-- Use validation mechanisms including automated scripts, human-in-the-loop, adversarial validation, property-based validation, and statistical validation (Part 11)
-- Ensure validation produces auditable evidence for compliance reporting and troubleshooting (Part 11)
+Subject all Hermes agent actions and autonomous operations to rigorous validation before, during, and after execution to ensure safety, correctness, and goal alignment. AI-OS **MUST**:
+- Perform pre-execution validation of agent plans, resource requests, and safety constraints through Hermes Validation Architecture (Part 11)
+- Conduct continuous verification during execution of process fidelity, intermediate results, and resource utilization (Part 11)
+- Execute post-execution validation against goal criteria, quality standards, and architectural principle adherence (Part 11)
+- Implement automatic rollback to known-good states or corrective actions when validation fails, preserving system integrity (Part 11)
+- Maintain cryptographically verifiable audit trail of all validation attempts, outcomes, and evidence for forensic analysis (Part 11)
+- Use validation mechanisms including automated conformity scripts, human-in-the-loop review, adversarial challenge validation, property-based validation, and statistical validation of distributions (Part 11)
+- Ensure validation produces tamper-evident evidence for compliance reporting, troubleshooting, and architectural learning (Part 11)
+- Treat validation failures as architectural events requiring immediate review and potential escalation to FinalJudge for human oversight (Part 12)
 
 ### 5. **AI-OS Transparent Reasoning and Traceability**
-Make AI agent reasoning processes visible and traceable where possible. AI-OS **must**:
-- Emit structured logs with correlation IDs for all significant operations (Part 10: Observability & Telemetry)
-- Export metrics for monitoring agent behavior and performance (Part 10)
-- Instrument code for distributed tracing to correlate logs with events (Part 10)
-- Design for monitorability and debuggability from the start (Part 10)
-- Preserve reasoning traces in appropriate memory tiers for audit and learning (Part 3)
-- Enable forensic analysis of agent decisions through comprehensive audit trails (Part 12: AIAgencyService)
+Make Hermes agent reasoning processes visible and traceable through observable, immutable artifacts to enable audit, learning, and oversight. AI-OS **MUST**:
+- Emit structured logs with correlation IDs for all significant Hermes operations enabling workflow traceability (Part 10: Observability & Telemetry)
+- Export metrics for monitoring agent behavior, resource utilization, and performance trends through Hermes Observability systems (Part 10)
+- Instrument Hermes code for distributed tracing to correlate logs with events across service boundaries (Part 10)
+- Design Hermes services for monitorability and debuggability from architectural inception, not as afterthoughts (Part 10)
+- Preserve reasoning traces, intermediate states, and decision logs in appropriate MemoryManager tiers for audit preservation and agent learning (Part 3)
+- Enable forensic analysis of agent decisions through comprehensive, immutable audit trails secured by AIAgencyService (Part 12)
+- Treat reasoning trace violations as architectural events requiring conformance review (Part 11)
 
 ### 6. **AI-OS Resource-Aware Agent Operation**
-Design AI agents to be conscious of their resource consumption and operate within allocated quotas. AI-OS **must**:
+Design AI agents to be conscious of their resource consumption and operate within allocated quotas. AI-OS **MUST**:
 - Track CPU, memory, and token utilization per agent via ResourceManager (Part 1)
 - Enforce configurable resource quotas per agent and agent type (Part 1)
 - Implement token budgeting and optimization through ModelRouter (Part 3)
@@ -505,7 +516,7 @@ Design AI agents to be conscious of their resource consumption and operate withi
 - Coordinate checkpointing to preserve state during resource-constrained recovery (Part 3: CheckpointManager)
 
 ### 7. **AI-OS Collaborative Intelligence through Multi-Agent Systems**
-Enable AI agents to collaborate, negotiate, and combine capabilities. AI-OS **must**:
+Enable AI agents to collaborate, negotiate, and combine capabilities. AI-OS **MUST**:
 - Support inter-agent communication through EventBus protocols (Part 2)
 - Provide shared workspaces in Working Memory for joint problem-solving (Part 3: MemoryManager)
 - Implement role assignment based on agent capabilities (specialist, facilitator, etc.) (Part 4: CouncilManager & Part 6: Engineering Services)
@@ -519,39 +530,43 @@ Enable AI agents to collaborate, negotiate, and combine capabilities. AI-OS **mu
 These principles govern AI-OS's event-driven architecture and communication patterns, realized in specific Architecture Specification parts:
 
 ### 1. **AI-OS Eventual Consistency Model**
-Prefer eventual consistency models that enable loose coupling and fault tolerance over strong consistency models that increase coupling and reduce availability. AI-OS **must**:
-- Design for eventual consistency through EventBus communication (Part 2)
-- Accept temporary inconsistency for improved availability and partition tolerance
-- Implement conflict resolution mechanisms where strong consistency is required
-- Use correlation/causation IDs to trace and resolve inconsistencies (Part 2)
-- Enable retry mechanisms for handling transient failures (Part 3: RetryManager)
+Prefer Hermes EventBus eventual consistency models that enable loose coupling and fault tolerance over strong consistency models that increase coupling and reduce availability in autonomous systems. AI-OS **MUST**:
+- Design for eventual consistency through Hermes EventBus asynchronous message passing (Part 2)
+- Accept temporary inconsistency between Hermes Components for improved availability and partition tolerance in distributed deployments
+- Implement conflict resolution mechanisms through Hermes RetryManager and LearningService where strong consistency is required for agent coordination
+- Use Hermes-generated correlation_id (for workflow trace) and causation_id (for direct cause) in every event to trace and resolve inconsistencies (Part 2)
+- Enable retry mechanisms with exponential backoff through Hermes RetryManager for handling transient failures in agent-tool interactions (Part 3)
+- Treat consistency violations as architectural events requiring conformance review (Part 11)
 
 ### 2. **AI-OS Immutability for Audit Trails and Replay**
-Use immutable events to create reliable audit trails that cannot be altered after the fact, enabling compliance, debugging, and historical analysis. AI-OS **must**:
-- Implement events as immutable data structures (frozen dataclasses) (Part 2)
-- Preserve original event content for audit integrity (Part 2)
-- Enable event replay for testing, debugging, and compliance verification (Part 2)
-- Store immutable events in appropriate storage for long-term audit trails (Part 3: StorageManager)
-- Never modify emitted events - create new events for updates/corrections (Part 2)
+Use Hermes-immutable events to create reliable audit trails that cannot be altered after emission, enabling compliance, deterministic replay debugging, and historical analysis of agent behaviors. AI-OS **MUST**:
+- Implement Hermes events as structurally immutable data structures (frozen dataclasses with validation) preventing post-emission modification (Part 2)
+- Preserve original event content, headers, and metadata for cryptographic audit integrity chains (Part 2)
+- Enable deterministic event replay for testing, debugging, compliance verification, and agent learning through EventBus reconstruction (Part 2)
+- Store immutable events in persistent StorageManager tiers with cryptographic sealing for long-term audit trails (Part 3)
+- Never modify emitted Hermes events - create new correction events with causation links to originals for audit preservation (Part 2)
+- Treat event mutability as an architectural violation requiring immediate conformance review (Part 11)
 
 ### 3. **AI-OS Correlation for End-to-End Traceability**
-Require correlation IDs on all events to enable tracing workflows across service and process boundaries for observability and debugging. AI-OS **must**:
-- Include correlation_id (UUID) in every event for workflow trace (Part 2)
-- Generate new correlation IDs at workflow initiation (Part 2)
-- Propagate correlation IDs through all event handling chains (Part 2)
-- Enable distributed tracing through correlation ID propagation (Part 10: Observability & Telemetry)
-- Support forensic analysis of workflow execution through correlated events (Part 12: AIAgencyService)
+Require Hermes-generated correlation IDs on all events to enable tracing autonomous workflows across Hermes service and process boundaries for observability, debugging, and audit. AI-OS **MUST**:
+- Include universally unique correlation_id (UUID v4) in every Hermes event for end-to-end workflow traceability (Part 2)
+- Generate new correlation IDs at workflow initiation through Hermes WorkflowManager for clean workflow boundaries (Part 2)
+- Propagate correlation IDs unchanged through all Hermes event handling chains, middleware, and agent interactions (Part 2)
+- Enable distributed tracing through Hermes correlation ID propagation integrated with Observability systems (Part 10)
+- Support forensic analysis of autonomous workflow execution through correlated event sequences secured by AIAgencyService (Part 12)
+- Treat missing or corrupted correlation IDs as architectural events requiring immediate conformance review (Part 11)
 
 ### 4. **AI-OS Causation for Responsibility Tracking**
-Require causation IDs to understand what directly caused each event, enabling root cause analysis and responsibility attribution. AI-OS **must**:
-- Include causation_id (UUID) in every event for direct cause tracking (Part 2)
-- Set causation ID to the ID of the event that directly triggered the current event (Part 2)
-- Enable building causality chains for root cause analysis (Part 3: RootCauseManager)
-- Support automated failure analysis through causation tracking (Part 11: Validation Architecture)
-- Preserve causality information in audit trails for compliance (Part 12: AIAgencyService)
+Require Hermes-generated causation IDs on all events to enable precise root cause analysis, responsibility attribution, and automated failure resolution in autonomous systems. AI-OS **MUST**:
+- Include universally unique causation_id (UUID v4) in every Hermes event for direct cause tracking and blame assignment (Part 2)
+- Set causation ID to the Hermes event ID that directly precipitated the current event through EventBus delivery (Part 2)
+- Enable construction of immutable causality chains for root cause analysis through Hermes RootCauseManager (Part 3)
+- Support automated failure analysis and recovery routing through Hermes Validation Architecture causation tracking (Part 11)
+- Preserve causality information in cryptographically sealed audit trails for compliance and forensic investigation (Part 12)
+- Treat missing, corrupted, or circular causation IDs as architectural events requiring immediate conformance review (Part 11)
 
 ### 5. **AI-OS Schema Evolution with Backward/Forward Compatibility**
-Version event schemas explicitly and provide clear backward/forward compatibility paths to enable system evolution without breaking existing consumers. AI-OS **must**:
+Version event schemas explicitly and provide clear backward/forward compatibility paths to enable system evolution without breaking existing consumers. AI-OS **MUST**:
 - Include schema version in every event definition (Part 2)
 - Maintain backward compatibility within major versions (Part 2)
 - Provide clear deprecation periods and migration paths for breaking changes (Part 2)
@@ -560,7 +575,7 @@ Version event schemas explicitly and provide clear backward/forward compatibilit
 - Document schema evolution in Architecture Decision Records (Part 0)
 
 ### 6. **AI-OS Event-First Communication as Sole Mechanism**
-Make events the primary communication mechanism rather than an optional feature—this ensures uniform observability, failure handling, and tracing capabilities. AI-OS **must**:
+Make events the primary communication mechanism rather than an optional feature—this ensures uniform observability, failure handling, and tracing capabilities. AI-OS **MUST**:
 - Use EventBus as the ONLY inter-component communication mechanism post-initialization (Part 2)
 - Prohibit direct service-to-service calls, shared mutable state, and RPC (ADR 001)
 - Require all services to extend BaseService and use emit()/subscribe() (Part 4)
@@ -568,7 +583,7 @@ Make events the primary communication mechanism rather than an optional feature�
 - Enable observability through event interception and monitoring (Part 10)
 
 ### 7. **AI-OS Dead Letter Queues for Failure Handling**
-Provide mechanisms for handling repeatedly failing events to prevent system overload while preserving failure information for analysis. AI-OS **must**:
+Provide mechanisms for handling repeatedly failing events to prevent system overload while preserving failure information for analysis. AI-OS **MUST**:
 - Implement dead letter queues for events that exceed retry budgets (Part 3: RetryManager)
 - Emit RetryBudgetExhausted events for permanently failed operations (Part 2)
 - Route dead letter events to appropriate handling services (Operations/Learning) (Parts 6-7)
@@ -580,7 +595,7 @@ Provide mechanisms for handling repeatedly failing events to prevent system over
 These principles govern how AI-OS ensures human oversight and accountability in AI agent operations, realized in specific Architecture Specification parts:
 
 ### 1. **AI-OS Human-in-the-Loop through FinalJudge**
-Require human oversight and approval for decisions that have significant safety, security, or strategic implications. AI-OS **must**:
+Require human oversight and approval for decisions that have significant safety, security, or strategic implications. AI-OS **MUST**:
 - Route critical agent outputs through FinalJudge for validation when required by policy (Part 12: Security & Safety)
 - Implement FinalJudge service as the human-in-the-loop validation capability (AI Agency doc & Part 12)
 - Define clear criteria for what requires human validation (AI Agency doc)
@@ -588,7 +603,7 @@ Require human oversight and approval for decisions that have significant safety,
 - Enable human judgment to veto or override AI agent decisions (Part 12 & AI Agency doc)
 
 ### 2. **AI-OS Clear Escalation Paths through Council Mechanisms**
-Define clear paths for AI systems to escalate to human judgment when encountering ambiguity, conflict, or situations outside their operational boundaries. AI-OS **must**:
+Define clear paths for AI systems to escalate to human judgment when encountering ambiguity, conflict, or situations outside their operational boundaries. AI-OS **MUST**:
 - Implement governance checkpoints where AIAgencyService submits significant decisions to CouncilManager for approval (AI Agency doc)
 - Use consensus algorithms (MAJORITY, UNANIMOUS, WEIGHTED) for council decisions (Part 12 & ADRs)
 - Escalate council dissent to human judges via FinalJudge when consensus cannot be reached (AI Agency doc & Part 12)
@@ -596,7 +611,7 @@ Define clear paths for AI systems to escalate to human judgment when encounterin
 - Document escalation procedures in Architecture Decision Records (Part 0)
 
 ### 3. **AI-OS Auditability of All Actions through Immutable Events**
-Maintain comprehensive audit trails of all AI agent actions, decisions, and resource usage to enable accountability and forensic analysis. AI-OS **must**:
+Maintain comprehensive audit trails of all AI agent actions, decisions, and resource usage to enable accountability and forensic analysis. AI-OS **MUST**:
 - Emit immutable audit events for all significant agent actions with correlation/causation IDs (Part 2 & AI Agency doc)
 - Store audit trails in persistent storage for long-term retention (Part 3: StorageManager)
 - Enable forensic analysis through correlated event sequences (Part 10: Observability & Telemetry)
@@ -604,7 +619,7 @@ Maintain comprehensive audit trails of all AI agent actions, decisions, and reso
 - Integrate audit trails with learning systems for improvement (Part 6: LearningService)
 
 ### 4. **AI-OS Transparent Governance Processes**
-Make governance mechanisms (voting, consensus, escalation) transparent and understandable to human overseers. AI-OS **must**:
+Make governance mechanisms (voting, consensus, escalation) transparent and understandable to human overseers. AI-OS **MUST**:
 - Document council policies, voting algorithms, and escalation criteria (Part 12 & AI Agency doc)
 - Emit governance events for monitoring and transparency (Part 2)
 - Provide clear documentation of human oversight mechanisms (Part 12)
@@ -612,7 +627,7 @@ Make governance mechanisms (voting, consensus, escalation) transparent and under
 - Maintain transparency in AI agent decision-making processes (Part 6: LearningService & Part 10)
 
 ### 5. **AI-OS Configurable Autonomy Levels**
-Allow different levels of agent autonomy based on trust, capability, and risk assessment rather than applying a uniform autonomy model. AI-OS **must**:
+Allow different levels of agent autonomy based on trust, capability, and risk assessment rather than applying a uniform autonomy model. AI-OS **MUST**:
 - Support supervised, guided, and autonomous agent operation modes (Part 14: Goal-Driven Execution & Agentic Systems)
 - Configure autonomy levels through ConfigurationAuthority (AI Agency doc)
 - Adjust autonomy based on agent type, task criticality, and historical performance (AI Agency doc)
@@ -620,7 +635,7 @@ Allow different levels of agent autonomy based on trust, capability, and risk as
 - Enable dynamic adjustment of autonomy based on system state and goals (Part 14)
 
 ### 6. **AI-OS Bias Detection and Mitigation**
-Implement mechanisms to detect and mitigate biases in AI agent decision-making that could lead to unfair or harmful outcomes. AI-OS **must**:
+Implement mechanisms to detect and mitigate biases in AI agent decision-making that could lead to unfair or harmful outcomes. AI-OS **MUST**:
 - Validate AI outputs for bias, fairness, and ethical considerations (Part 11: Validation Architecture)
 - Implement adversarial validation to challenge assumptions (Part 11)
 - Use diverse training data and evaluation sets to reduce bias (Part 6: LearningService)
@@ -629,7 +644,7 @@ Implement mechanisms to detect and mitigate biases in AI agent decision-making t
 - Store bias assessment results in Engineering Intelligence memory for organizational learning (Part 3)
 
 ### 7. **AI-OS Human Authority Supremacy**
-Ensure that human judgment ultimately supersedes AI agent decisions in matters of safety, ethics, and strategic direction. AI-OS **must**:
+Ensure that human judgment ultimately supersedes AI agent decisions in matters of safety, ethics, and strategic direction. AI-OS **MUST**:
 - Implement FinalJudge as the ultimate authority for critical validations (Part 12)
 - Enable human override of AI agent decisions through governance mechanisms (AI Agency doc)
 - Maintain clear chains of accountability from AI agents to human overseers (Part 12)
@@ -641,7 +656,7 @@ Ensure that human judgment ultimately supersedes AI agent decisions in matters o
 These principles govern how AI-OS approaches security and protection of assets, realized in specific Architecture Specification parts:
 
 ### 1. **AI-OS Least Privilege Access through Capability Mediation**
-Grant components, agents, and users only the minimum permissions necessary to perform their functions. AI-OS **must**:
+Grant components, agents, and users only the minimum permissions necessary to perform their functions. AI-OS **MUST**:
 - Mediate all access to capabilities through CapabilityManager (Part 3)
 - Enforce agent permissions through SecurityManager authorization checks (AI Agency doc & Part 3)
 - Implement resource quotas through ResourceManager (Part 1)
@@ -650,7 +665,7 @@ Grant components, agents, and users only the minimum permissions necessary to pe
 - Use role-based access control where appropriate for system administration functions
 
 ### 2. **AI-OS Input Validation and Sanitization at Boundaries**
-Validate and sanitize all inputs to prevent injection attacks, malformed data processing, and other input-based vulnerabilities. AI-OS **must**:
+Validate and sanitize all inputs to prevent injection attacks, malformed data processing, and other input-based vulnerabilities. AI-OS **MUST**:
 - Validate all event payloads against schemas at consumption points (Part 2: Event System)
 - Sanitize inputs to external tools/skills/MCPs through CapabilityManager (Part 3)
 - Validate configuration values against schemas before use (Part 8: Configuration System)
@@ -659,7 +674,7 @@ Validate and sanitize all inputs to prevent injection attacks, malformed data pr
 - Store validation schemas in appropriate memory tiers for reuse (Part 3: MemoryManager)
 
 ### 3. **AI-OS Protection of Sensitive Data through Isolation and Encryption**
-Encrypt, isolate, and strictly control access to sensitive data including API keys, credentials, proprietary code, and user data. AI-OS **must**:
+Encrypt, isolate, and strictly control access to sensitive data including API keys, credentials, proprietary code, and user data. AI-OS **MUST**:
 - Encrypt sensitive data at rest and in transit using industry-standard algorithms
 - Isolate sensitive data in secure storage with access controls (Part 3: StorageManager)
 - Strictly control access through authentication and authorization (SecurityManager & AIAgencyService)
@@ -669,7 +684,7 @@ Encrypt, isolate, and strictly control access to sensitive data including API ke
 - Store security policies in Engineering Intelligence memory for organizational awareness (Part 3)
 
 ### 4. **AI-OS Secure Defaults and Principle of Least Privilege**
-Configure systems with secure defaults rather than requiring users to opt into security features. AI-OS **must**:
+Configure systems with secure defaults rather than requiring users to opt into security features. AI-OS **MUST**:
 - Ship with secure configuration defaults (Part 8: Configuration System)
 - Disable dangerous features by default
 - Require explicit opt-in for reduced security postures
@@ -679,7 +694,7 @@ Configure systems with secure defaults rather than requiring users to opt into s
 - Audit default configurations against security benchmarks regularly
 
 ### 5. **AI-OS Regular Security Assessment and Continuous Improvement**
-Conduct regular security reviews, penetration testing, and vulnerability assessments to identify and address security weaknesses. AI-OS **must**:
+Conduct regular security reviews, penetration testing, and vulnerability assessments to identify and address security weaknesses. AI-OS **MUST**:
 - Integrate security testing into validation pipeline (Part 11: Validation Architecture)
 - Conduct regular penetration testing of exposed interfaces
 - Perform dependency vulnerability scanning on all third-party components
@@ -689,7 +704,7 @@ Conduct regular security reviews, penetration testing, and vulnerability assessm
 - Maintain security incident response procedures and playbooks
 
 ### 6. **AI-OS Security Monitoring and Alerting with Observability**
-Implement continuous security monitoring with alerting for suspicious activities, potential breaches, or policy violations. AI-OS **must**:
+Implement continuous security monitoring with alerting for suspicious activities, potential breaches, or policy violations. AI-OS **MUST**:
 - Export security events to observability systems (Part 10: Observability & Telemetry)
 - Monitor for anomalous behavior patterns using statistical and ML techniques
 - Alert on security policy violations and potential threats
@@ -699,7 +714,7 @@ Implement continuous security monitoring with alerting for suspicious activities
 - Store security monitoring data in appropriate memory tiers for analysis (Part 3)
 
 ### 7. **AI-OS Secure Communication Channels through Mediation**
-Use encrypted, authenticated channels for all communication, especially when crossing trust boundaries or handling sensitive data. AI-OS **must**:
+Use encrypted, authenticated channels for all communication, especially when crossing trust boundaries or handling sensitive data. AI-OS **MUST**:
 - Encrypt all inter-component communication where required (though EventBus is primary)
 - Authenticate all service-to-service interactions through defined contracts
 - Use capability-based authorization for external tool/skill/MCP access (Part 3: CapabilityManager)
@@ -709,7 +724,7 @@ Use encrypted, authenticated channels for all communication, especially when cro
 - Use mutual TLS or equivalent for external service communications where appropriate
 
 ### 8. **AI-OS Permission Mediation through Defined Systems**
-Mediate all access to capabilities and resources through formal permission systems rather than allowing direct, unrestricted access. AI-OS **must**:
+Mediate all access to capabilities and resources through formal permission systems rather than allowing direct, unrestricted access. AI-OS **MUST**:
 - Route all capability access through CapabilityManager (Part 3)
 - Mediate all resource access through ResourceManager (Part 1)
 - Control all memory access through MemoryManager with proper scoping (Part 3)
@@ -723,33 +738,36 @@ Mediate all access to capabilities and resources through formal permission syste
 These principles govern how AI-OS ensures system reliability, availability, and fault tolerance, realized in specific Architecture Specification parts:
 
 ### 1. **AI-OS Assume Failure Will Happen**
-Design systems assuming that components will fail, networks will partition, and errors will occur—not as exceptional cases but as expected conditions. AI-OS **must**:
-- Design for partial failure rather than assuming perfect reliability (Part 11: Fault Tolerance & Recovery)
-- Implement timeout mechanisms for all external dependencies
-- Assume network partitions and component failures in distributed modes
-- Design graceful degradation paths for non-critical functionality
-- Plan for failure scenarios in all architectural decisions (Part 0: Principles)
+Design AI-OS systems assuming that Hermes Components will fail, networks will partition, and errors will occur as expected conditions in autonomous operations—not as exceptional cases. AI-OS **MUST**:
+- Design for partial Hermes Component failure rather than assuming perfect reliability, enabling continued operation during degradation (Part 11: Fault Tolerance & Recovery)
+- Implement Hermes-enforced timeout mechanisms for all external Dependencies through ResourceManager quotas (Part 1)
+- Assume network partitions and Hermes Component failures in distributed deployment modes, designing for continued operation (Part 11)
+- Design Hermes graceful degradation paths for non-critical agent capabilities while preserving core orchestration (Part 1)
+- Plan for Hermes failure scenarios in all architectural decisions, treating failure modes as first-class design considerations (Part 0: Principles)
+- Treat unexpected failure absence as an architectural event requiring investigation (Part 11)
 
 ### 2. **AI-OS Failure Isolation through Loose Coupling**
-Isolate failures to prevent cascading failures and limit the impact of any single component failure. AI-OS **must**:
-- Use EventBus communication to decouple component lifecycles (Part 2)
-- Implement bulkheads and circuit breakers for external dependencies
-- Isolate agent failures through sandboxing and resource quotas (AI Agency doc)
-- Contain memory corruption through proper scoping and access controls (Part 3: MemoryManager)
-- Prevent failure propagation through well-defined service boundaries (Parts 5-7)
-- Never allow exceptions to cross service boundaries - convert to failure events (ADR 009)
+Isolate Hermes failures to prevent cascading failures and limit blast radius of any single component failure in autonomous systems. AI-OS **MUST**:
+- Use Hermes EventBus asynchronous messaging to decouple Hermes Component lifecycles and failure domains (Part 2)
+- Implement Hermes-enforced bulkheads and circuit breakers for external Dependencies through ResourceManager quotas (Part 1)
+- Isolate Hermes agent failures through AIAgencyService sandboxing and ResourceManager quotas (AI Agency doc)
+- Contain Hermes memory corruption through MemoryManager scoping and access controls, preventing cross-agent contamination (Part 3)
+- Prevent Hermes failure propagation through well-defined ServiceManager interfaces and BaseService contracts (Parts 4-7)
+- Never allow Hermes exceptions to cross Service boundaries - convert all exceptions to typed failure events for uniform handling (ADR 009)
+- Treat failure propagation between Hermes Components as an architectural event requiring immediate conformance review (Part 11)
 
 ### 3. **AI-OS Graceful Degradation through Priority-Based Design**
-Where possible, continue providing reduced functionality rather than complete failure when components experience issues. AI-OS **must**:
-- Implement priority-based resource allocation (ResourceManager) (Part 1)
-- Provide degraded modes for non-critical features when resources are constrained
-- Maintain core orchestration functionality even when individual services fail
-- Enable fallback capabilities for extension points when specific implementations are unavailable
-- Design for graceful degradation in agent capabilities when tools/skills/MCPs fail
-- Preserve system stability over feature completeness during partial failures
+Where Hermes Components experience issues, continue providing reduced functionality rather than complete failure to preserve autonomous system stability. AI-OS **MUST**:
+- Implement Hermes ResourceManager priority-based resource allocation for critical agent operations (Part 1)
+- Provide Hermes-degraded modes for non-critical agent capabilities when system resources are constrained (Part 1)
+- Maintain core Hermes Kernel orchestration functionality even when individual Hermes Services experience failures (Part 1)
+- Enable fallback capabilities for Hermes extension points when specific implementations are unavailable or fail (Part 9)
+- Design Hermes agent capabilities for graceful degradation when tools/skills/MCPs fail, preserving agent lifecycle (Part 14)
+- Preserve Hermes system stability over feature completeness during partial failures, treating availability as paramount (Part 1)
+- Treat degradation failures as architectural events requiring conformance review (Part 11)
 
 ### 4. **AI-OS Automatic Recovery through Checkpointing and Retries**
-Implement automatic recovery mechanisms (checkpointing, retries, failover) rather than requiring manual intervention for common failure scenarios. AI-OS **must**:
+Implement automatic recovery mechanisms (checkpointing, retries, failover) rather than requiring manual intervention for common failure scenarios. AI-OS **MUST**:
 - Implement workflow execution snapshots through CheckpointManager (Part 3)
 - Use configurable retry budgets with exponential backoff through RetryManager (Part 3)
 - Apply automatic failure classification and recovery routing through RootCauseManager (Part 3)
@@ -758,7 +776,7 @@ Implement automatic recovery mechanisms (checkpointing, retries, failover) rathe
 - Never require manual intervention for recoverable failure scenarios
 
 ### 5. **AI-OS Mean Time to Recovery (MTTR) Focus through Instrumentation**
-Optimize for quick recovery from failures as much as (or more than) preventing failures in the first place. AI-OS **must**:
+Optimize for quick recovery from failures as much as (or more than) preventing failures in the first place. AI-OS **MUST**:
 - Implement comprehensive health checking and monitoring (Part 10: Observability & Telemetry)
 - Export metrics for failure detection and recovery time measurement
 - Instrument code for distributed tracing to accelerate root cause analysis
@@ -768,7 +786,7 @@ Optimize for quick recovery from failures as much as (or more than) preventing f
 - Measure and continuously improve MTTR as a key reliability metric
 
 ### 6. **AI-OS Redundancy for Critical Components through Extension Points**
-Provide redundancy for critical system functions where availability is paramount. AI-OS **must**:
+Provide redundancy for critical system functions where availability is paramount. AI-OS **MUST**:
 - Design for multiple implementations of critical extension points (Skills, MCP, Repository)
 - Enable hot standby configurations for critical services where appropriate
 - Implement leader election and failover mechanisms for distributed deployments
@@ -777,7 +795,7 @@ Provide redundancy for critical system functions where availability is paramount
 - Never create single points of failure in critical system paths
 
 ### 7. **AI-OS Health Checks and Monitoring through Observability**
-Implement comprehensive health checking and monitoring to detect issues early and trigger appropriate responses. AI-OS **must**:
+Implement comprehensive health checking and monitoring to detect issues early and trigger appropriate responses. AI-OS **MUST**:
 - Implement liveness and readiness probes for all services (Part 10)
 - Export health metrics to monitoring systems (Part 10)
 - Monitor system behavior for anomalies using statistical and ML techniques
@@ -786,7 +804,7 @@ Implement comprehensive health checking and monitoring to detect issues early an
 - Integrate health monitoring with validation pipeline for preventive measures (Part 11)
 
 ### 8. **AI-OS Deterministic Recovery Procedures through State Management**
-Ensure recovery procedures are deterministic and produce predictable outcomes rather than relying on chance or manual intervention. AI-OS **must**:
+Ensure recovery procedures are deterministic and produce predictable outcomes rather than relying on chance or manual intervention. AI-OS **MUST**:
 - Implement deterministic state restoration through StateManager and MemoryManager (Parts 1 & 3)
 - Ensure consistent recovery state across distributed components
 - Validate recovery completeness and correctness through validation mechanisms (Part 11)
@@ -799,7 +817,7 @@ Ensure recovery procedures are deterministic and produce predictable outcomes ra
 These principles govern how AI-OS enables and manages extension and customization, realized in specific Architecture Specification parts:
 
 ### 1. **AI-OS Well-Defined, Versioned Extension Points**
-Provide explicit, documented, and versioned extension points rather than allowing arbitrary modification of core components. AI-OS **must**:
+Provide explicit, documented, and versioned extension points rather than allowing arbitrary modification of core components. AI-OS **MUST**:
 - Define explicit extension points in Architecture Specification Part 9
 - Version extension point contracts with semantic versioning
 - Maintain backward compatibility within major versions
@@ -808,7 +826,7 @@ Provide explicit, documented, and versioned extension points rather than allowin
 - Never allow extensions to modify core architecture (EventBus interface, Kernel lifecycle, BaseService contract, etc.)
 
 ### 2. **AI-OS Extension Point Stability with Governance**
-Maintain extension point contracts across versions with clear deprecation and migration paths to enable ecosystem evolution. AI-OS **must**:
+Maintain extension point contracts across versions with clear deprecation and migration paths to enable ecosystem evolution. AI-OS **MUST**:
 - Govern extension points through Architecture Review Board (ARB) approval process
 - Require ARB approval for changes to extension point contracts
 - Maintain extension point contracts through formal deprecation procedures
@@ -817,7 +835,7 @@ Maintain extension point contracts across versions with clear deprecation and mi
 - Document extension point governance in Part 0 §0.5.2 and Part 9
 
 ### 3. **AI-OS Isolation of Extensions through Sandboxing and Mediation**
-Isolate extensions from core system functions to prevent extensions from compromising system stability or security. AI-OS **must**:
+Isolate extensions from core system functions to prevent extensions from compromising system stability or security. AI-OS **MUST**:
 - Execute Skills in sandboxed environments with configurable permission profiles (Part 9)
 - Route MCP access through standardized transports with capability negotiation (Part 10)
 - Isolate Repository components through well-defined interfaces and dependency management (Part 13)
@@ -826,7 +844,7 @@ Isolate extensions from core system functions to prevent extensions from comprom
 - Implement process isolation, resource limits, and security boundaries for all extensions
 
 ### 4. **AI-OS Discovery Mechanisms through Registrics and Recommendations**
-Provide ways to discover available extensions through registries, search capabilities, and recommendation systems. AI-OS **must**:
+Provide ways to discover available extensions through registries, search capabilities, and recommendation systems. AI-OS **MUST**:
 - Maintain central registries for Skills, MCPs, and Repository components (Part 13)
 - Implement search, filtering, and recommendation capabilities in registries
 - Provide compatibility checking against kernel and platform versions
@@ -835,7 +853,7 @@ Provide ways to discover available extensions through registries, search capabil
 - Store discovery metadata in Engineering Intelligence memory for organizational learning (Part 3)
 
 ### 5. **AI-OS Version Compatibility through Semantic Versioning**
-Ensure extensions can declare their compatibility with specific system versions and that the system can validate extension compatibility. AI-OS **must**:
+Ensure extensions can declare their compatibility with specific system versions and that the system can validate extension compatibility. AI-OS **MUST**:
 - Use semantic versioning (MAJOR.MINOR.PATCH) for all extension points
 - Enable backward compatibility within major versions
 - Provide clear deprecation and migration paths for breaking changes
@@ -844,7 +862,7 @@ Ensure extensions can declare their compatibility with specific system versions 
 - Document version compatibility requirements in extension registries
 
 ### 6. **AI-OS Security Boundaries for Extensions through Mediation**
-Apply the same security principles to extensions as to core components, including permission models, sandboxing, and validation. AI-OS **must**:
+Apply the same security principles to extensions as to core components, including permission models, sandboxing, and validation. AI-OS **MUST**:
 - Apply least privilege access to all extensions through capability-based permissions
 - Execute extensions in sandboxed environments with resource limits
 - Validate extension inputs and outputs for security and correctness
@@ -853,7 +871,7 @@ Apply the same security principles to extensions as to core components, includin
 - Store security policies for extensions in Engineering Intelligence memory (Part 3)
 
 ### 7. **AI-OS Governance Models through Ecosystem Councils**
-Establish governance processes for extension curation, quality assurance, and lifecycle management. AI-OS **must**:
+Establish governance processes for extension curation, quality assurance, and lifecycle management. AI-OS **MUST**:
 - Implement community curation and contribution processes for all ecosystems
 - Conduct security scanning and vulnerability assessment for all extensions
 - Establish quality gates and certification programs for ecosystem components
@@ -862,7 +880,7 @@ Establish governance processes for extension curation, quality assurance, and li
 - Store governance policies and decisions in Engineering Intelligence memory (Part 3)
 
 ### 8. **AI-OS Fallback Capabilities through Graceful Degradation**
-Ensure the system can operate meaningfully even when specific extensions are unavailable or fail. AI-OS **must**:
+Ensure the system can operate meaningfully even when specific extensions are unavailable or fail. AI-OS **MUST**:
 - Design core functionality to work without specific extensions enabled
 - Provide meaningful error messages when extensions fail to load
 - Implement fallback mechanisms for critical extension point failures
@@ -875,7 +893,7 @@ Ensure the system can operate meaningfully even when specific extensions are una
 These principles govern how AI-OS approaches documentation and knowledge sharing, realized in specific Architecture Specification parts:
 
 ### 1. **AI-OS Documentation as Legal Contract**
-Treat architectural documentation with the same seriousness as legal contracts—it defines what the system must be and why. AI-OS **must**:
+Treat architectural documentation with the same seriousness as legal contracts—it defines what the system must be and why. AI-OS **MUST**:
 - Consider the Architecture Specification Parts 1-15 as the definitive, frozen contract
 - Treat this Engineering Principles document as the philosophical foundation for interpretation
 - Maintain alignment between documentation and implementation
@@ -883,7 +901,7 @@ Treat architectural documentation with the same seriousness as legal contracts�
 - Store architectural documentation in Obsidian memory for knowledge preservation (Part 3: MemoryType.OBSIDIAN)
 
 ### 2. **AI-OS Document Rationale, Not Just Mechanics with Decision Records**
-Explain why decisions were made and the principles behind them, not just how things work. AI-OS **must**:
+Explain why decisions were made and the principles behind them, not just how things work. AI-OS **MUST**:
 - Document all significant architectural decisions in Architecture Decision Records (ADRs) (Part 0)
 - Include context, problem, alternatives, decision, rationale, trade-offs, and consequences in ADRs
 - Preserve ADRs as historical record of principled decision-making (Part 0)
@@ -891,7 +909,7 @@ Explain why decisions were made and the principles behind them, not just how thi
 - Store ADRs in Engineering Intelligence memory for organizational learning (Part 3)
 
 ### 3. **AI-OS Keep Documentation Close to Code with Living Documents**
-Maintain documentation near the code it describes to reduce drift and facilitate updates during development. AI-OS **must**:
+Maintain documentation near the code it describes to reduce drift and facilitate updates during development. AI-OS **MUST**:
 - Keep documentation in the same repository as implementation (architecture/ directory)
 - Update documentation as part of the definition of done for changes
 - Use documentation to enable ecosystem contributors to understand extension points
@@ -899,7 +917,7 @@ Maintain documentation near the code it describes to reduce drift and facilitate
 - Use documentation versioning to track alignment with implementation versions
 
 ### 4. **AI-OS Multiple Documentation Levels for Different Audiences**
-Provide documentation at different levels (overview, detailed specification, implementation guides) to serve different audiences. AI-OS **must**:
+Provide documentation at different levels (overview, detailed specification, implementation guides) to serve different audiences. AI-OS **MUST**:
 - Provide this Engineering Principles document as the philosophical foundation (why)
 - Provide Architecture Decision Records as the historical record of decisions (what)
 - Provide Architecture Evolution Document as the historical progression (how we got here)
@@ -909,7 +927,7 @@ Provide documentation at different levels (overview, detailed specification, imp
 - Tailor documentation depth to audience: architects, engineers, contributors, auditors, students
 
 ### 5. **AI-OS Document Deprecations Clearly with Migration Paths**
-Clearly mark deprecated features, explain why they're deprecated, and provide migration paths. AI-OS **must**:
+Clearly mark deprecated features, explain why they're deprecated, and provide migration paths. AI-OS **MUST**:
 - Use semantic versioning to indicate deprecation timelines
 - Provide clear deprecation periods in documentation
 - Explain why features are deprecated (usually to maintain architectural integrity)
@@ -918,7 +936,7 @@ Clearly mark deprecated features, explain why they're deprecated, and provide mi
 - Never remove deprecated features without ARB approval and proper notification
 
 ### 6. **AI-OS Examples and Use Cases for Principle Illustration**
-Include concrete examples and use cases to illustrate principles and help understanding. AI-OS **must**:
+Include concrete examples and use cases to illustrate principles and help understanding. AI-OS **MUST**:
 - Use examples that demonstrate principles in action
 - Show both correct applications and common violations (anti-patterns)
 - Reference real architectural decisions from ADRs as examples
@@ -927,7 +945,7 @@ Include concrete examples and use cases to illustrate principles and help unders
 - Store valuable use cases in Engineering Intelligence memory for team reference (Part 3)
 
 ### 7. **AI-OS Language and Technology Neutrality in Documentation**
-Avoid language-specific examples or references in architectural documentation to maintain technology neutrality. AI-OS **must**:
+Avoid language-specific examples or references in architectural documentation to maintain technology neutrality. AI-OS **MUST**:
 - Focus on behavioral contracts rather than implementation specifics
 - Use pseudocode or language-agnostic diagrams when needed
 - Reference Architecture Specification parts rather than implementation details
@@ -935,7 +953,7 @@ Avoid language-specific examples or references in architectural documentation to
 - Store language-neutral documentation in appropriate memory tiers (Part 3)
 
 ### 8. **AI-OS Accessibility and Discoverability through Organization**
-Organize documentation logically and make it easy to find relevant information through clear structure and navigation. AI-OS **must**:
+Organize documentation logically and make it easy to find relevant information through clear structure and navigation. AI-OS **MUST**:
 - Use clear hierarchical organization in all documentation
 - Provide tables of contents and cross-references
 - Maintain consistent navigation patterns across documents
@@ -948,7 +966,7 @@ Organize documentation logically and make it easy to find relevant information t
 These principles govern how AI-OS ensures long-term maintainability of the system and its implementations, realized in specific Architecture Specification parts:
 
 ### 1. **AI-OS Architectural Integrity Preservation through Conformance**
-Protect the system's architectural principles and invariants from erosion through disciplined development and conformance checking. AI-OS **must**:
+Protect the system's architectural principles and invariants from erosion through disciplined development and conformance checking. AI-OS **MUST**:
 - Implement automated conformance testing against Architecture Specification Parts 1-15 (Part 11: Validation Architecture)
 - Use conformance levels (L1-L4) to apply appropriate rigor for different components
 - Monitor for architectural drift through regular validation pipeline execution
@@ -957,7 +975,7 @@ Protect the system's architectural principles and invariants from erosion throug
 - Store architectural conformance results in Engineering Intelligence memory for team awareness (Part 3)
 
 ### 2. **AI-OS Technical Debt Visibility through Tracking Systems**
-Make technical debt visible and trackable rather than allowing it to accumulate hidden in the codebase. AI-OS **must**:
+Make technical debt visible and trackable rather than allowing it to accumulate hidden in the codebase. AI-OS **MUST**:
 - Distinguish between regular technical debt and architectural debt (violations of principles/invariants)
 - Implement technical debt tracking in project management systems
 - Make technical debt visible through dashboards and reporting
@@ -967,7 +985,7 @@ Make technical debt visible and trackable rather than allowing it to accumulate 
 - Never allow architectural debt to accumulate without explicit ARB approval and mitigation plan
 
 ### 3. **AI-OS Modularity and Loose Coupling through Well-Defined Interfaces**
-Design for high modularity and loose coupling to enable independent development, testing, and replacement of components. AI-OS **must**:
+Design for high modularity and loose coupling to enable independent development, testing, and replacement of components. AI-OS **MUST**:
 - Define clear interfaces for all components (event schemas, service APIs, extension points)
 - Use BaseService contracts to enforce modularity and loose coupling (Part 4)
 - Prefer EventBus communication over direct service calls for loose coupling (Part 2)
@@ -977,7 +995,7 @@ Design for high modularity and loose coupling to enable independent development,
 - Store module interface contracts in Engineerning Intelligence memory for team reference (Part 3)
 
 ### 4. **AI-OS Predictable Build and Deployment through Automation**
-Ensure build and deployment processes are predictable, repeatable, and well-documented. AI-OS **must**:
+Ensure build and deployment processes are predictable, repeatable, and well-documented. AI-OS **MUST**:
 - Implement automated build pipelines with consistent outputs
 - Use infrastructure-as-code for reproducible deployments
 - Maintain clear documentation for build and deployment procedures
@@ -987,7 +1005,7 @@ Ensure build and deployment processes are predictable, repeatable, and well-docu
 - Never rely on manual, undocumented build or deployment processes
 
 ### 5. **AI-OS Clear Deprecation Policies with Migration Paths**
-Establish and follow clear policies for deprecating features with adequate notice and migration paths. AI-OS **must**:
+Establish and follow clear policies for deprecating features with adequate notice and migration paths. AI-OS **MUST**:
 - Use semantic versioning to indicate deprecation timelines
 - Provide clear deprecation periods (typically one minor version)
 - Explain why features are deprecated (usually to maintain architectural integrity)
@@ -997,7 +1015,7 @@ Establish and follow clear policies for deprecating features with adequate notic
 - Enable automated migration tools where feasible for complex changes
 
 ### 6. **AI-OS Knowledge Retention through Living Archives**
-Implement systems to retain organizational knowledge about the architecture, decisions, and rationale beyond individual team members. AI-OS **must**:
+Implement systems to retain organizational knowledge about the architecture, decisions, and rationale beyond individual team members. AI-OS **MUST**:
 - Store architectural decisions in Architecture Decision Records (ADRs) as immutable historical record (Part 0)
 - Preserve Architecture Evolution Document as complete historical record of system progression
 - Maintain AI_OS_MASTER_CONTEXT.md as integrated view of current state and principles
@@ -1012,7 +1030,7 @@ Implement systems to retain organizational knowledge about the architecture, dec
 - Never rely solely on individual team members for critical architectural knowledge
 
 ### 7. **AI-OS Conformance Testing through Validation Pipeline**
-Implement automated testing to verify ongoing conformance to architectural principles and specification requirements. AI-OS **must**:
+Implement automated testing to verify ongoing conformance to architectural principles and specification requirements. AI-OS **MUST**:
 - Run validation pipeline on every commit (pre-commit validation)
 - Validate against Architecture Specification Parts 1-15 regularly
 - Test for principle adherence, not just specification requirements
@@ -1023,7 +1041,7 @@ Implement automated testing to verify ongoing conformance to architectural princ
 - Continuously improve conformance testing based on feedback and metrics (Part 11: Validation Architecture)
 
 ### 8. **AI-OS Refactoring as Ongoing Practice with Architectural Awareness**
-Treat refactoring not as a special activity but as an ongoing practice to prevent deterioration of code quality and architectural integrity. AI-OS **must**:
+Treat refactoring not as a special activity but as an ongoing practice to prevent deterioration of code quality and architectural integrity. AI-OS **MUST**:
 - Refactor regularly to prevent technical debt accumulation
 - Ensure refactoring preserves architectural principles and invariants
 - Use refactoring to improve modularity and loose coupling
@@ -1037,14 +1055,14 @@ Treat refactoring not as a special activity but as an ongoing practice to preven
 These principles govern how AI-OS evolves over time while preserving its core identity, realized in specific Architecture Specification parts:
 
 ### 1. **AI-OS Evolution Through Extension Points, Not Core Modification**
-Prefer evolving the system through extension points and ecosystems rather than modifying core architectural principles or invariants. AI-OS **must**:
+Prefer evolving the system through extension points and ecosystems rather than modifying core architectural principles or invariants. AI-OS **MUST**:
 - Evolve through explicitly permitted extension points (Skills, MCP, Repository, Custom Events, Memory Backends) (Part 9)
 - Never modify core architecture (EventBus interface, Kernel lifecycle, BaseService contract, etc.) without ARB approval
 - Use extension points for variability while keeping kernel stable (Fixed Component Counts constraint)
 - Store extension point contracts and versioning in Engineering Intelligence memory (Part 3)
 
 ### 2. **AI-OS Explicit Semantic Versioning with Compatibility Guarantees**
-Use explicit, semantic versioning for the specification, interfaces, and contracts to enable clear communication about changes and compatibility. AI-OS **must**:
+Use explicit, semantic versioning for the specification, interfaces, and contracts to enable clear communication about changes and compatibility. AI-OS **MUST**:
 - Use semantic versioning (MAJOR.MINOR.PATCH) for Architecture Specification (Part 0)
 - Version event schemas, configuration schemas, and APIs explicitly (Parts 2, 8)
 - Maintain backward compatibility within major versions (L1-L4 conformance levels)
@@ -1053,7 +1071,7 @@ Use explicit, semantic versioning for the specification, interfaces, and contrac
 - Store version compatibility matrices in Engineering Intelligence memory (Part 3)
 
 ### 3. **AI-OS Deprecation with Migration Paths and Sunset Dates**
-When deprecating features or interfaces, provide clear timelines, explanations, and migration paths to enable smooth transitions. AI-OS **must**:
+When deprecating features or interfaces, provide clear timelines, explanations, and migration paths to enable smooth transitions. AI-OS **MUST**:
 - Announce deprecations with clear sunset dates (typically one minor version)
 - Explain why features are deprecated (usually to maintain architectural integrity)
 - Provide concrete migration paths with examples and automation where possible
@@ -1062,7 +1080,7 @@ When deprecating features or interfaces, provide clear timelines, explanations, 
 - Enable automated migration tools where feasible for complex changes (Part 13: Repository Ecosystem)
 
 ### 4. **AI-OS Backward Compatibility within Major Versions through Conformance Levels**
-Maintain backward compatibility within major versions to enable gradual adoption and reduce upgrade friction. AI-OS **must**:
+Maintain backward compatibility within major versions to enable gradual adoption and reduce upgrade friction. AI-OS **MUST**:
 - Define conformance levels (L1-L4) allowing appropriate rigor for different use cases (Part 11: Validation Architecture)
 - Allow implementations to claim conformance at appropriate levels
 - Never break L3 conformance within a major version without ARB approval
@@ -1070,7 +1088,7 @@ Maintain backward compatibility within major versions to enable gradual adoption
 - Store conformance level requirements in Engineering Intelligence memory (Part 3)
 
 ### 5. **AI-OS Evolution Driven by Feedback, Metrics, and Real-World Usage**
-Let evolution be guided by real-world usage patterns, feedback, and measurable outcomes rather than purely theoretical considerations. AI-OS **must**:
+Let evolution be guided by real-world usage patterns, feedback, and measurable outcomes rather than purely theoretical considerations. AI-OS **MUST**:
 - Monitor system usage through observability systems (Part 10: Observability & Telemetry)
 - Collect feedback from ecosystem participants through contribution processes
 - Measure outcomes through validation and learning systems (Parts 6 & 11)
@@ -1079,7 +1097,7 @@ Let evolution be guided by real-world usage patterns, feedback, and measurable o
 - Never evolve based solely on theoretical considerations without validation
 
 ### 6. **AI-OS Preserve Investment in Existing Code through Compatibility Guarantees**
-Minimize breaking changes that would require significant rework of existing implementations, extensions, or integrations. AI-OS **must**:
+Minimize breaking changes that would require significant rework of existing implementations, extensions, or integrations. AI-OS **MUST**:
 - Maintain extension point contracts across versions with clear deprecation paths
 - Provide migration tools for common breaking changes where feasible
 - Never break L3 conformance without major version bump and migration path
@@ -1088,7 +1106,7 @@ Minimize breaking changes that would require significant rework of existing impl
 - Prioritize preserving user investment over architectural purity when reasonable
 
 ### 7. **AI-OS Clear Evolution Roadmap through Public Documentation**
-Maintain and communicate a clear roadmap for how the architecture is expected to evolve over time. AI-OS **must**:
+Maintain and communicate a clear roadmap for how the architecture is expected to evolve over time. AI-OS **MUST**:
 - Publish evolution roadmap in Architecture Evolution Document and Part 15: Future Directions
 - Maintain public changelog of specification changes
 - Communicate planned deprecations and removals well in advance
@@ -1097,7 +1115,7 @@ Maintain and communicate a clear roadmap for how the architecture is expected to
 - Never make breaking changes without proper notice and documentation
 
 ### 8. **AI-OS Community Involvement in Evolution through Governance**
-Involve the ecosystem community in evolutionary decisions through feedback mechanisms, contribution processes, and governance participation. AI-OS **must**:
+Involve the ecosystem community in evolutionary decisions through feedback mechanisms, contribution processes, and governance participation. AI-OS **MUST**:
 - Govern evolution through Architecture Review Board (ARB) with community representation (Part 0)
 - Accept ecosystem contributions through formal contribution processes (Part 13)
 - Implement feedback mechanisms for ecosystem participants (Part 13: Community Hub)
@@ -1107,7 +1125,7 @@ Involve the ecosystem community in evolutionary decisions through feedback mecha
 
 ## Anti-Patterns
 
-These are common approaches that violate AI-OS principles and should be avoided:
+These are common approaches that violate AI-OS principles and SHOULD be avoided:
 
 ### 1. **Direct Service-to-Service Communication**
 Bypassing the EventBus for direct calls between services creates tight coupling, hinders observability, and violates the Event-First Communication Principle.
@@ -1144,108 +1162,108 @@ Treating security as an add-on rather than a foundational principle creates inco
 These are hard constraints that define the boundaries of what AI-OS can be:
 
 ### 1. **Exactly Four Core Components**
-The Hermes Kernel must contain exactly and only four Core Components: EventBus, StateManager, WorkflowManager, and ResourceManager.
+The Hermes Kernel MUST contain exactly and only four Core Components: EventBus, StateManager, WorkflowManager, and ResourceManager.
 
 ### 2. **Exactly Nine Core Managers**
-The Hermes Kernel must own exactly nine Core Managers: MemoryManager, ModelRouter, ToolManager, StorageManager, ContextManager, AgentManager, RetryManager, CheckpointManager, RootCauseManager, CouncilManager, and AIAgencyService.
+The Hermes Kernel MUST own exactly nine Core Managers: MemoryManager, ModelRouter, ToolManager, StorageManager, ContextManager, AgentManager, RetryManager, CheckpointManager, RootCauseManager, CouncilManager, and AIAgencyService.
 
 ### 3. **EventBus as Sole Communication Mechanism**
-Post-initialization, all inter-component communication must occur exclusively through the EventBus—no direct service-to-service calls, no shared mutable state outside StateManager, and no RPC mechanisms.
+Post-initialization, all inter-component communication MUST occur exclusively through the EventBus—no direct service-to-service calls, no shared mutable state outside StateManager, and no RPC mechanisms.
 
 ### 4. **Immutable Events with Correlation/Causation**
-Every event must be immutable and carry both correlation_id (for workflow tracing) and causation_id (for direct cause tracking).
+Every event MUST be immutable and carry both correlation_id (for workflow tracing) and causation_id (for direct cause tracking).
 
 ### 5. **Four-Layer Configuration Merge**
-Configuration must use the four-layer merge (defaults → app.yaml → env.yaml → env vars) with later layers overriding earlier ones—no hardcoded defaults in Kernel or Manager code.
+Configuration MUST use the four-layer merge (defaults → app.yaml → env.yaml → env vars) with later layers overriding earlier ones—no hardcoded defaults in Kernel or Manager code.
 
 ### 6. **Services Must Extend BaseService**
-Every service must extend the BaseService contract, declare depends_on for dependencies, subscribe to events in on_start(), emit typed events for outputs, and must not call other services directly.
+Every service must extend the BaseService contract, declare depends_on for dependencies, subscribe to events in on_start(), emit typed events for outputs, and MUST NOT call other services directly.
 
 ### 7. **Capability Facade Services Translation**
-The four Capability Facade Services (SkillService, CouncilService, MCPService, MemoryService) must translate incoming events into manager calls and emit result events—must not contain business logic.
+The four Capability Facade Services (SkillService, CouncilService, MCPService, MemoryService) must translate incoming events into manager calls and emit result events—MUST NOT contain business logic.
 
 ### 8. **Five-State FSM**
 The system must implement an explicit five-state finite state machine: UNINITIALIZED → INITIALIZED → RUNNING → SHUTTING_DOWN → TERMINATED.
 
 ### 9. **Specification/Implementation Separation**
-AI-OS must distinguish between the architecture specification (what the system must be) and any particular implementation (how it is built).
+AI-OS MUST distinguish between the architecture specification (what the system must be) and any particular implementation (how it is built).
 
 ### 10. **Extension Point Governance**
-Specific extension points are explicitly permitted for variability while core architecture (EventBus interface, Kernel lifecycle, BaseService contract, etc.) must not vary.
+Specific extension points are explicitly permitted for variability while core architecture (EventBus interface, Kernel lifecycle, BaseService contract, etc.) MUST NOT vary.
 
 ## Architecture Invariants
 
 These are properties that must always hold true in a compliant AI-OS system:
 
 ### 1. **AI-OS Kernel Stability and Purity**
-The Hermes Kernel provides stable orchestration primitives that change infrequently and predictably, containing exactly and only four Core Components (EventBus, StateManager, WorkflowManager, ResourceManager) and nine Core Managers, with zero domain logic (Parts 1, 3, ADRs 001-003).
+The Hermes Kernel MUST provide stable orchestration primitives that change infrequently and predictably, containing exactly and only four Core Components (EventBus, StateManager, WorkflowManager, ResourceManager) and nine Core Managers, with zero domain logic (Parts 1, 3, ADRs 001-003).
 
 ### 2. **AI-OS Observability Through Immutable Events**
-All significant system actions, state transitions, agent activities, and failures are visible through immutable events with both correlation_id (workflow trace) and causation_id (direct cause), enabling end-to-end tracing, replay debugging, and forensic analysis (Parts 2, 10, 12, ADRs 008, 009).
+All significant system actions, state transitions, agent activities, and failures MUST be visible through immutable events with both correlation_id (workflow trace) and causation_id (direct cause), enabling end-to-end tracing, replay debugging, and forensic analysis (Parts 2, 10, 12, ADRs 008, 009).
 
 ### 3. **AI-OS Deterministic Lifecycle Management**
-Kernel and service initialization and shutdown follow predictable, deterministic orders based on dependency declarations (depends_on) and phase sequencing (0→3 sequential, 4→8 parallel-within-phase), enabling reliable system start/stop and recovery (Parts 1, 3, 4, ADR 004).
+Kernel and service initialization and shutdown MUST follow predictable, deterministic orders based on dependency declarations (depends_on) and phase sequencing (0→3 sequential, 4→8 parallel-within-phase), enabling reliable system start/stop and recovery (Parts 1, 3, 4, ADR 004).
 
 ### 4. **AI-OS Strict Resource Quota Enforcement**
-All agents and workflows operate within declared resource quotas (CPU, memory, tokens, tools) enforced by ResourceManager and capability managers, with hard limits preventing system exhaustion and soft limits providing early warnings (Parts 1, 3, AI Agency doc).
+All agents and workflows MUST operate within declared resource quotas (CPU, memory, tokens, tools) enforced by ResourceManager and capability managers, with hard limits preventing system exhaustion and soft limits providing early warnings (Parts 1, 3, AI Agency doc).
 
 ### 5. **AI-OS Failure Handling Through Events Only**
-All failures are communicated as events (TaskFailed, RetryBudgetExhausted, RootCauseAnalyzed, etc.) rather than exceptions crossing service boundaries, enabling uniform failure handling, retry budgets, and deterministic recovery (Parts 2, 3, 11, ADR 009).
+All failures MUST be communicated as events (TaskFailed, RetryBudgetExhausted, RootCauseAnalyzed, etc.) rather than exceptions crossing service boundaries, enabling uniform failure handling, retry budgets, and deterministic recovery (Parts 2, 3, 11, ADR 009).
 
 ### 6. **AI-OS Human Oversight Through Council Governance**
-Human oversight and intervention capabilities are available for critical AI agent decisions through Council mechanisms (Claude Council, LLM Council, etc.) with voting algorithms (MAJORITY, UNANIMOUS, WEIGHTED) and FinalJudge for veto/override capabilities (Parts 4, 12, AI Agency doc, ADRs 010, 012).
+Human oversight and intervention capabilities MUST be available for critical AI agent decisions through Council mechanisms (Claude Council, LLM Council, etc.) with voting algorithms (MAJORITY, UNANIMOUS, WEIGHTED) and FinalJudge for veto/override capabilities (Parts 4, 12, AI Agency doc, ADRs 010, 012).
 
 ### 7. **AI-OS Ecosystem Compatibility Through Versioned Contracts**
-Extensions developed against published, versioned extension point contracts (Skills, MCP, Repository, Custom Events, Memory Backends) remain compatible with system updates within version constraints, governed by Architecture Review Board (ARB) approval processes (Parts 9, 10, 13, ADR 013).
+Extensions developed against published, versioned extension point contracts (Skills, MCP, Repository, Custom Events, Memory Backends) MUST remain compatible with system updates within version constraints, governed by Architecture Review Board (ARB) approval processes (Parts 9, 10, 13, ADR 013).
 
 ### 8. **AI-OS Validation-First Execution as Foundational Practice**
-All agentic operations undergo rigorous pre-execution, during-execution, and post-execution validation to ensure safety, correctness, and goal alignment, with validation results fed into learning systems for continuous improvement (Parts 6, 11, ADR 010).
+All agentic operations MUST undergo rigorous pre-execution, during-execution, and post-execution validation to ensure safety, correctness, and goal alignment, with validation results fed into learning systems for continuous improvement (Parts 6, 11, ADR 010).
 
 ### 9. **AI-OS Immutable Event Integrity for Audit Trails**
-Once emitted, events cannot be altered, ensuring reliable audit trails for compliance, forensic analysis, and replay capabilities, with events stored in persistent storage for long-term retention (Parts 2, 3, 10, ADR 008).
+Once emitted, events MUST NOT be altered, ensuring reliable audit trails for compliance, forensic analysis, and replay capabilities, with events stored in persistent storage for long-term retention (Parts 2, 3, 10, ADR 008).
 
 ### 10. **AI-OS Technology-Neutral Specification Compliance**
-Implementations can vary in technology stack (language, framework, infrastructure) while maintaining specification compliance through adherence to behavioral contracts (event schemas, service APIs, extension point interfaces) and passing conformance tests (Parts 0, 15).
+Implementations MUST be able to vary in technology stack (language, framework, infrastructure) while maintaining specification compliance through adherence to behavioral contracts (event schemas, service APIs, extension point interfaces) and passing conformance tests (Parts 0, 15).
 
 ### 11. **AI-OS Extension Point Integrity and Isolation**
-Specific extension points are explicitly permitted for variability while core architecture (EventBus interface, Kernel lifecycle, BaseService contract, manager APIs, etc.) must not vary without ARB approval, and extensions are isolated through sandboxing, mediation, and defined interfaces (Parts 0, 9, 10, 13, ADR 013).
+Specific extension points MUST be explicitly permitted for variability while core architecture (EventBus interface, Kernel lifecycle, BaseService contract, manager APIs, etc.) MUST NOT vary without ARB approval, and extensions MUST be isolated through sandboxing, mediation, and defined interfaces (Parts 0, 9, 10, 13, ADR 013).
 
 ### 12. **AI-OS Principle Adherence as Conformance Requirement**
-Conformant implementations must adhere to the principles documented in this document, not just the bare specification requirements, with principle violations treated as architectural defects requiring ADR documentation and mitigation planning (Parts 0, 11-15).
+Conformant implementations MUST adhere to the principles documented in this document, not just the bare specification requirements, with principle violations treated as architectural defects requiring ADR documentation and mitigation planning (Parts 0, 11-15).
 
 ## Decision Making Principles
 
 These principles guide how architectural and engineering decisions should be made in AI-OS development:
 
 ### 1. **Principle-Based Decision Making**
-Decisions should be traced back to fundamental architectural and engineering principles rather than made on expedience or personal preference.
+Decisions SHOULD be traced back to fundamental architectural and engineering principles rather than made on expedience or personal preference.
 
 ### 2. **Rationale Documentation**
-Significant decisions should document the context, problem, alternatives considered, decision made, rationale, trade-offs, and consequences (following the ADR format).
+Significant decisions SHOULD document the context, problem, alternatives considered, decision made, rationale, trade-offs, and consequences (following the ADR format).
 
 ### 3. **Impact Analysis**
-Decisions should include analysis of impact on system stability, performance, security, extensibility, and conformance requirements.
+Decisions SHOULD include analysis of impact on system stability, performance, security, extensibility, and conformance requirements.
 
 ### 4. **Trade-off Awareness**
-Decisions should explicitly acknowledge and document the trade-offs being made rather than pretending there are no downsides.
+Decisions SHOULD explicitly acknowledge and document the trade-offs being made rather than pretending there are no downsides.
 
 ### 5. **Reversibility Preference**
 When possible, prefer decisions that are easily reversible or have clear migration paths over those that create permanent architectural changes.
 
 ### 6. **Stakeholder Consideration**
-Decisions should consider impact on different stakeholders: kernel developers, service developers, ecosystem contributors, implementers, and end users.
+Decisions SHOULD consider impact on different stakeholders: kernel developers, service developers, ecosystem contributors, implementers, and end users.
 
 ### 7. **Data-Informed When Possible**
-Decisions should be informed by measurable data, metrics, and empirical evidence when available rather than purely opinion-based.
+Decisions SHOULD be informed by measurable data, metrics, and empirical evidence when available rather than purely opinion-based.
 
 ### 8. **Principle Consistency**
-Decisions should be consistent with established principles unless there is compelling reason to evolve those principles through formal process.
+Decisions SHOULD be consistent with established principles unless there is compelling reason to evolve those principles through formal process.
 
 ### 9. **Long-Term View**
-Decisions should consider long-term implications for architectural integrity, maintainability, and evolution potential rather than just short-term gains.
+Decisions SHOULD consider long-term implications for architectural integrity, maintainability, and evolution potential rather than just short-term gains.
 
 ### 10. **Consensus-Seeking for Major Changes**
-Significant architectural changes should seek broad consensus among stakeholders rather than being imposed unilaterally.
+Significant architectural changes SHOULD seek broad consensus among stakeholders rather than being imposed unilaterally.
 
 ## Architectural Tradeoffs
 
@@ -1299,7 +1317,7 @@ Conformant implementations must adhere to the principles documented in this docu
 Conformant implementations must maintain all architectural invariants under normal operating conditions.
 
 ### 4. **Constraint Compliance**
-Conformant implementations must not violate any of the hard constraints documented in the Architecture Constraints section.
+Conformant implementations MUST NOT violate any of the hard constraints documented in the Architecture Constraints section.
 
 ### 5. **Extension Point Respect**
 Conformant implementations and extensions must respect extension point contracts and not attempt to access non-extension points.
