@@ -21,9 +21,18 @@ from aios.events.core.priority import EventPriority
 from aios.events.core.category import EventCategory
 from aios.events.core.types import EventType, SemanticVersion
 from aios.events.core.payload import EventPayload
+from aios.events.core.registry import (
+    EventTypeRegistry,
+    EventTypeRegistration,
+    RegistryState,
+    DeprecationInfo,
+    ValidationResult,
+    CompatibilityResult,
+)
 from aios.events.core.errors import (
     EventValidationError,
     EventModelError,
+    EventRegistryError,
 )
 from aios.events.core.serialization import (
     canonical_json,
@@ -39,8 +48,15 @@ __all__ = [
     "EventType",
     "SemanticVersion",
     "EventPayload",
+    "EventTypeRegistry",
+    "EventTypeRegistration",
+    "RegistryState",
+    "DeprecationInfo",
+    "ValidationResult",
+    "CompatibilityResult",
     "EventValidationError",
     "EventModelError",
+    "EventRegistryError",
     "canonical_json",
     "to_canonical_dict",
 ]

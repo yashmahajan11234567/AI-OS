@@ -14,6 +14,16 @@ class EventModelError(Exception):
     """Base error for the Event core model."""
 
 
+class EventRegistryError(EventModelError):
+    """Raised by the EventTypeRegistry / EventTypeRegistration layer.
+
+    Covers registration rejection (duplicate, malformed, reserved-prefix
+    violation per INV-ET-004 / INV-EXT-003 / INV-EXT-004), lifecycle violations,
+    and lookup of invalid EventType input. Reuses the EventModelError base so
+    it participates in the existing error hierarchy without redesign.
+    """
+
+
 class EventValidationError(EventModelError):
     """Raised when Event construction or deserialization fails validation.
 
@@ -32,4 +42,4 @@ class EventValidationError(EventModelError):
         return f"{self.args[0]}:\n  - {joined}"
 
 
-__all__ = ["EventModelError", "EventValidationError"]
+__all__ = ["EventModelError", "EventValidationError", "EventRegistryError"]
