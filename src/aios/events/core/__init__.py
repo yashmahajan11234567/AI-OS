@@ -29,6 +29,24 @@ from aios.events.core.registry import (
     ValidationResult,
     CompatibilityResult,
 )
+from aios.events.core.subscription import (
+    Subscription,
+    SubscriptionState,
+    HandlerPriority,
+    RetryPolicy,
+    WILDCARD,
+    WILDCARD_PRIORITY,
+)
+from aios.events.core.filters import (
+    EventFilter,
+    FilterDSL,
+    is_async_filter,
+)
+from aios.events.core.manager import (
+    SubscriptionManager,
+    SubscribeOptions,
+    ManagerState,
+)
 from aios.events.core.errors import (
     EventValidationError,
     EventModelError,
@@ -54,6 +72,18 @@ __all__ = [
     "DeprecationInfo",
     "ValidationResult",
     "CompatibilityResult",
+    "Subscription",
+    "SubscriptionState",
+    "HandlerPriority",
+    "RetryPolicy",
+    "WILDCARD",
+    "WILDCARD_PRIORITY",
+    "EventFilter",
+    "FilterDSL",
+    "is_async_filter",
+    "SubscriptionManager",
+    "SubscribeOptions",
+    "ManagerState",
     "EventValidationError",
     "EventModelError",
     "EventRegistryError",
