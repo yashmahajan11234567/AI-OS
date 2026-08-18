@@ -270,6 +270,20 @@ from aios.core.kernel import (
     set_kernel,
     create_kernel,
 )
+from aios.core.service_registry import (
+    ServiceRegistry,
+    ServiceRegistration,
+    ServiceType,
+    ServiceLifecycleState,
+    ServiceRegistryState,
+    ServiceNamespace,
+    Capability,
+    ServiceRegistryError,
+    ServiceRegistryHealth,
+    get_service_registry,
+    set_service_registry,
+    reset_service_registry_singleton,
+)
 from aios.core.kernel_management import (
     run_kernel,
     stop_kernel,
@@ -511,6 +525,19 @@ __all__ = [
     "get_kernel",
     "set_kernel",
     "create_kernel",
+    # Service Registry (Core Component C2)
+    "ServiceRegistry",
+    "ServiceRegistration",
+    "ServiceType",
+    "ServiceLifecycleState",
+    "ServiceRegistryState",
+    "ServiceNamespace",
+    "Capability",
+    "ServiceRegistryError",
+    "ServiceRegistryHealth",
+    "get_service_registry",
+    "set_service_registry",
+    "reset_service_registry_singleton",
     # Kernel Management
     "run_kernel",
     "stop_kernel",
