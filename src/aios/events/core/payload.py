@@ -106,12 +106,15 @@ class EventPayload:
             # A frozen mapping is encoded as a sorted tuple of (key, frozen_value)
             # pairs. Rebuild as an immutable Mapping proxy so callers cannot
             # mutate the payload through the accessor (INV-EVT-012 deep immut).
-            if frozen and all(
-                isinstance(item, tuple) and len(item) == 2 for item in frozen
+            # Check if it's a mapping encoding (all items are 2-tuples with string keys).
+            if all(
+                isinstance(item, tuple) and len(item) == 2 and isinstance(item[0], str)
+                for item in frozen
             ):
                 return types.MappingProxyType(
                     {k: EventPayload._rebuild_view(v) for k, v in frozen}
                 )
+            # Otherwise it's a frozen list/tuple - recurse on elements.
             return tuple(EventPayload._rebuild_view(v) for v in frozen)
         return frozen
 
@@ -137,9 +140,23 @@ class EventPayload:
     def __iter__(self) -> Iterator[str]:
         return iter(self._view)
 
+    def __getitem__(self, key: str) -> Any:
+        return self._view[key]
+
     def to_dict(self) -> dict[str, Any]:
         """Return a deep copy of the underlying data."""
-        return copy.deepcopy(self._view)
+        # Convert mappingproxy to dict to avoid deepcopy issues
+        def _to_dict(obj):
+            if isinstance(obj, types.MappingProxyType):
+                return {k: _to_dict(v) for k, v in obj.items()}
+            if isinstance(obj, tuple):
+                return tuple(_to_dict(v) for v in obj)
+            if isinstance(obj, list):
+                return [_to_dict(v) for v in obj]
+            if isinstance(obj, frozenset):
+                return frozenset(_to_dict(v) for v in obj)
+            return obj
+        return _to_dict(self._view)
 
     # --- equality / hash ------------------------------------------------
     def __eq__(self, other: object) -> bool:

@@ -56,6 +56,22 @@ from aios.events.core.serialization import (
     canonical_json,
     to_canonical_dict,
 )
+from aios.events.core.bus import (
+    EventBus,
+    EventBusState,
+    PublishStatus,
+    PublishResult,
+    PublishOptions,
+    EventBusConfig,
+    EventBusDiagnostics,
+    EventBusMetrics,
+    DeadLetterEntry,
+    DeadLetterFilter,
+    ReplayOptions,
+    UnsubscribeOptions,
+    EventBusHealth,
+    reset_event_bus_singleton,
+)
 
 __all__ = [
     "Event",
@@ -89,4 +105,18 @@ __all__ = [
     "EventRegistryError",
     "canonical_json",
     "to_canonical_dict",
+    "EventBus",
+    "EventBusState",
+    "PublishStatus",
+    "PublishResult",
+    "PublishOptions",
+    "EventBusConfig",
+    "EventBusDiagnostics",
+    "EventBusMetrics",
+    "DeadLetterEntry",
+    "DeadLetterFilter",
+    "ReplayOptions",
+    "UnsubscribeOptions",
+    "EventBusHealth",
+    "reset_event_bus_singleton",
 ]
