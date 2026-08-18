@@ -284,6 +284,18 @@ from aios.core.service_registry import (
     set_service_registry,
     reset_service_registry_singleton,
 )
+# ConfigurationManager (Core Component C3, Part 3 §3.5)
+from aios.core.configuration_manager import (
+    ConfigurationManager,
+    ConfigState,
+    ConfigurationError,
+    ConfigurationFrozenError,
+    KernelConfigSchema,
+    PropertySchema,
+    get_configuration_manager,
+    set_configuration_manager,
+    reset_configuration_manager_singleton,
+)
 from aios.core.kernel_management import (
     run_kernel,
     stop_kernel,
@@ -538,6 +550,16 @@ __all__ = [
     "get_service_registry",
     "set_service_registry",
     "reset_service_registry_singleton",
+    # ConfigurationManager (Core Component C3, Part 3 §3.5)
+    "ConfigurationManager",
+    "ConfigState",
+    "ConfigurationError",
+    "ConfigurationFrozenError",
+    "KernelConfigSchema",
+    "PropertySchema",
+    "get_configuration_manager",
+    "set_configuration_manager",
+    "reset_configuration_manager_singleton",
     # Kernel Management
     "run_kernel",
     "stop_kernel",

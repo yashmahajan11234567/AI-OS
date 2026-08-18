@@ -36,6 +36,11 @@ from aios.core.resource_manager import (
     get_resource_manager,
     set_resource_manager,
 )
+from aios.core.configuration_manager import (
+    ConfigurationManager,
+    get_configuration_manager,
+    set_configuration_manager,
+)
 from aios.services.registry import ServiceRegistry, get_service_registry, set_service_registry
 from aios.services.base import BaseService
 
@@ -97,6 +102,13 @@ class HermesKernel:
         self._state_manager: StateManager | None = None
         self._workflow_manager: WorkflowManager | None = None
         self._resource_manager: ResourceManager | None = None
+        # ServiceRegistry (C2, Phase 1) is created during start(); initialize the
+        # field so the accessor raises a clear RuntimeError before initialization
+        # rather than AttributeError (FIX 8).
+        self._service_registry: ServiceRegistry | None = None
+        # C3 ConfigurationManager — authoritative configuration authority
+        # (Phase 2). Constructed and owned exclusively by HermesKernel.
+        self._configuration: ConfigurationManager | None = None
 
         # Removed managers (now accessed via capability services):
         # - CheckpointManager -> via CheckpointService (if created) or WorkflowManager
@@ -150,6 +162,11 @@ class HermesKernel:
     def resource_manager(self) -> ResourceManager | None:
         """Get resource manager."""
         return self._resource_manager
+
+    @property
+    def configuration(self) -> ConfigurationManager | None:
+        """Get the ConfigurationManager Core Component (C3, Part 3 §3.5)."""
+        return self._configuration
 
     @property
     def service_registry(self) -> ServiceRegistry | None:
@@ -251,6 +268,22 @@ class HermesKernel:
         self._event_bus = EventBus(max_history=self._config.event_bus_max_history)
         set_event_bus(self._event_bus)
         await self._event_bus.start()
+
+        # ConfigurationManager (C3, Phase 2) — depends on EventBus (§3.5).
+        # Constructed and owned by the kernel; set as the global singleton so
+        # other components resolve the SAME instance. Loads + merges the four
+        # configuration layers and validates schema during initialize(), then
+        # is frozen at the Phase 2->3 boundary below (INV-CM-FRZ-001/002).
+        self._configuration = get_configuration_manager(
+            event_bus=self._event_bus,
+            config_path=self._config.config_path,
+        )
+        set_configuration_manager(self._configuration)
+        await self._configuration.initialize()
+        # Phase 2 -> 3 freeze boundary: freeze configuration before any Core
+        # Manager (Phase 4+) or Service (Phase 9+) can read it. This is the
+        # existing repository's freeze hook; no LifecycleManager is invented.
+        self._configuration.freeze()
 
         # State Manager
         self._state_manager = StateManager(
