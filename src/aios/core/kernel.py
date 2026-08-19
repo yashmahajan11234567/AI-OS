@@ -41,6 +41,11 @@ from aios.core.configuration_manager import (
     get_configuration_manager,
     set_configuration_manager,
 )
+from aios.core.structured_logger import (
+    StructuredLogger,
+    get_logger,
+    set_logger,
+)
 from aios.services.registry import ServiceRegistry, get_service_registry, set_service_registry
 from aios.services.base import BaseService
 
@@ -109,6 +114,13 @@ class HermesKernel:
         # C3 ConfigurationManager — authoritative configuration authority
         # (Phase 2). Constructed and owned exclusively by HermesKernel.
         self._configuration: ConfigurationManager | None = None
+        # C4 StructuredLogger — observability substrate (Phase 3, §3.6).
+        # Constructed and owned exclusively by HermesKernel; set as the global
+        # singleton so all components resolve the SAME instance via
+        # ``kernel.logger``. Initialize it in Phase 3 (after EventBus,
+        # ServiceRegistry, ConfigurationManager) and shut it down first in
+        # Phase S3.
+        self._structured_logger: StructuredLogger | None = None
 
         # Removed managers (now accessed via capability services):
         # - CheckpointManager -> via CheckpointService (if created) or WorkflowManager
@@ -173,6 +185,11 @@ class HermesKernel:
         """Get service registry."""
         return self._service_registry
 
+    @property
+    def logger(self) -> StructuredLogger | None:
+        """Get the StructuredLogger Core Component (C4, Part 3 §3.6)."""
+        return self._structured_logger
+
     def register_service(self, service: BaseService) -> BaseService:
         """Register an Engineering Service with the kernel."""
         if self._service_registry:
@@ -232,6 +249,12 @@ class HermesKernel:
         # Stop services
         await self._stop_services()
 
+        # StructuredLogger shutdown (Phase S3 — FIRST Core Component to shut
+        # down, §3.7.4). Flushes remaining logs before other components (the
+        # EventBus, which drains last in S0) are torn down. The kernel owns the
+        # lifecycle; no LifecycleManager is invented.
+        await self._shutdown_structured_logger()
+
         # Emit kernel stopped event
         if self._event_bus:
             self._event_bus.publish(
@@ -285,6 +308,19 @@ class HermesKernel:
         # existing repository's freeze hook; no LifecycleManager is invented.
         self._configuration.freeze()
 
+        # StructuredLogger (C4, Phase 3 — last Core Component, §3.6 / §3.7.3).
+        # Depends on EventBus, ServiceRegistry (constructed below), and the now
+        # frozen ConfigurationManager. Constructed and owned exclusively by the
+        # kernel; set as the global singleton so every component resolves the
+        # same instance. Initializes after the ConfigurationManager freeze
+        # (INV-CC-INIT-003 / INV-CC-LC-005). ServiceRegistry is constructed
+        # during _init_service_registry (Phase 1 in the architecture); we inject
+        # the already-built EventBus + ConfigurationManager here and let the
+        # logger resolve ServiceRegistry lazily via the kernel accessor.
+        self._structured_logger = get_logger()
+        set_logger(self._structured_logger)
+        await self._structured_logger.initialize(self)
+
         # State Manager
         self._state_manager = StateManager(
             persistence_path=self._config.data_dir / "state"
@@ -300,6 +336,18 @@ class HermesKernel:
         set_resource_manager(self._resource_manager)
 
         logger.debug("Core components initialized")
+
+    async def _shutdown_structured_logger(self) -> None:
+        """Shut down the StructuredLogger Core Component (Phase S3, §3.7.4)."""
+        sl = self._structured_logger
+        if sl is None:
+            return
+        try:
+            await sl.shutdown()
+        except Exception as e:
+            logger.error(f"Error shutting down StructuredLogger: {e}")
+        finally:
+            self._structured_logger = None
 
     async def _init_service_registry(self) -> None:
         """Initialize the Service Registry and register it as global singleton."""
