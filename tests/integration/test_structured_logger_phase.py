@@ -162,7 +162,11 @@ class TestStructuredLoggerPhase:
         kernel.logger.clear_context(tok)
         kernel.logger.flush()
         assert sink.entries, "registered sink must receive the entry"
-        entry = sink.entries[0]
+        # C4 may also carry earlier (lifecycle) entries, so target the entry this
+        # test actually emitted rather than the first buffered one.
+        phase_entries = [e for e in sink.entries if e.get("message") == "phase message"]
+        assert phase_entries, "registered sink must receive the phase message entry"
+        entry = phase_entries[-1]
         assert entry["correlationId"] == "corr-phase-123"
         assert entry["causationId"] == "caus-phase-456"
 
@@ -174,7 +178,7 @@ class TestStructuredLoggerPhase:
         await kernel.stop()
         allowed = {"CORE_COMPONENT_INITIALIZED", "CORE_COMPONENT_SHUTDOWN"}
         for ev in kernel.event_bus.get_history():
-            et = ev.event_type
+            et = ev.eventType  # canonical Event uses camelCase eventType
             et_name = et.name if isinstance(et, EventType) else str(et)
             if "COMPONENT" in et_name:
                 assert et_name in allowed

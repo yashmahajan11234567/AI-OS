@@ -346,6 +346,18 @@ def reset_event_bus_singleton() -> None:
         _INSTANCE = None
 
 
+def get_core_event_bus() -> EventBus | None:
+    """Get the canonical EventBus singleton instance.
+
+    Returns the single EventBus instance for the process, or None if not yet
+    initialized. The kernel is responsible for constructing and initializing
+    the canonical EventBus during startup.
+
+    This is the authoritative accessor for the canonical EventBus (C1, Task 5).
+    """
+    return _INSTANCE
+
+
 # ---------------------------------------------------------------------------
 # EventBus
 # ---------------------------------------------------------------------------
@@ -938,6 +950,54 @@ class EventBus:
             out = out[-limit:]
         return out
 
+    # --- legacy-compatibility methods (Task 9 migration) --------------------
+    # These methods provide the legacy EventBus API surface expected by
+    # existing kernel code and tests, without creating a second EventBus instance.
+
+    def get_history(
+        self,
+        event_type: str | EventType | None = None,
+        correlation_id: str | uuid.UUID | None = None,
+        limit: int = 100,
+    ) -> list[Event]:
+        """Legacy-compatible event history accessor.
+
+        Mirrors ``aios.events.bus.EventBus.get_history`` signature.
+        Canonical EventBus uses EventType enum and uuid.UUID for correlationId.
+        """
+        events = self.getRecentEvents(limit=limit)
+        if event_type is not None:
+            # Accept both EventType enum and string name
+            target = event_type.value if isinstance(event_type, EventType) else event_type
+            # Canonical events have eventType as EventType enum
+            events = [e for e in events if e.eventType == target]
+        if correlation_id is not None:
+            target_cid = correlation_id if isinstance(correlation_id, uuid.UUID) else uuid.UUID(correlation_id)
+            events = [e for e in events if e.correlationId == target_cid]
+        return events
+
+    def get_stats(self) -> dict[str, Any]:
+        """Legacy-compatible statistics (extends existing get_stats).
+
+        Returns canonical metrics plus legacy-expected fields:
+        - total_events_published
+        - active_subscriptions
+        - history_size
+        - max_history
+        """
+        # Get canonical metrics
+        metrics = self.getMetrics()
+        return {
+            "total_events_published": metrics.published_count,
+            "active_subscriptions": self._subscriptions.subscription_count,
+            "history_size": len(self._history),
+            "max_history": getattr(self._config, "max_history", 10000),
+            # Include canonical metrics for completeness
+            "canonical_dlq_size": metrics.dlq_count,
+            "canonical_retry_count": metrics.retry_count,
+            "canonical_rejected_count": metrics.rejected_count,
+        }
+
     # --- dead-letter queries / replay --------------------------------------
 
     def getDeadLetters(
@@ -1124,3 +1184,7 @@ def uuid7() -> uuid.UUID:
     from aios.events.core.ids import uuid7 as _core_uuid7
 
     return _core_uuid7()
+
+
+# Alias for backward compatibility with events/__init__.py export
+reset_core_event_bus_singleton = reset_event_bus_singleton

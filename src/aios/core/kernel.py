@@ -373,9 +373,17 @@ class HermesKernel:
         set_logger(self._structured_logger)
         await self._structured_logger.initialize(self)
 
-        # Managers (constructed after C1–C4, use canonical singletons)
+        # Managers (constructed after C1–C4, use canonical singletons).
+        # Task 10 — StateManager is a Phase-2 Core Manager; it receives the
+        # canonical C2/C3/C4 refs via DI so its initialize() can register with
+        # ServiceRegistry, read frozen ConfigurationManager, and log through
+        # StructuredLogger. LifecycleManager (constructed next) will register
+        # and drive it.
         self._state_manager = StateManager(
-            persistence_path=self._config.data_dir / "state"
+            persistence_path=self._config.data_dir / "state",
+            service_registry=self._service_registry,
+            configuration_manager=self._configuration,
+            logger=self._structured_logger,
         )
         set_state_manager(self._state_manager)
 
@@ -442,6 +450,16 @@ class HermesKernel:
         set_lifecycle_manager(lm)
         self._lifecycle = lm
         await lm.register_with_service_registry()
+
+        # Task 10 — register the StateManager Core Manager (Phase 2, "State &
+        # Storage") for LifecycleManager orchestration. StateManager was
+        # constructed in _init_core_components(); its initialize()/shutdown() are
+        # driven by LifecycleManager's phase topology, NOT by the engineering
+        # service start/stop loops.
+        if self._state_manager is not None:
+            lm.register_manager(self._state_manager)
+            logger.debug("Registered StateManager with LifecycleManager (Phase 2).")
+
         try:
             await lm.initialize()
         except Exception as exc:  # noqa: BLE001
@@ -454,9 +472,12 @@ class HermesKernel:
         """Start all registered services."""
         logger.debug("Starting services...")
 
-        # Start core services first (canonical managers)
+        # Start core services first (canonical managers). NOTE: StateManager is
+        # NOT started here — as a Phase-2 Core Manager (Task 10) its lifecycle is
+        # owned by LifecycleManager (initialized during Phase 2, shut down in
+        # reverse phase order). It is thus excluded from the engineering-service
+        # startup path per the Core Manager topology (Part 4 §4.2.3).
         services = [
-            ("state_manager", self._start_state_manager),
             ("workflow_manager", self._start_workflow_manager),
             ("resource_manager", self._start_resource_manager),
         ]
@@ -535,7 +556,6 @@ class HermesKernel:
         stop_order = [
             "resource_manager",
             "workflow_manager",
-            "state_manager",
         ]
 
         for name in stop_order:
@@ -588,9 +608,6 @@ class HermesKernel:
                     logger.error(f"Error stopping engineering service {svc.name}: {e}")
 
     # Service start/stop methods
-    async def _start_state_manager(self) -> None:
-        self._state_manager.load_persisted_snapshots()
-
     async def _start_workflow_manager(self) -> None:
         pass
 

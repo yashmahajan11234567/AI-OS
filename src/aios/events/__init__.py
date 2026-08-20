@@ -7,6 +7,12 @@ All services communicate through events published to the Event Bus.
 
 from aios.events.base import Event, EventType, create_event
 from aios.events.bus import EventBus, get_event_bus, set_event_bus
+from aios.events.core.bus import (
+    EventBus as CoreEventBus,
+    EventBusConfig,
+    get_core_event_bus,
+    reset_core_event_bus_singleton,
+)
 from aios.events.handlers import EventHandler, AsyncEventHandler, handler_for, async_handler_for
 from aios.events.types import (
     # Core Kernel Events
@@ -139,6 +145,11 @@ __all__ = [
     "EventBus",
     "get_event_bus",
     "set_event_bus",
+    # Canonical Core EventBus (C1, Task 5)
+    "CoreEventBus",
+    "EventBusConfig",
+    "get_core_event_bus",
+    "reset_core_event_bus_singleton",
     "EventHandler",
     "AsyncEventHandler",
     "handler_for",

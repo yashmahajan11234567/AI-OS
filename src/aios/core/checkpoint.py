@@ -2,21 +2,25 @@
 Checkpoint Manager for AI-OS Hermes Kernel.
 
 Manages workflow checkpoints for recovery and replay capabilities.
+Uses the canonical EventBus (C1, Task 5) and canonical EventType enum.
 """
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
-import shutil
+import uuid
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 from typing import Any
 
 from aios.core.state import StateManager, StateScope, get_state_manager
-from aios.events.bus import get_event_bus
-from aios.events.types import CheckpointCreated, CheckpointRestored, CheckpointDeleted
+from aios.events.core.bus import get_core_event_bus
+from aios.events.core.event import Event as CoreEvent
+from aios.events.core.identity import ComponentIdentity, ComponentType
+from aios.events.core.types import EventType, SemanticVersion
 
 logger = logging.getLogger(__name__)
 
@@ -64,13 +68,22 @@ class CheckpointManager:
             auto_checkpoint: Whether to auto-checkpoint after steps
         """
         self._state_manager = state_manager or get_state_manager()
-        self._event_bus = get_event_bus()
+        self._event_bus = get_core_event_bus()
+        if self._event_bus is None:
+            raise RuntimeError("Canonical EventBus not initialized. Start the kernel first.")
         self._checkpoint_dir = checkpoint_dir or Path("./data/checkpoints")
         self._checkpoint_dir.mkdir(parents=True, exist_ok=True)
         self._max_checkpoints = max_checkpoints_per_workflow
         self._auto_checkpoint = auto_checkpoint
 
         self._checkpoints: dict[str, list[Checkpoint]] = {}
+
+        # Component identity for event emission
+        self._identity = ComponentIdentity(
+            component_type=ComponentType.CORE_MANAGER,
+            component_name="CheckpointManager",
+            version=SemanticVersion.parse("0.1.0"),
+        )
 
     def create_checkpoint(
         self,
@@ -120,19 +133,17 @@ class CheckpointManager:
         # Persist to disk
         self._persist_checkpoint(checkpoint)
 
-        # Emit event
-        self._event_bus.publish(
-            CheckpointCreated(
-                source_service="checkpoint_manager",
-                correlation_id=execution_id,
-                payload={
-                    "checkpoint_id": checkpoint.checkpoint_id,
-                    "workflow_id": workflow_id,
-                    "execution_id": execution_id,
-                    "step": step,
-                    "tags": checkpoint.tags,
-                },
-            )
+        # Emit event using canonical CoreEvent
+        self._emit_event(
+            EventType.CHECKPOINT_CREATED,
+            {
+                "checkpoint_id": checkpoint.checkpoint_id,
+                "workflow_id": workflow_id,
+                "execution_id": execution_id,
+                "step": step,
+                "tags": checkpoint.tags,
+            },
+            execution_id,
         )
 
         logger.info(f"Created checkpoint {checkpoint.checkpoint_id} at step {step}")
@@ -181,18 +192,16 @@ class CheckpointManager:
                 StateScope.WORKFLOW, execution_id, f"step_results.{step_id}", result
             )
 
-        # Emit event
-        self._event_bus.publish(
-            CheckpointRestored(
-                source_service="checkpoint_manager",
-                correlation_id=execution_id,
-                payload={
-                    "checkpoint_id": checkpoint.checkpoint_id,
-                    "workflow_id": checkpoint.workflow_id,
-                    "execution_id": execution_id,
-                    "step": checkpoint.step,
-                },
-            )
+        # Emit event using canonical CoreEvent
+        self._emit_event(
+            EventType.CHECKPOINT_RESTORED,
+            {
+                "checkpoint_id": checkpoint.checkpoint_id,
+                "workflow_id": checkpoint.workflow_id,
+                "execution_id": execution_id,
+                "step": checkpoint.step,
+            },
+            execution_id,
         )
 
         logger.info(f"Restored checkpoint {checkpoint.checkpoint_id} for {execution_id}")
@@ -255,14 +264,12 @@ class CheckpointManager:
                     checkpoints.pop(i)
                     self._delete_persisted_checkpoint(checkpoint_id)
 
-                    self._event_bus.publish(
-                        CheckpointDeleted(
-                            source_service="checkpoint_manager",
-                            correlation_id=execution_id,
-                            payload={
-                                "checkpoint_id": checkpoint_id,
-                            },
-                        )
+                    self._emit_event(
+                        EventType.CHECKPOINT_PRUNED,
+                        {
+                            "checkpoint_id": checkpoint_id,
+                        },
+                        execution_id,
                     )
                     return True
 
@@ -397,6 +404,29 @@ def set_checkpoint_manager(manager: CheckpointManager) -> None:
     """Set the global checkpoint manager."""
     global _global_checkpoint_manager
     _global_checkpoint_manager = manager
+
+
+def _emit_event(
+        self, event_type: EventType, payload: dict[str, Any], correlation_id: str
+    ) -> None:
+        """Emit a canonical event via the canonical EventBus."""
+        import uuid as uuid_mod
+
+        event = CoreEvent(
+            eventType=event_type,
+            source=self._identity,
+            correlationId=uuid_mod.UUID(correlation_id) if correlation_id else uuid_mod.uuid4(),
+            payload=payload,
+        )
+        result = self._event_bus.publish(event)
+        # Fire and forget - result handling is async
+        if hasattr(result, "__await__"):
+            # Schedule on the event loop if available
+            try:
+                loop = asyncio.get_running_loop()
+                loop.create_task(result)
+            except RuntimeError:
+                pass
 
 
 __all__ = [

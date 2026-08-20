@@ -2,10 +2,12 @@
 Council Manager for AI-OS Hermes Kernel.
 
 Manages multi-agent deliberation and consensus building.
+Uses the canonical EventBus (C1, Task 5) and canonical EventType enum.
 """
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import uuid
 from dataclasses import dataclass, field
@@ -13,13 +15,10 @@ from datetime import datetime
 from enum import Enum
 from typing import Any
 
-from aios.events.bus import get_event_bus
-from aios.events.types import (
-    CouncilConvened,
-    CouncilDeliberated,
-    CouncilDecided,
-    CouncilDissented,
-)
+from aios.events.core.bus import get_core_event_bus
+from aios.events.core.event import Event as CoreEvent
+from aios.events.core.identity import ComponentIdentity, ComponentType
+from aios.events.core.types import EventType, SemanticVersion
 
 logger = logging.getLogger(__name__)
 
@@ -126,7 +125,16 @@ class CouncilManager:
 
     def __init__(self):
         self._councils: dict[str, CouncilSession] = {}
-        self._event_bus = get_event_bus()
+        self._event_bus = get_core_event_bus()
+        if self._event_bus is None:
+            raise RuntimeError("Canonical EventBus not initialized. Start the kernel first.")
+
+        # Component identity for event emission
+        self._identity = ComponentIdentity(
+            component_type=ComponentType.CORE_MANAGER,
+            component_name="CouncilManager",
+            version=SemanticVersion.parse("0.1.0"),
+        )
 
     def convene(
         self,
@@ -162,18 +170,16 @@ class CouncilManager:
 
         self._councils[council_id] = council
 
-        self._event_bus.publish(
-            CouncilConvened(
-                source_service="council_manager",
-                correlation_id=council_id,
-                payload={
-                    "council_id": council_id,
-                    "topic": topic,
-                    "members": [m.member_id for m in members],
-                    "algorithm": algorithm.value,
-                    "quorum": quorum,
-                },
-            )
+        self._emit_event(
+            EventType.COUNCIL_CONVENED,
+            {
+                "council_id": council_id,
+                "topic": topic,
+                "members": [m.member_id for m in members],
+                "algorithm": algorithm.value,
+                "quorum": quorum,
+            },
+            council_id,
         )
 
         logger.info(f"Convened council {council_id}: {topic}")
@@ -220,17 +226,15 @@ class CouncilManager:
 
         council.proposals.append(proposal)
 
-        self._event_bus.publish(
-            CouncilDeliberated(
-                source_service="council_manager",
-                correlation_id=council_id,
-                payload={
-                    "council_id": council_id,
-                    "proposal_id": proposal_id,
-                    "title": title,
-                    "round": len(council.proposals),
-                },
-            )
+        self._emit_event(
+            EventType.COUNCIL_PROPOSAL_SUBMITTED,
+            {
+                "council_id": council_id,
+                "proposal_id": proposal_id,
+                "title": title,
+                "round": len(council.proposals),
+            },
+            council_id,
         )
 
         logger.info(f"Proposal {proposal_id} created in council {council_id}")

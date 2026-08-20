@@ -130,6 +130,8 @@ class ServiceNamespace(str, Enum):
     EXTENSION = "extension"
 
 
+
+
 # ---------------------------------------------------------------------------
 # Value objects
 # ---------------------------------------------------------------------------
@@ -895,7 +897,7 @@ class ServiceRegistry:
     # =====================================================================
 
     def _validate_namespace(self, service_id: str) -> None:
-        """INV-SR-NS-001/002: prefix required; `kernel` reserved."""
+        """INV-SR-NS-001/002: prefix required; ``kernel`` reserved (registration throws)."""
         if "." not in service_id:
             raise ServiceRegistryError(
                 f"ServiceId '{service_id}' MUST be prefixed with a namespace "
@@ -903,6 +905,13 @@ class ServiceRegistry:
             )
         prefix = service_id.split(".", 1)[0]
         if prefix == ServiceNamespace.KERNEL.value:
+            # INV-SR-NS-002: the ``kernel`` namespace is reserved for Core
+            # Components / Core Managers and MUST NOT be used by registered
+            # services (registration throws). Core Managers whose Part-4 spec ids
+            # are ``kernel.<x>`` are registered under the un-reserved ``core.<x>``
+            # namespace (see LifecycleManager ``core.lifecycle`` and
+            # StateManager ``core.state``), so this validator stays a strict
+            # blanket rejection of ``kernel.*`` and introduces NO exceptions.
             raise ServiceRegistryError(
                 f"ServiceId '{service_id}' uses the reserved 'kernel' namespace "
                 f"(INV-SR-NS-002). Registration rejected."

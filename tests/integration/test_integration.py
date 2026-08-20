@@ -6,6 +6,7 @@ import tempfile
 import shutil
 from pathlib import Path
 from typing import List
+import uuid
 from aios.core.kernel import HermesKernel, KernelConfig
 from aios.core.kernel_management import run_kernel, stop_kernel, get_kernel
 from aios.core.workflow import (
@@ -35,17 +36,39 @@ from aios.core.checkpoint import (
 )
 from aios.core.state import StateManager, StateScope, get_state_manager
 from aios.events.bus import EventBus, get_event_bus
-from aios.events.types import Event
+from aios.events.core.event import Event as CoreEvent
+from aios.events.core.identity import ComponentIdentity, ComponentType
+from aios.events.core.types import EventType
+from aios.events.core.payload import EventPayload
+from aios.events.core.priority import EventPriority
 from aios.services.registry import ServiceRegistry, get_service_registry
 from aios.services.base import BaseService, ServiceStatus
 # ===== Shared Fixtures =====
 @pytest_asyncio.fixture
 async def event_bus():
-    """Create and start an EventBus for testing."""
-    bus = EventBus(max_history=100)
-    await bus.start()
+    """Create and start a canonical EventBus for testing."""
+    from aios.events.core.bus import EventBus as CoreEventBus, EventBusConfig
+    from aios.events.core.bus import reset_core_event_bus_singleton
+
+    # Reset and create canonical EventBus
+    reset_core_event_bus_singleton()
+    bus = CoreEventBus(config=EventBusConfig(auto_start_dispatch_worker=False))
+    await bus.initialize()
     yield bus
-    bus.shutdown()
+    await bus.shutdown()
+
+
+def _create_test_event(event_type: EventType, payload: dict | None = None) -> CoreEvent:
+    """Create a canonical CoreEvent for testing with valid required fields."""
+    return CoreEvent(
+        eventType=event_type,
+        eventVersion="1.0.0",
+        source=ComponentIdentity(component_type=ComponentType.APPLICATION_SERVICE, component_name="test"),
+        payload=EventPayload(payload or {}),
+        correlationId=uuid.uuid4(),
+        causationId=None,
+        priority=EventPriority.NORMAL,
+    )
 @pytest_asyncio.fixture
 async def kernel():
     """Create and start a kernel for testing."""
@@ -62,13 +85,22 @@ class TestEventBus:
     async def test_publish_subscribe(self, event_bus):
         """Test basic publish/subscribe."""
         received = []
-        class TestEvent(Event):
-            event_type: str = "test.event"
-            payload: dict = {}
         async def handler(event):
-            received.append(event.payload)
-        event_bus.subscribe(handler, "test.event")
-        event_bus.publish(TestEvent(source_service="test", payload={"data": "hello"}))
+            received.append(event.payload.to_dict())
+        from aios.events.core.manager import SubscribeOptions
+        from aios.events.core.identity import ComponentIdentity, ComponentType
+        from aios.events.core.subscription import HandlerPriority, RetryPolicy
+
+        options = SubscribeOptions(
+            subscriber=ComponentIdentity(component_type=ComponentType.APPLICATION_SERVICE, component_name="test-subscriber"),
+            event_types=[EventType.TASK_CREATED],
+            handler=handler,
+            priority=HandlerPriority.NORMAL,
+            retry_policy=RetryPolicy()
+        )
+        event_bus.subscribe(options)
+        await event_bus.publish(_create_test_event(EventType.TASK_CREATED, {"data": "hello"}))
+        await event_bus.drain()
         await asyncio.sleep(0.1)
         assert len(received) == 1
         assert received[0]["data"] == "hello"
@@ -76,29 +108,43 @@ class TestEventBus:
     async def test_multiple_subscribers(self, event_bus):
         """Test multiple subscribers receive the same event."""
         results = []
-        class TestEvent(Event):
-            event_type: str = "multi.event"
-            payload: dict = {}
         async def handler1(event):
             results.append(1)
         async def handler2(event):
             results.append(2)
-        event_bus.subscribe(handler1, "multi.event")
-        event_bus.subscribe(handler2, "multi.event")
-        event_bus.publish(TestEvent(source_service="test", payload={}))
+        from aios.events.core.manager import SubscribeOptions
+        from aios.events.core.identity import ComponentIdentity, ComponentType
+        from aios.events.core.subscription import HandlerPriority, RetryPolicy
+
+        options1 = SubscribeOptions(
+            subscriber=ComponentIdentity(component_type=ComponentType.APPLICATION_SERVICE, component_name="test-subscriber-1"),
+            event_types=[EventType.WORKFLOW_STARTED],
+            handler=handler1,
+            priority=HandlerPriority.NORMAL,
+            retry_policy=RetryPolicy()
+        )
+        options2 = SubscribeOptions(
+            subscriber=ComponentIdentity(component_type=ComponentType.APPLICATION_SERVICE, component_name="test-subscriber-2"),
+            event_types=[EventType.WORKFLOW_STARTED],
+            handler=handler2,
+            priority=HandlerPriority.NORMAL,
+            retry_policy=RetryPolicy()
+        )
+        event_bus.subscribe(options1)
+        event_bus.subscribe(options2)
+        await event_bus.publish(_create_test_event(EventType.WORKFLOW_STARTED, {}))
+        await event_bus.drain()
         await asyncio.sleep(0.1)
         assert len(results) == 2
         assert 1 in results and 2 in results
     @pytest.mark.asyncio
     async def test_event_history(self, event_bus):
         """Test event history is maintained."""
-        class TestEvent(Event):
-            event_type: str = "history.event"
-            payload: dict = {}
         for i in range(5):
-            event_bus.publish(TestEvent(source_service="test", payload={"index": i}))
+            await event_bus.publish(_create_test_event(EventType.TASK_CREATED, {"index": i}))
+            await event_bus.drain()
             await asyncio.sleep(0.01)
-        history = event_bus.get_history("history.event")
+        history = event_bus.get_history(EventType.TASK_CREATED.name)
         assert len(history) == 5
 class TestRetryManager:
     """Test RetryManager functionality."""
@@ -392,10 +438,18 @@ class TestServiceRegistry:
     """Test Service Registry lifecycle management."""
     @pytest_asyncio.fixture
     async def registry(self, event_bus):
+        # Reset the canonical ServiceRegistry singleton so each test starts
+        # from a clean state (Rule 9 / Rule 12: test fixtures must reset the
+        # canonical singleton; the legacy wrapper delegates to it). The shared
+        # event_bus fixture is left intact (owned by the event_bus fixture).
+        from aios.core.service_registry import reset_service_registry_singleton
+        reset_service_registry_singleton()
         return ServiceRegistry(event_bus)
     class TestService(BaseService):
-        def __init__(self, name):
-            super().__init__(name, "1.0.0")
+        name = "test_service"
+        version = "1.0.0"
+        def __init__(self):
+            super().__init__()
             self.started = False
             self.stopped = False
         async def on_start(self):
@@ -406,7 +460,10 @@ class TestServiceRegistry:
             return True
     class DepService(BaseService):
         def __init__(self, name, deps=None):
-            super().__init__(name, "1.0.0", depends_on=deps or [])
+            self.name = name
+            self.version = "1.0.0"
+            self.depends_on = deps or []
+            super().__init__()
             self.started = False
         async def on_start(self):
             self.started = True
@@ -415,7 +472,7 @@ class TestServiceRegistry:
     @pytest.mark.asyncio
     async def test_register_and_start_service(self, registry):
         """Test registering and starting a service."""
-        service = self.TestService("test_service")
+        service = self.TestService()
         registry.register(service)
         assert registry.has("test_service")
         results = await registry.start_all()
@@ -424,7 +481,7 @@ class TestServiceRegistry:
     @pytest.mark.asyncio
     async def test_stop_service(self, registry):
         """Test stopping a service."""
-        service = self.TestService("base_service")
+        service = self.TestService()
         registry.register(service)
         await registry.start_all()
         await registry.stop_all()
@@ -446,13 +503,15 @@ class TestServiceRegistry:
     async def test_health_check(self, registry):
         """Test health check reporting."""
         class HealthyService(self.TestService):
+            name = "healthy"
             async def on_health_check(self):
                 return True
         class UnhealthyService(self.TestService):
+            name = "unhealthy"
             async def on_health_check(self):
                 return False
-        registry.register(HealthyService("healthy"))
-        registry.register(UnhealthyService("unhealthy"))
+        registry.register(HealthyService())
+        registry.register(UnhealthyService())
         await registry.start_all()
         report = await registry.health_check()
         assert report["healthy"] is True

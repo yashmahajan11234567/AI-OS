@@ -43,9 +43,9 @@ def _handler() -> None:
     pass
 
 
-def _make(event_types=EventType.TASK_CREATED, handler=None, **kw) -> Subscription:
+def _make(event_types=EventType.TASK_CREATED, handler=None, subscriptionId=None, **kw) -> Subscription:
     return Subscription.create(
-        subscriptionId=uuid7(),
+        subscriptionId=subscriptionId or uuid7(),
         subscriber=_subscriber(),
         eventTypes=event_types,
         handler=handler or _handler,

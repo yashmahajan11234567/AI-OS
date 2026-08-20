@@ -52,8 +52,6 @@ from aios.core.sinks import (
     Sink,
     SinkHealth,
 )
-from aios.events.base import Event as LegacyEvent
-from aios.events.bus import EventBus as LegacyEventBus
 from aios.events.core.event import Event
 from aios.events.core.serialization import compute_checksum
 from aios.events.core.types import EventType, SemanticVersion
@@ -789,36 +787,24 @@ class StructuredLogger:
 
     # --- event emission (CORE_COMPONENT_INITIALIZED / SHUTDOWN) ----------
 
-    def _make_event(self, event_type: EventType, payload: dict[str, Any]) -> Any:
-        """Build an Event for the ACTUAL bus type (canonical or legacy).
-
-        Mirrors the ConfigurationManager bus-agnostic emission: the kernel may
-        wire the legacy ``aios.events.bus.EventBus`` (carrying legacy
-        ``aios.events.base.Event``) or the canonical Task-5 bus. No new
-        EventType is ever created — only canonical EventTypes are used.
-        """
-        bus = self._event_bus
-        if bus is not None and isinstance(bus, LegacyEventBus):
-            return LegacyEvent(
-                event_type=event_type,
-                payload=dict(payload),
-                source_service=self._identity.component_name,
-            )
+    def _make_event(self, event_type: EventType, payload: dict[str, Any]) -> Event:
+        """Build a canonical Event for the canonical EventBus (C1, Task 5)."""
+        import uuid
         return Event(
             eventType=event_type,
             source=self._identity,
+            correlationId=uuid.uuid4(),
             payload=payload,
         )
 
     async def _emit_async(self, event_type: EventType, payload: dict[str, Any]) -> None:
+        """Emit a canonical event via the canonical EventBus."""
         bus = self._event_bus
         if bus is None:
             return
         try:
             event = self._make_event(event_type, payload)
             result = bus.publish(event)
-            # Kernel's legacy bus is sync; canonical bus is async. We are on the
-            # initialize() coroutine, so an awaitable may be safely awaited.
             if hasattr(result, "__await__"):
                 await result
         except Exception as exc:  # noqa: BLE001

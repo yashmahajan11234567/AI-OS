@@ -93,10 +93,13 @@ _EVENT_TYPE_CATEGORY: dict[EventType, EventCategory] = {
     EventType.TASK_CANCELLED: EventCategory.CONTROL,
     EventType.TASK_DEPENDENCY_RESOLVED: EventCategory.CONTROL,
     EventType.RETRY_BUDGET_EXHAUSTED: EventCategory.CONTROL,
+    EventType.RETRY_SCHEDULED: EventCategory.CONTROL,
+    EventType.RETRY_EXECUTED: EventCategory.CONTROL,
     EventType.ROOT_CAUSE_ANALYZED: EventCategory.CONTROL,
     EventType.RECOVERY_ACTION_DISPATCHED: EventCategory.CONTROL,
     EventType.RECOVERY_ACTION_COMPLETED: EventCategory.CONTROL,
     EventType.RECOVERY_ACTION_FAILED: EventCategory.CONTROL,
+    EventType.FAILURE_CLASSIFIED: EventCategory.CONTROL,
     # === DATA ===
     EventType.STATE_CHANGED: EventCategory.DATA,
     EventType.STATE_SNAPSHOT_CREATED: EventCategory.DATA,

@@ -2,20 +2,25 @@
 Skill Manager for AI-OS Hermes Kernel.
 
 Manages skill loading, execution, and marketplace integration.
+Uses the canonical EventBus (C1, Task 5) and canonical EventType enum.
 """
 
 from __future__ import annotations
 
+import asyncio
 import importlib.util
 import json
 import logging
+import uuid
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from aios.events.bus import get_event_bus
-from aios.events.types import SkillLoaded, SkillUnloaded, SkillExecuted, SkillFailed
+from aios.events.core.bus import get_core_event_bus
+from aios.events.core.event import Event as CoreEvent
+from aios.events.core.identity import ComponentIdentity, ComponentType
+from aios.events.core.types import EventType, SemanticVersion
 
 logger = logging.getLogger(__name__)
 
@@ -84,7 +89,18 @@ class SkillManager:
         self._skills: dict[str, Skill] = {}
         self._loaded_modules: dict[str, Any] = {}
         self._executions: list[SkillExecution] = []
-        self._event_bus = get_event_bus()
+
+        # FIX 9: Use canonical EventBus (C1, Task 5)
+        self._event_bus = get_core_event_bus()
+        if self._event_bus is None:
+            logger.warning("Canonical EventBus not yet initialized; events will be deferred")
+
+        # Component identity for event emission
+        self._identity = ComponentIdentity(
+            component_type=ComponentType.ENGINEERING_SERVICE,
+            component_name="SkillManager",
+            version=SemanticVersion.parse("0.1.0"),
+        )
 
         # Load built-in skills
         self._load_builtin_skills()
@@ -229,17 +245,15 @@ class SkillManager:
             skill.loaded = True
             skill.loaded_at = datetime.utcnow()
 
-            self._event_bus.publish(
-                SkillLoaded(
-                    source_service="skill_manager",
-                    correlation_id=skill_id,
-                    payload={
-                        "skill_id": skill_id,
-                        "name": skill.name,
-                        "version": skill.version,
-                        "source": skill.entry_point,
-                    },
-                )
+            self._emit_event(
+                EventType.SKILL_LOADED,
+                {
+                    "skill_id": skill_id,
+                    "name": skill.name,
+                    "version": skill.version,
+                    "source": skill.entry_point,
+                },
+                skill_id,
             )
 
             logger.info(f"Loaded skill: {skill_id}")
@@ -248,6 +262,23 @@ class SkillManager:
         except Exception as e:
             logger.error(f"Failed to load skill {skill_id}: {e}")
             return False
+
+    def _emit_event(self, event_type: EventType, payload: dict[str, Any], correlation_id: str) -> None:
+        """Emit a canonical event via the canonical EventBus."""
+        event = CoreEvent(
+            eventType=event_type,
+            source=self._identity,
+            correlationId=uuid.UUID(correlation_id) if correlation_id else uuid.uuid4(),
+            payload=payload,
+        )
+        result = self._event_bus.publish(event) if self._event_bus else None
+        # Fire and forget - result handling is async
+        if result and hasattr(result, "__await__"):
+            try:
+                loop = asyncio.get_running_loop()
+                loop.create_task(result)
+            except RuntimeError:
+                pass
 
     def unload_skill(self, skill_id: str) -> bool:
         """Unload a skill."""
@@ -259,12 +290,10 @@ class SkillManager:
         skill.loaded = False
         skill.loaded_at = None
 
-        self._event_bus.publish(
-            SkillUnloaded(
-                source_service="skill_manager",
-                correlation_id=skill_id,
-                payload={"skill_id": skill_id, "reason": "manual_unload"},
-            )
+        self._emit_event(
+            EventType.SKILL_UNLOADED,
+            {"skill_id": skill_id, "reason": "manual_unload"},
+            skill_id,
         )
 
         logger.info(f"Unloaded skill: {skill_id}")
@@ -322,18 +351,16 @@ class SkillManager:
 
             self._executions.append(execution)
 
-            self._event_bus.publish(
-                SkillExecuted(
-                    source_service="skill_manager",
-                    correlation_id=execution_id,
-                    payload={
-                        "skill_id": skill_id,
-                        "execution_id": execution_id,
-                        "input": input_data,
-                        "output": result,
-                        "duration_ms": execution.duration_ms,
-                    },
-                )
+            self._emit_event(
+                EventType.SKILL_EXECUTED,
+                {
+                    "skill_id": skill_id,
+                    "execution_id": execution_id,
+                    "input": input_data,
+                    "output": result,
+                    "duration_ms": execution.duration_ms,
+                },
+                execution_id,
             )
 
             return result
@@ -346,17 +373,15 @@ class SkillManager:
             )
             self._executions.append(execution)
 
-            self._event_bus.publish(
-                SkillFailed(
-                    source_service="skill_manager",
-                    correlation_id=execution_id,
-                    payload={
-                        "skill_id": skill_id,
-                        "execution_id": execution_id,
-                        "error": str(e),
-                        "input": input_data,
-                    },
-                )
+            self._emit_event(
+                EventType.SKILL_FAILED,
+                {
+                    "skill_id": skill_id,
+                    "execution_id": execution_id,
+                    "error": str(e),
+                    "input": input_data,
+                },
+                execution_id,
             )
 
             logger.error(f"Skill {skill_id} execution failed: {e}")

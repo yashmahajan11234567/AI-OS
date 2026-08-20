@@ -33,6 +33,10 @@ class EventType(str, Enum):
     the core model (EventTypeRegistry is a later component).
     """
 
+    def __str__(self) -> str:
+        """Return the string value for serialization (SCREAMING_SNAKE_CASE)."""
+        return self.value
+
     # === SYSTEM (Kernel, Core Components, Core Managers) ===
     KERNEL_INITIALIZATION_STARTED = "KERNEL_INITIALIZATION_STARTED"
     KERNEL_READY = "KERNEL_READY"
@@ -75,6 +79,8 @@ class EventType(str, Enum):
     TASK_CANCELLED = "TASK_CANCELLED"
     TASK_DEPENDENCY_RESOLVED = "TASK_DEPENDENCY_RESOLVED"
     RETRY_BUDGET_EXHAUSTED = "RETRY_BUDGET_EXHAUSTED"
+    RETRY_SCHEDULED = "RETRY_SCHEDULED"
+    RETRY_EXECUTED = "RETRY_EXECUTED"
     ROOT_CAUSE_ANALYZED = "ROOT_CAUSE_ANALYZED"
     RECOVERY_ACTION_DISPATCHED = "RECOVERY_ACTION_DISPATCHED"
     RECOVERY_ACTION_COMPLETED = "RECOVERY_ACTION_COMPLETED"
@@ -160,6 +166,7 @@ class EventType(str, Enum):
     PROMPT_TEMPLATE_RENDERED = "PROMPT_TEMPLATE_RENDERED"
     TOKEN_BUDGET_EXCEEDED = "TOKEN_BUDGET_EXCEEDED"
     PERSONA_OVERRIDE_APPLIED = "PERSONA_OVERRIDE_APPLIED"
+    FAILURE_CLASSIFIED = "FAILURE_CLASSIFIED"
 
     @classmethod
     def from_name(cls, name: str) -> "EventType":

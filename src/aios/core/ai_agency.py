@@ -11,21 +11,24 @@ Implements specialized AI review agents:
 - Bug Hunter: Bug hunting and fuzz testing
 - Architecture Validator: Architecture compliance validation
 - Final Judge: Final quality gate
+Uses the canonical EventBus (C1, Task 5) and canonical EventType enum.
 """
 
 from __future__ import annotations
 
 import asyncio
 import logging
+import uuid
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
 from typing import Any
 
-from aios.events.bus import get_event_bus
-from aios.events.base import Event, EventType, create_event
-from aios.events.types import Event as EventClass
+from aios.events.core.bus import get_core_event_bus
+from aios.events.core.event import Event as CoreEvent
+from aios.events.core.identity import ComponentIdentity, ComponentType
+from aios.events.core.types import EventType, SemanticVersion
 
 
 logger = logging.getLogger(__name__)
@@ -85,42 +88,73 @@ class AgencyResponse:
 class BaseAgency(ABC):
     """Base class for AI agencies."""
 
-    def __init__(self, agency_type: AgencyType):
+    def __init__(self, agency_type: AgencyType, event_bus=None):
         self.agency_type = agency_type
-        self._event_bus = get_event_bus()
+        self._event_bus = event_bus or get_core_event_bus()
+        if self._event_bus is None:
+            raise RuntimeError("Canonical EventBus not initialized. Start the kernel first.")
+
+        # Component identity for event emission
+        self._identity = ComponentIdentity(
+            component_type=ComponentType.ENGINEERING_SERVICE,
+            component_name=f"ai_agency.{self.agency_type.value}",
+            version=SemanticVersion.parse("0.1.0"),
+        )
 
     @abstractmethod
     async def review(self, request: AgencyRequest) -> AgencyResponse:
         """Perform the agency review."""
         pass
 
+    def _emit_event(self, event_type: EventType, payload: dict[str, Any], correlation_id: str) -> None:
+        """Emit a canonical event via the canonical EventBus."""
+        import uuid as uuid_mod
+
+        event = CoreEvent(
+            eventType=event_type,
+            source=self._identity,
+            correlationId=uuid_mod.UUID(correlation_id) if correlation_id else uuid_mod.uuid4(),
+            payload=payload,
+        )
+        result = self._event_bus.publish(event)
+        # Fire and forget - result handling is async
+        if hasattr(result, "__await__"):
+            # Schedule on the event loop if available
+            try:
+                loop = asyncio.get_running_loop()
+                loop.create_task(result)
+            except RuntimeError:
+                pass
+
     def _emit_started(self, request: AgencyRequest) -> None:
         """Emit review started event."""
-        event_name = f"{self.agency_type.value}_review_started"
-        self._event_bus.publish(
-            create_event(
-                event_type=EventType(event_name),
-                source_service=f"ai_agency.{self.agency_type.value}",
-                correlation_id=request.correlation_id or request.request_id,
-                payload={"request_id": request.request_id, "target": request.target},
-            )
+        event_name = f"{self.agency_type.value.upper()}_REVIEW_STARTED"
+        try:
+            event_type = EventType[event_name]
+        except KeyError:
+            event_type = EventType.AI_AGENT_TASK_REQUESTED  # fallback
+        self._emit_event(
+            event_type,
+            {"request_id": request.request_id, "target": request.target},
+            request.correlation_id or request.request_id,
         )
 
     def _emit_completed(self, request: AgencyRequest, response: AgencyResponse) -> None:
         """Emit review completed event."""
-        event_name = f"{self.agency_type.value}_review_completed"
-        self._event_bus.publish(
-            create_event(
-                event_type=EventType(event_name),
-                source_service=f"ai_agency.{self.agency_type.value}",
-                correlation_id=request.correlation_id or request.request_id,
-                payload={
-                    "request_id": request.request_id,
-                    "verdict": response.verdict.value,
-                    "confidence": response.confidence,
-                    "findings_count": len(response.findings),
-                },
-            )
+        event_name = f"{self.agency_type.value.upper()}_REVIEW_COMPLETED"
+        try:
+            event_type = EventType[event_name]
+        except KeyError:
+            event_type = EventType.AI_AGENT_TASK_COMPLETED  # fallback
+        self._emit_event(
+            event_type,
+            {
+                "request_id": request.request_id,
+                "verdict": response.verdict.value,
+                "confidence": response.confidence,
+                "findings_count": len(response.findings),
+            },
+            request.correlation_id or request.request_id,
         )
 
 
@@ -519,18 +553,21 @@ class AIAgencyService:
     """
 
     def __init__(self):
+        event_bus = get_core_event_bus()
+        if event_bus is None:
+            raise RuntimeError("Canonical EventBus not initialized. Start the kernel first.")
+        self._event_bus = event_bus
         self._agencies: dict[AgencyType, BaseAgency] = {
-            AgencyType.SECURITY: SecurityAgency(),
-            AgencyType.PERFORMANCE: PerformanceAgency(),
-            AgencyType.CHAOS: ChaosAgency(),
-            AgencyType.ACCESSIBILITY: AccessibilityAgency(),
-            AgencyType.DOCUMENTATION: DocumentationAgency(),
-            AgencyType.CONCURRENCY: ConcurrencyAgency(),
-            AgencyType.BUG_HUNTER: BugHunterAgency(),
-            AgencyType.ARCHITECTURE: ArchitectureAgency(),
-            AgencyType.FINAL_JUDGE: FinalJudgeAgency(),
+            AgencyType.SECURITY: SecurityAgency(event_bus=self._event_bus),
+            AgencyType.PERFORMANCE: PerformanceAgency(event_bus=self._event_bus),
+            AgencyType.CHAOS: ChaosAgency(event_bus=self._event_bus),
+            AgencyType.ACCESSIBILITY: AccessibilityAgency(event_bus=self._event_bus),
+            AgencyType.DOCUMENTATION: DocumentationAgency(event_bus=self._event_bus),
+            AgencyType.CONCURRENCY: ConcurrencyAgency(event_bus=self._event_bus),
+            AgencyType.BUG_HUNTER: BugHunterAgency(event_bus=self._event_bus),
+            AgencyType.ARCHITECTURE: ArchitectureAgency(event_bus=self._event_bus),
+            AgencyType.FINAL_JUDGE: FinalJudgeAgency(event_bus=self._event_bus),
         }
-        self._event_bus = get_event_bus()
 
     def get_agency(self, agency_type: AgencyType) -> BaseAgency | None:
         """Get an agency by type."""

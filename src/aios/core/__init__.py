@@ -303,6 +303,18 @@ from aios.core.kernel_management import (
     is_running,
     execute_with_kernel,
 )
+# LifecycleManager (first Core Manager, Part 4 §4.3, Task 9). NOT a Core
+# Component; it is the authoritative kernel-lifecycle state machine and only
+# consumes the four Core Components (C1–C4).
+from aios.core.lifecycle_manager import (
+    LifecycleManager,
+    LifecycleState,
+    LifecycleManagerError,
+    ICoreManager,
+    get_lifecycle_manager,
+    set_lifecycle_manager,
+    reset_lifecycle_manager_singleton,
+)
 
 __all__ = [
     # Constants
@@ -565,4 +577,12 @@ __all__ = [
     "stop_kernel",
     "is_running",
     "execute_with_kernel",
+    # LifecycleManager (first Core Manager, Part 4 §4.3, Task 9)
+    "LifecycleManager",
+    "LifecycleState",
+    "LifecycleManagerError",
+    "ICoreManager",
+    "get_lifecycle_manager",
+    "set_lifecycle_manager",
+    "reset_lifecycle_manager_singleton",
 ]

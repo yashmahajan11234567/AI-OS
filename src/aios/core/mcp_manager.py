@@ -2,6 +2,7 @@
 MCP Manager for AI-OS Hermes Kernel.
 
 Manages Model Context Protocol (MCP) server connections and tool orchestration.
+Uses the canonical EventBus (C1, Task 5) and canonical EventType enum.
 """
 
 from __future__ import annotations
@@ -9,19 +10,17 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import uuid
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
 from pathlib import Path
 from typing import Any
 
-from aios.events.bus import get_event_bus
-from aios.events.types import (
-    MCPServerConnected,
-    MCPServerDisconnected,
-    MCPToolCalled,
-    MCPToolResult,
-)
+from aios.events.core.bus import get_core_event_bus
+from aios.events.core.event import Event as CoreEvent
+from aios.events.core.identity import ComponentIdentity, ComponentType
+from aios.events.core.types import EventType, SemanticVersion
 
 logger = logging.getLogger(__name__)
 
@@ -104,7 +103,18 @@ class MCPManager:
         self._status: dict[str, MCPServerStatus] = {}
         self._processes: dict[str, asyncio.subprocess.Process] = {}
         self._tools_cache: dict[str, list[MCPTool]] = {}
-        self._event_bus = get_event_bus()
+
+        # FIX 9: Use canonical EventBus (C1, Task 5)
+        self._event_bus = get_core_event_bus()
+        if self._event_bus is None:
+            logger.warning("Canonical EventBus not yet initialized; events will be deferred")
+
+        # Component identity for event emission
+        self._identity = ComponentIdentity(
+            component_type=ComponentType.ENGINEERING_SERVICE,
+            component_name="MCPManager",
+            version=SemanticVersion.parse("0.1.0"),
+        )
 
         # Load configs
         self._load_configs()
@@ -210,17 +220,15 @@ class MCPManager:
             status.last_error = None
             status.retry_count = 0
 
-            self._event_bus.publish(
-                MCPServerConnected(
-                    source_service="mcp_manager",
-                    correlation_id=server_id,
-                    payload={
-                        "server_id": server_id,
-                        "name": config.name,
-                        "transport": config.transport.value,
-                        "tools": [t.name for t in tools],
-                    },
-                )
+            self._emit_event(
+                EventType.MCP_SERVER_CONNECTED,
+                {
+                    "server_id": server_id,
+                    "name": config.name,
+                    "transport": config.transport.value,
+                    "tools": [t.name for t in tools],
+                },
+                server_id,
             )
 
             logger.info(f"Connected to MCP server: {server_id}")
@@ -231,6 +239,23 @@ class MCPManager:
             status.retry_count += 1
             logger.error(f"Failed to connect to {server_id}: {e}")
             return False
+
+    def _emit_event(self, event_type: EventType, payload: dict[str, Any], correlation_id: str) -> None:
+        """Emit a canonical event via the canonical EventBus."""
+        event = CoreEvent(
+            eventType=event_type,
+            source=self._identity,
+            correlationId=uuid.UUID(correlation_id) if correlation_id else uuid.uuid4(),
+            payload=payload,
+        )
+        result = self._event_bus.publish(event) if self._event_bus else None
+        # Fire and forget - result handling is async
+        if result and hasattr(result, "__await__"):
+            try:
+                loop = asyncio.get_running_loop()
+                loop.create_task(result)
+            except RuntimeError:
+                pass
 
     async def _connect_stdio(
         self, config: MCPServerConfig, status: MCPServerStatus
@@ -312,12 +337,10 @@ class MCPManager:
         status.connected = False
         status.tools = []
 
-        self._event_bus.publish(
-            MCPServerDisconnected(
-                source_service="mcp_manager",
-                correlation_id=server_id,
-                payload={"server_id": server_id, "reason": "manual_disconnect"},
-            )
+        self._emit_event(
+            EventType.MCP_SERVER_DISCONNECTED,
+            {"server_id": server_id, "reason": "manual_disconnect"},
+            server_id,
         )
 
         logger.info(f"Disconnected from MCP server: {server_id}")
@@ -371,17 +394,15 @@ class MCPManager:
         if not tool:
             raise ValueError(f"Tool {tool_name} not found on server {server_id}")
 
-        self._event_bus.publish(
-            MCPToolCalled(
-                source_service="mcp_manager",
-                correlation_id=call_id,
-                payload={
-                    "call_id": call_id,
-                    "server_id": server_id,
-                    "tool_name": tool_name,
-                    "arguments": arguments,
-                },
-            )
+        self._emit_event(
+            EventType.MCP_TOOL_CALLED,
+            {
+                "call_id": call_id,
+                "server_id": server_id,
+                "tool_name": tool_name,
+                "arguments": arguments,
+            },
+            call_id,
         )
 
         try:
@@ -391,17 +412,15 @@ class MCPManager:
 
             result = {"success": True, "result": f"Mock result from {tool_name}"}
 
-            self._event_bus.publish(
-                MCPToolResult(
-                    source_service="mcp_manager",
-                    correlation_id=call_id,
-                    payload={
-                        "call_id": call_id,
-                        "success": True,
-                        "result": result,
-                        "error": None,
-                    },
-                )
+            self._emit_event(
+                EventType.MCP_TOOL_RESULT,
+                {
+                    "call_id": call_id,
+                    "success": True,
+                    "result": result,
+                    "error": None,
+                },
+                call_id,
             )
 
             return result
@@ -409,17 +428,15 @@ class MCPManager:
         except Exception as e:
             error_result = {"success": False, "error": str(e)}
 
-            self._event_bus.publish(
-                MCPToolResult(
-                    source_service="mcp_manager",
-                    correlation_id=call_id,
-                    payload={
-                        "call_id": call_id,
-                        "success": False,
-                        "result": {},
-                        "error": str(e),
-                    },
-                )
+            self._emit_event(
+                EventType.MCP_TOOL_RESULT,
+                {
+                    "call_id": call_id,
+                    "success": False,
+                    "result": {},
+                    "error": str(e),
+                },
+                call_id,
             )
 
             raise

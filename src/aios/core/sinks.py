@@ -53,8 +53,8 @@ from enum import Enum
 from pathlib import Path
 from typing import Any, Protocol, runtime_checkable
 
-from aios.events.base import Event as LegacyEvent
-from aios.events.base import EventType as LegacyEventType
+from aios.events.core.event import Event as LegacyEvent
+from aios.events.core.types import EventType as LegacyEventType
 from aios.events.core.serialization import compute_checksum
 
 logger = logging.getLogger("aios.core.sinks")
@@ -555,26 +555,25 @@ class AuditSink(BaseSink):
 
 
 class EventBusSink(BaseSink):
-    """Bridges log entries onto the legacy EventBus (§3.7.7 / §3.6.10).
+    """Bridges log entries onto the canonical EventBus (§3.7.7 / §3.6.10).
 
-    The architecture-named ``LogEvent`` EventType is not present in either the
-    legacy or canonical ``EventType`` enum (it would require an ARB change to
-    Part 2). To honor the EventBus-First rule and the closed-enum constraint
-    simultaneously, entries are bridged onto the bus using the existing legacy
-    ``EventType.LOG_ANOMALY_DETECTED`` type as the log-forwarding carrier, with
-    the full structured entry embedded in the payload. No new EventType is
-    invented (forbidden by the task brief); this deviation is documented in the
-    Task 8 report.
+    The architecture-named ``LogEvent`` EventType is not present in the
+    canonical ``EventType`` enum (it would require an ARB change to Part 2).
+    To honor the EventBus-First rule and the closed-enum constraint
+    simultaneously, entries are bridged onto the bus using the existing
+    canonical ``EventType.LOG_ANOMALY_DETECTED`` type as the log-forwarding
+    carrier, with the full structured entry embedded in the payload. No new
+    EventType is invented (forbidden by the task brief); this deviation is
+    documented in the Task 8 report.
 
-    The bound bus is used duck-typed (any object exposing a ``publish``
-    callable), so the sink forwards to both the real legacy ``EventBus`` and to
-    lightweight test doubles. The canonical event model has no log event type,
-    so the forward is always a ``LegacyEvent`` carrying the structured entry.
+    The bound bus is the canonical EventBus (C1, Task 5) which exposes an
+    async ``publish`` method. The sink handles the sync-to-async bridge
+    by scheduling the coroutine on the running event loop.
     """
 
     def __init__(
         self,
-        event_bus: Any | None,
+        event_bus: Any | None = None,
         name: str = "eventbus",
         level: int = 3,  # default: WARN and above (§3.6.5)
     ) -> None:
@@ -592,22 +591,23 @@ class EventBusSink(BaseSink):
                 continue
             try:
                 event = LegacyEvent(
-                    event_type=LegacyEventType.LOG_ANOMALY_DETECTED,
+                    eventType=LegacyEventType.LOG_ANOMALY_DETECTED,
+                    source=self._identity,
+                    correlationId=__import__('uuid').uuid4(),
                     payload={
                         "bridge": "StructuredLogger.EventBusSink",
                         "entry": entry,
                     },
-                    source_service=self._identity.component_name,
                 )
                 result = bus.publish(event)
                 if asyncio.iscoroutine(result):
-                    # The legacy kernel bus is sync; guard against a coroutine
-                    # result (defensive) without blocking on a loop we don't own.
+                    # Canonical bus is async; schedule on running loop
                     try:
                         loop = asyncio.get_running_loop()
                         asyncio.run_coroutine_threadsafe(result, loop)
                     except RuntimeError:
-                        asyncio.ensure_future(result)
+                        # No running loop - can't publish
+                        logger.debug("No event loop to publish log event; dropping")
             except Exception as exc:  # noqa: BLE001
                 # Bridge failure must not crash the logger (INV-SL-SNK-003).
                 self.mark_degraded()

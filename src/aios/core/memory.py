@@ -7,12 +7,15 @@ Manages multiple memory systems:
 - Engineering Intelligence: Long-term learnings
 - Obsidian: Knowledge vault integration
 - Graphify: Knowledge graph
+Uses the canonical EventBus (C1, Task 5) and canonical EventType enum.
 """
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
+import uuid
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -20,13 +23,10 @@ from enum import Enum
 from pathlib import Path
 from typing import Any
 
-from aios.events.bus import get_event_bus
-from aios.events.types import (
-    MemoryStored,
-    MemoryRetrieved,
-    MemoryUpdated,
-    MemoryConsolidated,
-)
+from aios.events.core.bus import get_core_event_bus
+from aios.events.core.event import Event as CoreEvent
+from aios.events.core.identity import ComponentIdentity, ComponentType
+from aios.events.core.types import EventType, SemanticVersion
 
 logger = logging.getLogger(__name__)
 
@@ -277,9 +277,19 @@ class MemoryManager:
         base_path: Path | None = None,
         backends: dict[MemoryType, MemoryBackend] | None = None,
     ):
-        self._event_bus = get_event_bus()
+        # FIX 9: Use canonical EventBus (C1, Task 5)
+        self._event_bus = get_core_event_bus()
+        if self._event_bus is None:
+            logger.warning("Canonical EventBus not yet initialized; events will be deferred")
         self._base_path = base_path or Path("./data/memory")
         self._base_path.mkdir(parents=True, exist_ok=True)
+
+        # Component identity for event emission
+        self._identity = ComponentIdentity(
+            component_type=ComponentType.ENGINEERING_SERVICE,
+            component_name="MemoryManager",
+            version=SemanticVersion.parse("0.1.0"),
+        )
 
         self._backends: dict[MemoryType, MemoryBackend] = backends or {}
         self._init_default_backends()
@@ -294,6 +304,23 @@ class MemoryManager:
     def get_backend(self, memory_type: MemoryType) -> MemoryBackend:
         """Get backend for a memory type."""
         return self._backends[memory_type]
+
+    def _emit_event(self, event_type: EventType, payload: dict[str, Any], correlation_id: str) -> None:
+        """Emit a canonical event via the canonical EventBus."""
+        event = CoreEvent(
+            eventType=event_type,
+            source=self._identity,
+            correlationId=uuid.UUID(correlation_id) if correlation_id else uuid.uuid4(),
+            payload=payload,
+        )
+        result = self._event_bus.publish(event) if self._event_bus else None
+        # Fire and forget - result handling is async
+        if result and hasattr(result, "__await__"):
+            try:
+                loop = asyncio.get_running_loop()
+                loop.create_task(result)
+            except RuntimeError:
+                pass
 
     def set_backend(self, memory_type: MemoryType, backend: MemoryBackend) -> None:
         """Set custom backend for a memory type."""
@@ -321,17 +348,15 @@ class MemoryManager:
         backend = self._backends[memory_type]
         await backend.store(entry)
 
-        self._event_bus.publish(
-            MemoryStored(
-                source_service="memory_manager",
-                correlation_id=f"{memory_type.value}:{key}",
-                payload={
-                    "memory_id": key,
-                    "memory_type": memory_type.value,
-                    "key": key,
-                    "tags": tags or [],
-                },
-            )
+        self._emit_event(
+            EventType.MEMORY_STORED,
+            {
+                "memory_id": key,
+                "memory_type": memory_type.value,
+                "key": key,
+                "tags": tags or [],
+            },
+            f"{memory_type.value}:{key}",
         )
 
         logger.debug(f"Stored in {memory_type.value}: {key}")
@@ -345,17 +370,15 @@ class MemoryManager:
         entry = await backend.retrieve(key)
 
         if entry:
-            self._event_bus.publish(
-                MemoryRetrieved(
-                    source_service="memory_manager",
-                    correlation_id=f"{memory_type.value}:{key}",
-                    payload={
-                        "memory_id": key,
-                        "memory_type": memory_type.value,
-                        "key": key,
-                        "found": True,
-                    },
-                )
+            self._emit_event(
+                EventType.MEMORY_RETRIEVED,
+                {
+                    "memory_id": key,
+                    "memory_type": memory_type.value,
+                    "key": key,
+                    "found": True,
+                },
+                f"{memory_type.value}:{key}",
             )
 
         return entry
@@ -372,17 +395,15 @@ class MemoryManager:
         result = await backend.update(key, value, metadata)
 
         if result:
-            self._event_bus.publish(
-                MemoryUpdated(
-                    source_service="memory_manager",
-                    correlation_id=f"{memory_type.value}:{key}",
-                    payload={
-                        "memory_id": key,
-                        "memory_type": memory_type.value,
-                        "key": key,
-                        "changes": {"value": "updated"},
-                    },
-                )
+            self._emit_event(
+                EventType.MEMORY_UPDATED,
+                {
+                    "memory_id": key,
+                    "memory_type": memory_type.value,
+                    "key": key,
+                    "changes": {"value": "updated"},
+                },
+                f"{memory_type.value}:{key}",
             )
 
         return result
@@ -436,16 +457,14 @@ class MemoryManager:
             count += 1
 
         if count > 0:
-            self._event_bus.publish(
-                MemoryConsolidated(
-                    source_service="memory_manager",
-                    correlation_id=f"consolidate:{from_type.value}:{to_type.value}",
-                    payload={
-                        "source_type": from_type.value,
-                        "target_type": to_type.value,
-                        "count": count,
-                    },
-                )
+            self._emit_event(
+                EventType.MEMORY_CONSOLIDATED,
+                {
+                    "source_type": from_type.value,
+                    "target_type": to_type.value,
+                    "count": count,
+                },
+                f"consolidate:{from_type.value}:{to_type.value}",
             )
 
         logger.info(f"Consolidated {count} entries from {from_type.value} to {to_type.value}")

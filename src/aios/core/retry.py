@@ -13,14 +13,13 @@ from datetime import datetime, timezone
 from enum import Enum
 from typing import Any, Callable, Optional
 
-from aios.events.bus import get_event_bus
-from aios.events.types import (
-    RetryBudgetExhausted,
-    RetryScheduled,
-    RetryExecuted,
-    TaskFailed,
-    TaskRetryRequested,
-)
+from aios.events.core.bus import get_core_event_bus
+from aios.events.core.event import Event as CoreEvent
+from aios.events.core.types import EventType, SemanticVersion
+from aios.events.core.identity import ComponentIdentity, ComponentType
+from aios.events.core.manager import SubscribeOptions
+from aios.events.core.subscription import HandlerPriority, RetryPolicy as CoreRetryPolicy
+import uuid
 
 logger = logging.getLogger(__name__)
 
@@ -131,10 +130,25 @@ class RetryManager:
     """
 
     def __init__(self):
-        self._event_bus = get_event_bus()
+        # Use canonical EventBus singleton (C1, Task 5)
+        self._event_bus = get_core_event_bus()
         self._policies: dict[str, RetryPolicy] = {}
         self._budgets: dict[str, RetryBudget] = {}
         self._default_policy = RetryPolicy()
+        self._identity = ComponentIdentity(
+            component_type=ComponentType.CORE_MANAGER,
+            component_name="RetryManager",
+            version=SemanticVersion.parse("0.1.0"),
+        )
+
+    def _ensure_bus(self):
+        """Ensure EventBus is available."""
+        if self._event_bus is None:
+            self._event_bus = get_core_event_bus()
+            # Don't raise error if EventBus not initialized yet - allow deferred initialization
+            if self._event_bus is None:
+                logger.debug("Canonical EventBus not yet initialized; event emission will be deferred")
+        return self._event_bus
 
     def set_policy(self, service: str, policy: RetryPolicy) -> None:
         """Set retry policy for a service."""
@@ -158,24 +172,22 @@ class RetryManager:
         key = f"{task_id}:{service}"
         return self._budgets.get(key)
 
-    def retry_budget_exhausted(self, task_id: str, service: str, budget: RetryBudget) -> None:
+    def retry_budget_exhausted(self, task_id: str, service: str, budget: RetryBudget, correlation_id: str) -> None:
         """Handle retry budget exhaustion."""
         key = f"{task_id}:{service}"
         if key in self._budgets:
             del self._budgets[key]
         logger.warning(f"Retry budget exhausted for task {task_id}: {budget}")
-        # Optionally, publish an event
-        self._event_bus.publish(
-            RetryBudgetExhausted(
-                source_service="retry_manager",
-                correlation_id=task_id,
-                payload={
-                    "task_id": task_id,
-                    "service": service,
-                    "max_retries": budget.policy.max_retries,
-                    "attempts": len(budget.attempts),
-                },
-            )
+        # Publish canonical event
+        self._emit_event(
+            EventType.RETRY_BUDGET_EXHAUSTED,
+            {
+                "task_id": task_id,
+                "service": service,
+                "max_retries": budget.policy.max_retries,
+                "attempts": len(budget.attempts),
+            },
+            correlation_id=correlation_id,
         )
 
     async def execute_with_retry(
@@ -184,6 +196,7 @@ class RetryManager:
         service: str,
         func: Callable[..., Any],
         policy: RetryPolicy | None = None,
+        correlation_id: str | None = None,
         *args,
         **kwargs,
     ) -> Any:
@@ -235,58 +248,83 @@ class RetryManager:
                     attempt = budget.record_attempt(e, error_type)
 
                     # Publish retry scheduled event
-                    self._event_bus.publish(
-                        RetryScheduled(
-                            source_service="retry_manager",
-                            correlation_id=task_id,
-                            payload={
-                                "task_id": task_id,
-                                "service": service,
-                                "retry_count": attempt.attempt,
-                                "delay_ms": attempt.delay_ms,
-                            },
-                        )
+                    self._emit_event(
+                        EventType.RETRY_SCHEDULED,
+                        {
+                            "task_id": task_id,
+                            "service": service,
+                            "retry_count": attempt.attempt,
+                            "delay_ms": attempt.delay_ms,
+                        },
+                        correlation_id=correlation_id,
                     )
 
                     # Wait before retry
                     await asyncio.sleep(attempt.delay_ms / 1000.0)
 
                     # Publish retry executed event
-                    self._event_bus.publish(
-                        RetryExecuted(
-                            source_service="retry_manager",
-                            correlation_id=task_id,
-                            payload={
-                                "task_id": task_id,
-                                "service": service,
-                                "retry_count": attempt.attempt,
-                            },
-                        )
+                    self._emit_event(
+                        EventType.RETRY_EXECUTED,
+                        {
+                            "task_id": task_id,
+                            "service": service,
+                            "retry_count": attempt.attempt,
+                        },
+                        correlation_id=task_id,
                     )
                 else:
                     # Max retries reached
                     break
 
         # All retries exhausted
-        self.retry_budget_exhausted(task_id, service, budget)
+        self.retry_budget_exhausted(task_id, service, budget, correlation_id)
 
         # Publish task failed event
-        self._event_bus.publish(
-            TaskFailed(
-                source_service="retry_manager",
-                correlation_id=task_id,
-                payload={
-                    "task_id": task_id,
-                    "service": service,
-                    "error": str(last_exception),
-                    "error_type": type(last_exception).__name__,
-                    "retryable": True,
-                    "retry_count": policy.max_retries,
-                },
-            )
+        self._emit_event(
+            EventType.TASK_FAILED,
+            {
+                "task_id": task_id,
+                "service": service,
+                "error": str(last_exception),
+                "error_type": type(last_exception).__name__,
+                "retryable": True,
+                "retry_count": policy.max_retries,
+            },
+            correlation_id=task_id,
         )
 
         raise last_exception
+
+    def _emit_event(self, event_type: EventType, payload: dict[str, Any], correlation_id: str) -> None:
+        """Emit a canonical event via the canonical EventBus."""
+        bus = self._ensure_bus()
+        if bus is None:
+            # EventBus not available, skip event emission
+            logger.debug("EventBus not available, skipping event emission")
+            return
+        import uuid as uuid_mod
+        # Handle invalid UUID strings by generating a new one
+        try:
+            correlation_uuid = uuid_mod.UUID(correlation_id) if correlation_id else uuid_mod.uuid4()
+        except ValueError:
+            logger.warning(f"Invalid UUID string for correlation_id: {correlation_id!r}. Generating a new UUID.")
+            correlation_uuid = uuid_mod.uuid4()
+
+        event = CoreEvent(
+            eventType=event_type,
+            source=self._identity,
+            correlationId=correlation_uuid,
+            payload=payload,
+        )
+        result = bus.publish(event)
+        # Fire and forget - result handling is async
+        if hasattr(result, "__await__"):
+            # Schedule on the event loop if available
+            try:
+                loop = asyncio.get_running_loop()
+                loop.create_task(result)
+            except RuntimeError:
+                pass
 
 
 # Global retry manager instance
@@ -316,4 +354,3 @@ __all__ = [
     "get_retry_manager",
     "set_retry_manager",
 ]
-

@@ -3,23 +3,25 @@ Root Cause Analyzer for AI-OS Hermes Kernel.
 
 Analyzes failures to determine root cause, responsible service, and recommended action.
 Routes failures back to the earliest responsible service instead of restarting everything.
+Uses the canonical EventBus (C1, Task 5) and canonical EventType enum.
 """
 
 from __future__ import annotations
 
+import asyncio
 import logging
-import traceback
+import uuid
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
 from typing import Any
 
-from aios.events.bus import get_event_bus
-from aios.events.types import (
-    RootCauseAnalyzed,
-    RootCauseResolved,
-    FailureClassified,
-)
+from aios.events.core.bus import get_core_event_bus
+from aios.events.core.event import Event as CoreEvent
+from aios.events.core.identity import ComponentIdentity, ComponentType
+from aios.events.core.manager import SubscribeOptions
+from aios.events.core.subscription import HandlerPriority
+from aios.events.core.types import EventType, SemanticVersion
 
 logger = logging.getLogger(__name__)
 
@@ -110,7 +112,10 @@ class RootCauseAnalyzer:
     """
 
     def __init__(self):
-        self._event_bus = get_event_bus()
+        # FIX 9: Use canonical EventBus (C1, Task 5) — single authority per process
+        self._event_bus = get_core_event_bus()
+        if self._event_bus is None:
+            logger.warning("Canonical EventBus not yet initialized; event subscriptions will be deferred")
         self._analyses: dict[str, RootCauseAnalysis] = {}
         self._failure_patterns: dict[str, dict] = {}
         self._service_responsibility: dict[str, list[str]] = {
@@ -126,17 +131,35 @@ class RootCauseAnalyzer:
             "council": ["council", "consensus", "deliberation", "vote"],
         }
 
-        # Subscribe to failure events
-        self._event_bus.subscribe(
-            handler=self._on_retry_budget_exhausted,
-            event_types="retry.budget_exhausted",
-        )
-        self._event_bus.subscribe(
-            handler=self._on_task_failed,
-            event_types="task.failed",
+        # Component identity for event emission
+        self._identity = ComponentIdentity(
+            component_type=ComponentType.CORE_MANAGER,
+            component_name="RootCauseAnalyzer",
+            version=SemanticVersion.parse("0.1.0"),
         )
 
-    async def _on_retry_budget_exhausted(self, event: Event) -> None:
+        # Subscribe to failure events (only if event bus is available)
+        if self._event_bus is not None:
+            self._event_bus.subscribe(
+                SubscribeOptions(
+                    subscriber=self._identity,
+                    event_types=[EventType.RETRY_BUDGET_EXHAUSTED],
+                    handler=self._on_retry_budget_exhausted,
+                    priority=HandlerPriority.NORMAL,
+                    metadata={"service_name": "root_cause_analyzer"},
+                )
+            )
+            self._event_bus.subscribe(
+                SubscribeOptions(
+                    subscriber=self._identity,
+                    event_types=[EventType.TASK_FAILED],
+                    handler=self._on_task_failed,
+                    priority=HandlerPriority.NORMAL,
+                    metadata={"service_name": "root_cause_analyzer"},
+                )
+            )
+
+    async def _on_retry_budget_exhausted(self, event: CoreEvent) -> None:
         """Handle RetryBudgetExhausted event."""
         payload = event.payload
         context = FailureContext(
@@ -146,13 +169,13 @@ class RootCauseAnalyzer:
             error_type="RetryBudgetExhausted",
             service=payload.get("service", "unknown"),
             task_id=payload.get("task_id", ""),
-            correlation_id=event.correlation_id,
+            correlation_id=str(event.correlationId),
             payload=payload,
             attempt_history=[],  # Could be populated from retry manager
         )
         self.analyze(context, retry_budget_exhausted=True)
 
-    async def _on_task_failed(self, event: Event) -> None:
+    async def _on_task_failed(self, event: CoreEvent) -> None:
         """Handle TaskFailed event."""
         payload = event.payload
         context = FailureContext(
@@ -225,35 +248,31 @@ class RootCauseAnalyzer:
         self._analyses[analysis_id] = analysis
         self._update_failure_patterns(context, analysis)
 
-        # Emit events
-        self._event_bus.publish(
-            RootCauseAnalyzed(
-                source_service="root_cause_analyzer",
-                correlation_id=context.correlation_id or context.failure_id,
-                payload={
-                    "analysis_id": analysis_id,
-                    "failure_id": context.failure_id,
-                    "category": category.value,
-                    "severity": severity.value,
-                    "root_cause": root_cause,
-                    "responsible_service": responsible_service,
-                    "recommended_action": recommended_action.value,
-                    "confidence": confidence,
-                },
-            )
+        # Emit events using canonical CoreEvent
+        self._emit_event(
+            EventType.ROOT_CAUSE_ANALYZED,
+            {
+                "analysis_id": analysis_id,
+                "failure_id": context.failure_id,
+                "category": category.value,
+                "severity": severity.value,
+                "root_cause": root_cause,
+                "responsible_service": responsible_service,
+                "recommended_action": recommended_action.value,
+                "confidence": confidence,
+            },
+            context.correlation_id or context.failure_id,
         )
 
-        self._event_bus.publish(
-            FailureClassified(
-                source_service="root_cause_analyzer",
-                correlation_id=context.correlation_id or context.failure_id,
-                payload={
-                    "failure_id": context.failure_id,
-                    "category": category.value,
-                    "severity": severity.value,
-                    "service": responsible_service,
-                },
-            )
+        self._emit_event(
+            EventType.FAILURE_CLASSIFIED,
+            {
+                "failure_id": context.failure_id,
+                "category": category.value,
+                "severity": severity.value,
+                "service": responsible_service,
+            },
+            context.correlation_id or context.failure_id,
         )
 
         logger.info(
@@ -275,10 +294,18 @@ class RootCauseAnalyzer:
         if any(kw in error_lower for kw in security_keywords):
             return FailureCategory.SECURITY
 
+        # Transient errors (check early for timeout)
+        transient_keywords = [
+            "temporary", "transient", "retry", "intermittent", "flaky",
+            "network", "connection reset", "timed out", "timeout",
+        ]
+        if any(kw in error_lower for kw in transient_keywords):
+            return FailureCategory.TRANSIENT
+
         # Resource keywords
         resource_keywords = [
             "memory", "oom", "out of memory", "disk", "quota", "limit exceeded",
-            "rate limit", "timeout", "deadlock", "cpu",
+            "rate limit", "deadlock", "cpu",
         ]
         if any(kw in error_lower for kw in resource_keywords):
             return FailureCategory.RESOURCE
@@ -295,7 +322,7 @@ class RootCauseAnalyzer:
         # Dependency keywords
         dep_keywords = [
             "connection", "network", "dns", "unreachable", "refused",
-            "timeout", "service unavailable", "dependency", "import",
+            "service unavailable", "dependency", "import",
             "module not found", "package", "version conflict",
         ]
         if any(kw in error_lower for kw in dep_keywords):
@@ -316,16 +343,7 @@ class RootCauseAnalyzer:
             "index", "key", "value error",
         ]
         if any(kw in error_lower for kw in code_keywords):
-            if "test" in error_lower:
-                return FailureCategory.CODE_DEFECT
-
-        # Transient errors (default for many)
-        transient_keywords = [
-            "temporary", "transient", "retry", "intermittent", "flaky",
-            "network", "connection reset", "timed out",
-        ]
-        if any(kw in error_lower for kw in transient_keywords):
-            return FailureCategory.TRANSIENT
+            return FailureCategory.CODE_DEFECT
 
         return FailureCategory.UNKNOWN
 
@@ -513,6 +531,38 @@ class RootCauseAnalyzer:
 
         self._failure_patterns[error_signature].append(analysis.analysis_id)
 
+    def _emit_event(
+        self, event_type: EventType, payload: dict[str, Any], correlation_id: str
+    ) -> None:
+        """Emit a canonical event via the canonical EventBus."""
+        if self._event_bus is None:
+            logger.debug("EventBus not available, skipping event emission")
+            return
+        import uuid as uuid_mod
+
+        # Handle invalid UUID strings by generating a new one
+        try:
+            correlation_uuid = uuid_mod.UUID(correlation_id) if correlation_id else uuid_mod.uuid4()
+        except ValueError:
+            logger.warning(f"Invalid UUID string for correlation_id: {correlation_id!r}. Generating a new UUID.")
+            correlation_uuid = uuid_mod.uuid4()
+
+        event = CoreEvent(
+            eventType=event_type,
+            source=self._identity,
+            correlationId=correlation_uuid,
+            payload=payload,
+        )
+        result = self._event_bus.publish(event)
+        # Fire and forget - result handling is async
+        if hasattr(result, "__await__"):
+            # Schedule on the event loop if available
+            try:
+                loop = asyncio.get_running_loop()
+                loop.create_task(result)
+            except RuntimeError:
+                pass
+
     def resolve_analysis(
         self, analysis_id: str, resolution: str, preventive: list[str] | None = None
     ) -> RootCauseAnalysis | None:
@@ -525,16 +575,14 @@ class RootCauseAnalyzer:
         if preventive:
             analysis.preventive_measures.extend(preventive)
 
-        self._event_bus.publish(
-            RootCauseResolved(
-                source_service="root_cause_analyzer",
-                correlation_id=analysis.failure_id,
-                payload={
-                    "analysis_id": analysis_id,
-                    "resolution": resolution,
-                    "preventive_measures": preventive or [],
-                },
-            )
+        self._emit_event(
+            EventType.ROOT_CAUSE_RESOLVED,
+            {
+                "analysis_id": analysis_id,
+                "resolution": resolution,
+                "preventive_measures": preventive or [],
+            },
+            analysis.failure_id,
         )
 
         return analysis

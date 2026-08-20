@@ -2,6 +2,7 @@
 Workflow Manager for AI-OS Hermes Kernel.
 
 Manages workflow state machines with state transitions, checkpoints, and recovery.
+Uses the canonical EventBus (C1, Task 5) and canonical EventType enum.
 """
 
 from __future__ import annotations
@@ -14,18 +15,12 @@ from datetime import datetime
 from enum import Enum
 from typing import Any, Callable
 
-from aios.events.bus import get_event_bus
-from aios.events.types import (
-    WorkflowCreated,
-    WorkflowStarted,
-    WorkflowCompleted,
-    WorkflowFailed,
-    WorkflowPaused,
-    WorkflowResumed,
-    StateTransitioned,
-    RootCauseAnalyzed,
-    CheckpointCreated,
-)
+from aios.events.core.bus import get_core_event_bus
+from aios.events.core.event import Event as CoreEvent
+from aios.events.core.identity import ComponentIdentity, ComponentType
+from aios.events.core.manager import SubscribeOptions
+from aios.events.core.subscription import HandlerPriority
+from aios.events.core.types import EventType, SemanticVersion
 from aios.core.state import StateManager, StateScope, get_state_manager
 from aios.core.retry import get_retry_manager, RetryPolicy, RetryStrategy
 
@@ -106,16 +101,30 @@ class WorkflowManager:
             state_manager: State manager instance (uses global if None)
         """
         self._state_manager = state_manager or get_state_manager()
-        self._event_bus = get_event_bus()
+        self._event_bus = get_core_event_bus()
+        if self._event_bus is None:
+            raise RuntimeError("Canonical EventBus not initialized. Start the kernel first.")
         self._workflows: dict[str, WorkflowDefinition] = {}
         self._running_workflows: dict[str, dict[str, Any]] = {}
         self._step_handlers: dict[str, Callable] = {}
         self._retry_manager = get_retry_manager()
 
+        # Component identity for event emission
+        self._identity = ComponentIdentity(
+            component_type=ComponentType.CORE_MANAGER,
+            component_name="WorkflowManager",
+            version=SemanticVersion.parse("0.1.0"),
+        )
+
         # Subscribe to RootCauseAnalyzed events for recovery routing
         self._event_bus.subscribe(
-            handler=self._on_root_cause_analyzed,
-            event_types="root_cause.analyzed",
+            SubscribeOptions(
+                subscriber=self._identity,
+                event_types=[EventType.ROOT_CAUSE_ANALYZED],
+                handler=self._on_root_cause_analyzed,
+                priority=HandlerPriority.NORMAL,
+                metadata={"service_name": "workflow_manager"},
+            )
         )
 
     def register_workflow(self, definition: WorkflowDefinition) -> None:
@@ -167,7 +176,7 @@ class WorkflowManager:
             raise ValueError(f"Workflow {workflow_id} not registered")
 
         execution_id = f"exec_{uuid.uuid4().hex[:12]}"
-        correlation_id = correlation_id or execution_id
+        correlation_id = correlation_id or str(uuid.uuid4())
 
         # Initialize workflow state
         initial_state = {
@@ -194,28 +203,15 @@ class WorkflowManager:
             "started_at": datetime.utcnow(),
         }
 
-        # Emit events
-        self._event_bus.publish(
-            WorkflowCreated(
-                source_service="workflow_manager",
-                correlation_id=correlation_id,
-                payload={
-                    "workflow_id": workflow_id,
-                    "execution_id": execution_id,
-                    "name": definition.name,
-                },
-            )
-        )
-
-        self._event_bus.publish(
-            WorkflowStarted(
-                source_service="workflow_manager",
-                correlation_id=correlation_id,
-                payload={
-                    "workflow_id": workflow_id,
-                    "execution_id": execution_id,
-                },
-            )
+        # Emit events using canonical CoreEvent
+        self._emit_event(
+            EventType.WORKFLOW_STARTED,
+            {
+                "workflow_id": workflow_id,
+                "execution_id": execution_id,
+                "name": definition.name,
+            },
+            correlation_id,
         )
 
         # Execute workflow
@@ -400,13 +396,11 @@ class WorkflowManager:
 
         self._add_checkpoint(execution_id, checkpoint_data)
 
-        # Emit checkpoint event
-        self._event_bus.publish(
-            CheckpointCreated(
-                source_service="workflow_manager",
-                correlation_id=correlation_id,
-                payload=checkpoint_data,
-            )
+        # Emit checkpoint event using canonical CoreEvent
+        self._emit_event(
+            EventType.CHECKPOINT_CREATED,
+            checkpoint_data,
+            correlation_id,
         )
 
         logger.debug(f"Created checkpoint {checkpoint_id} for workflow {execution_id} at step {step_id}")
@@ -450,17 +444,15 @@ class WorkflowManager:
     ) -> None:
         """Route failure back to planning phase."""
         logger.info(f"Routing workflow {execution_id} back to planning")
-        self._event_bus.publish(
-            CheckpointCreated(
-                source_service="workflow_manager",
-                correlation_id=execution_id,
-                payload={
-                    "execution_id": execution_id,
-                    "recovery_action": "return_to_planning",
-                    "reason": payload.get("root_cause", "Configuration issue"),
-                    "responsible_service": "planning",
-                },
-            )
+        self._emit_event(
+            EventType.CHECKPOINT_CREATED,
+            {
+                "execution_id": execution_id,
+                "recovery_action": "return_to_planning",
+                "reason": payload.get("root_cause", "Configuration issue"),
+                "responsible_service": "planning",
+            },
+            execution_id,
         )
         await self._fail_workflow(execution_id, execution_id, "Returned to planning for revision")
 
@@ -483,17 +475,15 @@ class WorkflowManager:
     ) -> None:
         """Escalate to human intervention."""
         logger.warning(f"Escalating workflow {execution_id} to human: {payload.get('root_cause')}")
-        self._event_bus.publish(
-            CheckpointCreated(
-                source_service="workflow_manager",
-                correlation_id=execution_id,
-                payload={
-                    "execution_id": execution_id,
-                    "recovery_action": "escalate_to_human",
-                    "reason": payload.get("root_cause", "Unknown failure"),
-                    "confidence": payload.get("confidence", 0.0),
-                },
-            )
+        self._emit_event(
+            EventType.CHECKPOINT_CREATED,
+            {
+                "execution_id": execution_id,
+                "recovery_action": "escalate_to_human",
+                "reason": payload.get("root_cause", "Unknown failure"),
+                "confidence": payload.get("confidence", 0.0),
+            },
+            execution_id,
         )
         await self._fail_workflow(execution_id, execution_id, f"Escalated to human: {payload.get('root_cause')}")
 
@@ -502,16 +492,14 @@ class WorkflowManager:
     ) -> None:
         """Rollback to previous version."""
         logger.info(f"Rolling back workflow {execution_id}")
-        self._event_bus.publish(
-            CheckpointCreated(
-                source_service="workflow_manager",
-                correlation_id=execution_id,
-                payload={
-                    "execution_id": execution_id,
-                    "recovery_action": "rollback",
-                    "reason": payload.get("root_cause", "Deployment failure"),
-                },
-            )
+        self._emit_event(
+            EventType.CHECKPOINT_CREATED,
+            {
+                "execution_id": execution_id,
+                "recovery_action": "rollback",
+                "reason": payload.get("root_cause", "Deployment failure"),
+            },
+            execution_id,
         )
         await self._fail_workflow(execution_id, execution_id, "Rollback initiated")
 
@@ -521,16 +509,14 @@ class WorkflowManager:
         """Restart the failing service."""
         service = payload.get("responsible_service", "unknown")
         logger.info(f"Restarting service {service} for workflow {execution_id}")
-        self._event_bus.publish(
-            CheckpointCreated(
-                source_service="workflow_manager",
-                correlation_id=execution_id,
-                payload={
-                    "execution_id": execution_id,
-                    "recovery_action": "restart_service",
-                    "service": service,
-                },
-            )
+        self._emit_event(
+            EventType.CHECKPOINT_CREATED,
+            {
+                "execution_id": execution_id,
+                "recovery_action": "restart_service",
+                "service": service,
+            },
+            execution_id,
         )
         await self._resume_from_latest_checkpoint(execution_id, service)
 
@@ -617,15 +603,13 @@ class WorkflowManager:
 
         self._running_workflows.pop(execution_id, None)
 
-        self._event_bus.publish(
-            WorkflowCompleted(
-                source_service="workflow_manager",
-                correlation_id=correlation_id,
-                payload={
-                    "execution_id": execution_id,
-                    "workflow_id": state.get("workflow_id"),
-                },
-            )
+        self._emit_event(
+            EventType.WORKFLOW_COMPLETED,
+            {
+                "execution_id": execution_id,
+                "workflow_id": state.get("workflow_id"),
+            },
+            correlation_id,
         )
 
         logger.info(f"Workflow {execution_id} completed successfully")
@@ -652,19 +636,46 @@ class WorkflowManager:
 
         self._running_workflows.pop(execution_id, None)
 
-        self._event_bus.publish(
-            WorkflowFailed(
-                source_service="workflow_manager",
-                correlation_id=correlation_id,
-                payload={
-                    "execution_id": execution_id,
-                    "workflow_id": state.get("workflow_id"),
-                    "error": error,
-                },
-            )
+        self._emit_event(
+            EventType.WORKFLOW_FAILED,
+            {
+                "execution_id": execution_id,
+                "workflow_id": state.get("workflow_id"),
+                "error": error,
+            },
+            correlation_id,
         )
 
         logger.error(f"Workflow {execution_id} failed: {error}")
+
+    def _emit_event(
+        self, event_type: EventType, payload: dict[str, Any], correlation_id: str
+    ) -> None:
+        """Emit a canonical event via the canonical EventBus."""
+        import uuid as uuid_mod
+
+        # Handle invalid UUID strings by generating a new one
+        try:
+            correlation_uuid = uuid_mod.UUID(correlation_id) if correlation_id else uuid_mod.uuid4()
+        except ValueError:
+            logger.warning(f"Invalid UUID string for correlation_id: {correlation_id!r}. Generating a new UUID.")
+            correlation_uuid = uuid_mod.uuid4()
+
+        event = CoreEvent(
+            eventType=event_type,
+            source=self._identity,
+            correlationId=correlation_uuid,
+            payload=payload,
+        )
+        result = self._event_bus.publish(event)
+        # Fire and forget - result handling is async
+        if hasattr(result, "__await__"):
+            # Schedule on the event loop if available
+            try:
+                loop = asyncio.get_running_loop()
+                loop.create_task(result)
+            except RuntimeError:
+                pass
 
     async def pause_workflow(
         self, execution_id: str, correlation_id: str | None = None
@@ -684,15 +695,13 @@ class WorkflowManager:
 
         correlation_id = correlation_id or state.get("correlation_id", execution_id)
 
-        self._event_bus.publish(
-            WorkflowPaused(
-                source_service="workflow_manager",
-                correlation_id=correlation_id,
-                payload={
-                    "execution_id": execution_id,
-                    "workflow_id": state.get("workflow_id"),
-                },
-            )
+        self._emit_event(
+            EventType.WORKFLOW_PAUSED,
+            {
+                "execution_id": execution_id,
+                "workflow_id": state.get("workflow_id"),
+            },
+            correlation_id,
         )
 
         logger.info(f"Workflow {execution_id} paused")
@@ -716,15 +725,13 @@ class WorkflowManager:
         correlation_id = correlation_id or state.get("correlation_id", execution_id)
         definition = self._workflows.get(state.get("workflow_id"))
 
-        self._event_bus.publish(
-            WorkflowResumed(
-                source_service="workflow_manager",
-                correlation_id=correlation_id,
-                payload={
-                    "execution_id": execution_id,
-                    "workflow_id": state.get("workflow_id"),
-                },
-            )
+        self._emit_event(
+            EventType.WORKFLOW_RESUMED,
+            {
+                "execution_id": execution_id,
+                "workflow_id": state.get("workflow_id"),
+            },
+            correlation_id,
         )
 
         logger.info(f"Workflow {execution_id} resumed")
@@ -778,6 +785,29 @@ def set_workflow_manager(manager: WorkflowManager) -> None:
     """Set the global workflow manager."""
     global _global_workflow_manager
     _global_workflow_manager = manager
+
+
+def _emit_event(
+        self, event_type: EventType, payload: dict[str, Any], correlation_id: str
+    ) -> None:
+        """Emit a canonical event via the canonical EventBus."""
+        import uuid as uuid_mod
+
+        event = CoreEvent(
+            eventType=event_type,
+            source=self._identity,
+            correlationId=uuid_mod.UUID(correlation_id) if correlation_id else uuid_mod.uuid4(),
+            payload=payload,
+        )
+        result = self._event_bus.publish(event)
+        # Fire and forget - result handling is async
+        if hasattr(result, "__await__"):
+            # Schedule on the event loop if available
+            try:
+                loop = asyncio.get_running_loop()
+                loop.create_task(result)
+            except RuntimeError:
+                pass
 
 
 __all__ = [
