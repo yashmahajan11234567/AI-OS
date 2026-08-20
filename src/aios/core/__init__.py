@@ -209,8 +209,10 @@ from aios.core.resource_manager import (
     ResourceAllocation,
     ResourceUsage,
     ResourceExhausted,
+    ResourceManagerError,
     get_resource_manager,
     set_resource_manager,
+    reset_resource_manager_singleton,
 )
 from aios.core.memory import (
     MemoryManager,
@@ -520,8 +522,10 @@ __all__ = [
     "ResourceAllocation",
     "ResourceUsage",
     "ResourceExhausted",
+    "ResourceManagerError",
     "get_resource_manager",
     "set_resource_manager",
+    "reset_resource_manager_singleton",
     "MemoryManager",
     "MemoryType",
     "MemoryEntry",

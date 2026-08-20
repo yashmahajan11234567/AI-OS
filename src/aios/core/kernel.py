@@ -435,7 +435,20 @@ class HermesKernel:
         self._workflow_manager = WorkflowManager(self._state_manager)
         set_workflow_manager(self._workflow_manager)
 
-        self._resource_manager = ResourceManager()
+        # Task 13 — ResourceManager is a Phase-3 (Governance) Core Manager. It
+        # receives the canonical C2/C3/C4 refs via DI so its initialize() can
+        # register with ServiceRegistry as ``core.resource``, read frozen
+        # ConfigurationManager (``kernel.resource.*``), and log through
+        # StructuredLogger. LifecycleManager (constructed next) will register
+        # and drive it. Per the Phase Dependency Rule, ResourceManager does NOT
+        # declare HealthManager or SecurityManager as formal dependencies —
+        # deterministic alphabetical ordering within Phase 3 (HealthManager,
+        # ResourceManager, SecurityManager) guarantees correct sequencing.
+        self._resource_manager = ResourceManager(
+            service_registry=self._service_registry,
+            configuration_manager=self._configuration,
+            logger=self._structured_logger,
+        )
         set_resource_manager(self._resource_manager)
 
         # Task 12 — HealthManager is a Phase-3 (Governance) Core Manager. It
@@ -540,6 +553,18 @@ class HermesKernel:
         if self._health_manager is not None:
             lm.register_manager(self._health_manager)
             logger.debug("Registered HealthManager with LifecycleManager (Phase 3).")
+
+        # Task 13 — register the ResourceManager Core Manager (Phase 3,
+        # "Governance") for LifecycleManager orchestration. ResourceManager was
+        # constructed in _init_core_components(); its initialize()/shutdown() are
+        # driven by LifecycleManager's Phase-3 phase topology, NOT by the
+        # engineering service start/stop loops (only its background cleanup task
+        # is started/stopped by the engineering-service hooks for backward
+        # compatibility). Phase-3 ordering is deterministic (alphabetical:
+        # HealthManager, ResourceManager, SecurityManager).
+        if self._resource_manager is not None:
+            lm.register_manager(self._resource_manager)
+            logger.debug("Registered ResourceManager with LifecycleManager (Phase 3).")
 
         try:
             await lm.initialize()
