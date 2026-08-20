@@ -67,6 +67,16 @@ from aios.core.resource_manager import (
     get_resource_manager,
     set_resource_manager,
 )
+# Task 12 — HealthManager (Phase-3 Governance Core Manager). Constructed in
+# _init_core_components(); LifecycleManager (constructed in _init_lifecycle_manager)
+# drives its initialize()/shutdown() via Phase-3 phase topology. It is NOT added
+# to _start_services/_stop_engineering_services (same-phase sibling of
+# ResourceManager; alphabetical ordering within Phase 3 is deterministic).
+from aios.core.health_manager import (
+    HealthManager,
+    get_health_manager,
+    set_health_manager,
+)
 # Engineering services use the canonical ServiceRegistry
 from aios.services.base import BaseService
 from aios.events.core.types import EventType
@@ -143,6 +153,7 @@ class HermesKernel:
         self._storage_manager: StorageManager | None = None
         self._workflow_manager: WorkflowManager | None = None
         self._resource_manager: ResourceManager | None = None
+        self._health_manager: HealthManager | None = None
 
         # Service tracking
         self._services: dict[str, ServiceStatus] = {}
@@ -189,6 +200,11 @@ class HermesKernel:
     def resource_manager(self) -> ResourceManager | None:
         """Get resource manager."""
         return self._resource_manager
+
+    @property
+    def health_manager(self) -> HealthManager | None:
+        """Get the HealthManager Core Manager (Part 4 §4.6, Task 12)."""
+        return self._health_manager
 
     @property
     def configuration(self) -> ConfigurationManager | None:
@@ -422,6 +438,22 @@ class HermesKernel:
         self._resource_manager = ResourceManager()
         set_resource_manager(self._resource_manager)
 
+        # Task 12 — HealthManager is a Phase-3 (Governance) Core Manager. It
+        # receives the canonical C2/C3/C4 refs via DI so its initialize() can
+        # register with ServiceRegistry as ``core.health``, read frozen
+        # ConfigurationManager (``kernel.health.*``), and log through
+        # StructuredLogger. LifecycleManager (constructed next) will register
+        # and drive it. Per the Phase Dependency Rule, HealthManager does NOT
+        # declare ResourceManager or SecurityManager as formal dependencies —
+        # deterministic alphabetical ordering within Phase 3 (HealthManager,
+        # ResourceManager, SecurityManager) guarantees correct sequencing.
+        self._health_manager = HealthManager(
+            service_registry=self._service_registry,
+            configuration_manager=self._configuration,
+            logger=self._structured_logger,
+        )
+        set_health_manager(self._health_manager)
+
         logger.debug("Canonical core components initialized")
 
     async def _shutdown_structured_logger(self) -> None:
@@ -498,6 +530,16 @@ class HermesKernel:
         if self._storage_manager is not None:
             lm.register_manager(self._storage_manager)
             logger.debug("Registered StorageManager with LifecycleManager (Phase 2).")
+
+        # Task 12 — register the HealthManager Core Manager (Phase 3, "Governance")
+        # for LifecycleManager orchestration. HealthManager was constructed in
+        # _init_core_components(); its initialize()/shutdown() are driven by
+        # LifecycleManager's Phase-3 phase topology, NOT by the engineering service
+        # start/stop loops. Phase-3 ordering is deterministic (alphabetical:
+        # HealthManager, ResourceManager, SecurityManager).
+        if self._health_manager is not None:
+            lm.register_manager(self._health_manager)
+            logger.debug("Registered HealthManager with LifecycleManager (Phase 3).")
 
         try:
             await lm.initialize()

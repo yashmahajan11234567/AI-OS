@@ -324,6 +324,17 @@ from aios.core.lifecycle_manager import (
     set_lifecycle_manager,
     reset_lifecycle_manager_singleton,
 )
+# Task 12 — HealthManager (Phase-3 Governance Core Manager, Part 4 §4.6)
+from aios.core.health_manager import (
+    HealthManager,
+    HealthStatus,
+    HealthCheck,
+    HealthCheckResult,
+    HealthManagerError,
+    get_health_manager,
+    set_health_manager,
+    reset_health_manager_singleton,
+)
 
 __all__ = [
     # Constants
@@ -601,4 +612,13 @@ __all__ = [
     "get_lifecycle_manager",
     "set_lifecycle_manager",
     "reset_lifecycle_manager_singleton",
+    # Task 12 — HealthManager (Phase-3 Governance Core Manager, Part 4 §4.6)
+    "HealthManager",
+    "HealthStatus",
+    "HealthCheck",
+    "HealthCheckResult",
+    "HealthManagerError",
+    "get_health_manager",
+    "set_health_manager",
+    "reset_health_manager_singleton",
 ]
