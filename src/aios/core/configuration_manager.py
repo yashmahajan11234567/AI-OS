@@ -65,6 +65,11 @@ IMPLEMENTATION NOTES / ARCHITECTURE CONFLICTS (documented, not silently
      arrays REPLACE (never concatenate), ``null`` removes a key, and the result
      is deterministic.
 
+  6. FIX 9: The split-brain issue (Task 9) has been resolved. The Kernel now
+     constructs ONLY the canonical EventBus (C1, Task 5) and canonical
+     ServiceRegistry (C2, Task 6). This module now uses ONLY the canonical
+     EventBus via ``get_core_event_bus()`` and emits canonical Event objects.
+
 This module does NOT implement the Kernel, any Manager, Engineering Service,
 LifecycleManager, or any other forbidden-scope component. It is a drop-in Core
 Component intended to be constructed and owned exclusively by HermesKernel
@@ -79,34 +84,20 @@ import logging
 import os
 import re
 import threading
+import uuid
 from collections.abc import Iterable, Iterator, Mapping
 from dataclasses import dataclass, field
 from enum import StrEnum
-from typing import Any, Protocol, cast, runtime_checkable
+from typing import Any, cast
 
-# Legacy EventBus (the bus the Kernel actually wires; see FIX 9 decision in the
-# final report). Its ``publish`` is synchronous (returns int) and it carries the
-# legacy ``aios.events.base.Event`` object.
-from aios.events.base import Event as LegacyEvent
-from aios.events.bus import EventBus as LegacyEventBus
-from aios.events.core.event import Event
+from aios.events.core.bus import get_core_event_bus
+from aios.events.core.event import Event as CoreEvent
 from aios.events.core.identity import ComponentIdentity, ComponentType
 from aios.events.core.serialization import compute_checksum
 from aios.events.core.types import EventType, SemanticVersion
 
 
-@runtime_checkable
-class EmittingBus(Protocol):
-    """Structural protocol for any EventBus (legacy or canonical Task-5 core).
-
-    The kernel injects the legacy ``aios.events.bus.EventBus`` (sync ``publish``)
-    while the canonical Task-5 ``aios.events.core.bus.EventBus`` exposes an async
-    ``publish``. C3 is bus-agnostic: it only requires a ``publish(event)`` method
-    and dispatches correctly whether it is sync or async (see ``_publish``).
-    """
-
-    def publish(self, event: Any) -> Any:  # noqa: ANN401 - structural duck type
-        ...
+logger = logging.getLogger(__name__)
 
 logger = logging.getLogger(__name__)
 
@@ -726,7 +717,7 @@ class ConfigurationManager:
 
     def __init__(
         self,
-        event_bus: EmittingBus | None = None,
+        event_bus = None,  # Deprecated - canonical EventBus resolved via get_core_event_bus()
         config_path: Any | None = None,
     ) -> None:
         # INV-CM-STR-001: exactly one instance per process.
@@ -739,7 +730,10 @@ class ConfigurationManager:
                 )
             _INSTANCE = self
 
-        self._event_bus = event_bus
+        # FIX 9: Use canonical EventBus (C1, Task 5) — single authority per process
+        self._event_bus = get_core_event_bus()
+        if self._event_bus is None:
+            logger.warning("Canonical EventBus not yet initialized; events will be deferred")
         self._config_path = config_path
         self._state = ConfigState.UNINITIALIZED
         self._kernel: Any = None
@@ -787,9 +781,9 @@ class ConfigurationManager:
         return self._state
 
     @property
-    def event_bus(self) -> EmittingBus | None:
-        """The injected EventBus (read-only accessor)."""
-        return self._event_bus
+    def event_bus(self):
+        """The canonical EventBus (C1, Task 5) — read-only accessor."""
+        return self._event_bus or get_core_event_bus()
 
     @property
     def config_hash(self) -> str | None:
@@ -1097,33 +1091,21 @@ class ConfigurationManager:
         """Emit deterministically from a sync context.
 
         FIX 4: ``freeze`` / ``shutdown`` are SYNC public methods but the EventBus
-        publication is async (canonical Task-5 bus) or sync (legacy bus).
+        publication is async (canonical Task-5 bus).
 
-        * Legacy sync bus (the bus the Kernel actually wires): publish INLINE,
-          synchronously, so the event is in the bus history immediately and
-          deterministically — no task, no fire-and-forget, no GC risk.
-        * Canonical async bus (Task 5): ``publish`` is a coroutine. We schedule
-          it on the running loop with ``ensure_future`` and keep a strong
-          reference in ``self._pending_tasks`` (so it is never garbage-collected
-          mid-flight), then the caller/tests drive completion via ``await
-          bus.drain()``. This is deterministic (the event is enqueued before the
-          queue is drained) and never double-awaits.
+        Canonical async bus (Task 5): ``publish`` is a coroutine. We schedule
+        it on the running loop with ``ensure_future`` and keep a strong
+        reference in ``self._pending_tasks`` (so it is never garbage-collected
+        mid-flight), then the caller/tests drive completion via ``await
+        bus.drain()``. This is deterministic (the event is enqueued before the
+        queue is drained) and never double-awaits.
 
         If no loop is running, the emission is skipped (logged debug) — the
         configuration is still correctly frozen.
         """
-        bus = self._event_bus
+        bus = self._event_bus or get_core_event_bus()
         if bus is None:
             return
-        if isinstance(bus, LegacyEventBus):
-            # Sync bus: publish inline and deterministically.
-            try:
-                event = self._make_event(event_type, payload)
-                bus.publish(event)
-            except Exception as exc:  # noqa: BLE001
-                logger.debug("Event emission of %s failed: %s", event_type.name, exc)
-            return
-        # Async (canonical) bus.
         try:
             import asyncio
 
@@ -1224,48 +1206,31 @@ class ConfigurationManager:
 
     # --- event emission (canonical EventTypes only) ----------------------
 
-    def _make_event(self, event_type: EventType, payload: dict[str, Any]) -> Any:
-        """Construct an Event for the ACTUAL bus type (canonical or legacy).
+    def _make_event(self, event_type: EventType, payload: dict[str, Any]) -> CoreEvent:
+        """Construct a canonical Event for the canonical EventBus.
 
-        FIX 9: the Kernel wires the legacy ``aios.events.bus.EventBus`` (sync
-        ``publish`` + legacy ``aios.events.base.Event``), while the canonical
-        Task-5 ``aios.events.core.bus.EventBus`` carries immutable canonical
-        ``Event`` objects. C3 is bus-agnostic and must emit onto whichever bus
-        the Kernel actually provides, so we build the matching Event type. No
-        new EventType is ever created; only canonical EventTypes (Task 2) are
-        used. Correlation ids follow each Event factory's own behavior
-        (canonical ``Event`` auto-generates a UUIDv7 correlationId; legacy
-        ``Event`` auto-generates a ``uuid4`` correlation_id).
+        FIX 9: Only the canonical EventBus (C1, Task 5) is used. Correlation IDs
+        are auto-generated as UUIDv7 by the canonical Event factory.
         """
-        bus = self._event_bus
-        if bus is not None and isinstance(bus, LegacyEventBus):
-            # Legacy bus: legacy Event object (str/EventType event_type + dict).
-            return LegacyEvent(
-                event_type=event_type,
-                payload=dict(payload),
-                source_service=self._identity.component_name,
-            )
-        # Canonical bus (Task 5) or undetermined: canonical immutable Event.
-        return Event(
+        return CoreEvent(
             eventType=event_type,
             source=self._identity,
             payload=payload,
         )
 
     async def _emit(self, event_type: EventType, payload: dict[str, Any]) -> None:
-        """Deterministic async emission onto the actual bus.
+        """Deterministic async emission onto the canonical EventBus.
 
-        The bus may be the legacy sync ``aios.events.bus.EventBus`` (whose
-        ``publish`` returns an int) or the canonical Task-5 async
-        ``aios.events.core.bus.EventBus`` (whose ``publish`` is a coroutine
-        returning a ``PublishResult``). In both cases we AWAIT the result so
-        the caller observes a fully-published (enqueued) event before
-        returning — no fire-and-forget, no leaked tasks, no double-await. For
-        the canonical bus this guarantees the event is in the queue (and thus
-        observable via ``await bus.drain()``) deterministically.
+        The canonical Task-5 ``aios.events.core.bus.EventBus`` has an async
+        ``publish`` returning a ``PublishResult``. We AWAIT the result so the
+        caller observes a fully-published (enqueued) event before returning —
+        no fire-and-forget, no leaked tasks, no double-await. This guarantees
+        the event is in the queue (and thus observable via ``await bus.drain()``)
+        deterministically.
         """
-        bus = self._event_bus
+        bus = self._event_bus or get_core_event_bus()
         if bus is None:
+            logger.debug("Event %s not dispatched (no EventBus available)", event_type.name)
             return
         try:
             event = self._make_event(event_type, payload)

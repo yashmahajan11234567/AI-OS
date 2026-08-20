@@ -1,4 +1,4 @@
-﻿"""
+"""
 Hermes Kernel - The Core Orchestrator for AI-OS.
 
 The Kernel is the central coordination component that manages the Event Bus,
@@ -17,24 +17,17 @@ from typing import Any
 
 from aios.config.loader import load_config
 from aios.config.models import AppConfig
-from aios.events.bus import EventBus, get_event_bus, set_event_bus
-from aios.events.types import KernelStarted, KernelStopped
 
-# The Kernel owns the single global event bus and registers every manager
-# as its global singleton. This guarantees that all managers (which call
-# get_event_bus()/get_state_manager()/...) share the SAME instances the
-# Kernel created, instead of silently constructing their own and emitting
-# events into a disconnected bus.
-from aios.core.state import StateManager, get_state_manager, set_state_manager
-from aios.core.workflow import (
-    WorkflowManager,
-    get_workflow_manager,
-    set_workflow_manager,
+# Kernel uses CANONICAL Core Components (Task 5/6/7/8 — single authority per process)
+from aios.events.core.bus import (
+    EventBus as CoreEventBus,
+    EventBusConfig,
+    reset_event_bus_singleton as reset_core_event_bus_singleton,
 )
-from aios.core.resource_manager import (
-    ResourceManager,
-    get_resource_manager,
-    set_resource_manager,
+from aios.core.service_registry import (
+    ServiceRegistry as CoreServiceRegistry,
+    get_service_registry as get_core_service_registry,
+    reset_service_registry_singleton as reset_core_service_registry_singleton,
 )
 from aios.core.configuration_manager import (
     ConfigurationManager,
@@ -46,8 +39,32 @@ from aios.core.structured_logger import (
     get_logger,
     set_logger,
 )
-from aios.services.registry import ServiceRegistry, get_service_registry, set_service_registry
+# Task 9 — LifecycleManager (first Core Manager, Part 4 §4.3). Minimal kernel
+# integration: the kernel owns its construction/integration so LifecycleManager
+# (which is NOT a Core Component) can drive the kernel lifecycle state machine.
+# The kernel retains ownership of EventBus / StructuredLogger shutdown order
+# (§3.7.4) and does NOT delegate Core Component teardown to LifecycleManager.
+from aios.core.lifecycle_manager import (
+    LifecycleManager,
+    get_lifecycle_manager,
+    set_lifecycle_manager,
+    reset_lifecycle_manager_singleton,
+)
+# Managers (these use canonical EventBus / ServiceRegistry via global singletons)
+from aios.core.state import StateManager, get_state_manager, set_state_manager
+from aios.core.workflow import (
+    WorkflowManager,
+    get_workflow_manager,
+    set_workflow_manager,
+)
+from aios.core.resource_manager import (
+    ResourceManager,
+    get_resource_manager,
+    set_resource_manager,
+)
+# Engineering services use the canonical ServiceRegistry
 from aios.services.base import BaseService
+from aios.events.core.types import EventType
 
 logger = logging.getLogger(__name__)
 
@@ -79,10 +96,15 @@ class HermesKernel:
     Hermes Kernel - The central orchestrator for AI-OS.
 
     The Kernel manages:
-    - Event Bus for inter-service communication
+    - Event Bus for inter-service communication (CANONICAL C1)
+    - Service Registry for core services (CANONICAL C2)
+    - Configuration Manager (C3)
+    - Structured Logger (C4)
     - State Manager for workflow/application state
     - Workflow Manager for DAG-based workflows
     - Resource Manager for quotas
+    - Lifecycle Manager (first Core Manager)
+    - Engineering Services (registered in canonical C2)
     """
 
     def __init__(
@@ -102,37 +124,19 @@ class HermesKernel:
         self._running = False
         self._start_time: datetime | None = None
 
-        # Core components (only the four required components)
-        self._event_bus: EventBus | None = None
+        # Core Components (C1–C4) — CANONICAL AUTHORITIES (single instance per process)
+        self._event_bus: CoreEventBus | None = None          # C1 — canonical EventBus (Task 5)
+        self._service_registry: CoreServiceRegistry | None = None  # C2 — canonical ServiceRegistry (Task 6)
+        self._configuration: ConfigurationManager | None = None   # C3 — ConfigurationManager (Task 7)
+        self._structured_logger: StructuredLogger | None = None   # C4 — StructuredLogger (Task 8)
+
+        # Core Manager (Task 9)
+        self._lifecycle: LifecycleManager | None = None
+
+        # Managers (constructed after C1–C4, use canonical singletons)
         self._state_manager: StateManager | None = None
         self._workflow_manager: WorkflowManager | None = None
         self._resource_manager: ResourceManager | None = None
-        # ServiceRegistry (C2, Phase 1) is created during start(); initialize the
-        # field so the accessor raises a clear RuntimeError before initialization
-        # rather than AttributeError (FIX 8).
-        self._service_registry: ServiceRegistry | None = None
-        # C3 ConfigurationManager — authoritative configuration authority
-        # (Phase 2). Constructed and owned exclusively by HermesKernel.
-        self._configuration: ConfigurationManager | None = None
-        # C4 StructuredLogger — observability substrate (Phase 3, §3.6).
-        # Constructed and owned exclusively by HermesKernel; set as the global
-        # singleton so all components resolve the SAME instance via
-        # ``kernel.logger``. Initialize it in Phase 3 (after EventBus,
-        # ServiceRegistry, ConfigurationManager) and shut it down first in
-        # Phase S3.
-        self._structured_logger: StructuredLogger | None = None
-
-        # Removed managers (now accessed via capability services):
-        # - CheckpointManager -> via CheckpointService (if created) or WorkflowManager
-        # - RetryManager -> via RetryService (if created)
-        # - RootCauseAnalyzer -> via RootCauseService (if created)
-        # - ModelRouter -> via ModelRouterService (if created)
-        # - MemoryManager -> via MemoryService
-        # - SkillManager -> via SkillService
-        # - MCPManager -> via MCPService
-        # - AIAgencyService -> via AIAgencyService
-        # - CouncilManager -> via CouncilService
-        # - StructuredLogger -> stdlib logging
 
         # Service tracking
         self._services: dict[str, ServiceStatus] = {}
@@ -156,8 +160,8 @@ class HermesKernel:
         return self._running
 
     @property
-    def event_bus(self) -> EventBus | None:
-        """Get event bus."""
+    def event_bus(self) -> CoreEventBus | None:
+        """Get the CANONICAL EventBus (C1 — Task 5 authoritative implementation)."""
         return self._event_bus
 
     @property
@@ -181,8 +185,8 @@ class HermesKernel:
         return self._configuration
 
     @property
-    def service_registry(self) -> ServiceRegistry | None:
-        """Get service registry."""
+    def service_registry(self) -> CoreServiceRegistry | None:
+        """Get the CANONICAL ServiceRegistry (C2 — Task 6 authoritative implementation)."""
         return self._service_registry
 
     @property
@@ -190,17 +194,43 @@ class HermesKernel:
         """Get the StructuredLogger Core Component (C4, Part 3 §3.6)."""
         return self._structured_logger
 
+    @property
+    def lifecycle(self) -> LifecycleManager | None:
+        """Get the LifecycleManager Core Manager (Part 4 §4.3, Task 9)."""
+        return self._lifecycle
+
     def register_service(self, service: BaseService) -> BaseService:
-        """Register an Engineering Service with the kernel."""
+        """Register an Engineering Service with the kernel (canonical C2 registry).
+
+        Synchronous, preserving the pre-Task-9 public contract: before the kernel
+        is started (registry not yet initialized) this raises ``RuntimeError``
+        immediately; after initialization it registers through the canonical
+        ServiceRegistry. The canonical ``register`` is a coroutine (Core Component
+        pattern), so it is driven to completion via :func:`_run_sync`.
+        """
         if self._service_registry:
-            return self._service_registry.register(service)
-        raise RuntimeError("Service registry not initialized. Start kernel first.")
+            # Register using canonical ServiceRegistry with proper namespacing.
+            from aios.core.service_registry import ServiceType
+            _run_sync(
+                self._service_registry.register(
+                    service,
+                    service_id=f"engineering.{service.name}",
+                    service_type=ServiceType.ENGINEERING,
+                    metadata={"version": service.version, "description": service.description},
+                )
+            )
+            logger.debug(f"Registered engineering service '{service.name}' in canonical registry")
+            return service
+        raise RuntimeError("Canonical service registry not initialized. Start kernel first.")
 
     def get_service(self, name: str) -> BaseService:
-        """Get a registered Engineering Service."""
+        """Get a registered Engineering Service (canonical C2 registry)."""
         if self._service_registry:
-            return self._service_registry.get(name)
-        raise RuntimeError("Service registry not initialized. Start kernel first.")
+            # Look up by namespaced ID
+            svc = self._service_registry.get_service(f"engineering.{name}")
+            if svc is not None:
+                return svc
+        raise RuntimeError(f"Engineering service '{name}' not found or registry not initialized")
 
     async def start(self) -> None:
         """Start the kernel and all core services."""
@@ -210,28 +240,43 @@ class HermesKernel:
 
         logger.info("Starting Hermes Kernel...")
 
-        # Initialize core components
+        # Initialize core components (canonical C1–C4)
         await self._init_core_components()
 
-        # Initialize Service Registry
-        await self._init_service_registry()
+        # Task 9 — construct + integrate the LifecycleManager Core Manager
+        # (Part 4 §4.3). It is the authoritative kernel-lifecycle state machine.
+        # Phase-1 wiring only; later managers are registered as they land (Tasks 10+).
+        # The kernel retains ownership of Core Component shutdown order.
+        await self._init_lifecycle_manager()
 
         # Start services if enabled
         if self._config.auto_start_services:
             await self._start_services()
 
-        # Emit kernel started event
-        self._event_bus.publish(
-            KernelStarted(
-                source_service="kernel",
-                correlation_id=f"kernel_start_{datetime.utcnow().timestamp()}",
+        # Emit kernel started event using canonical C1 EventBus
+        # Map KernelStarted -> KERNEL_READY (canonical EventType)
+        if self._event_bus:
+            from aios.events.core.identity import ComponentIdentity, ComponentType
+            from aios.events.core.event import Event
+            from aios.events.core.types import SemanticVersion
+
+            kernel_identity = ComponentIdentity(
+                component_type=ComponentType.CORE_COMPONENT,
+                component_name="HermesKernel",
+                version=SemanticVersion(0, 1, 0),
+            )
+
+            event = Event(
+                eventType=EventType.KERNEL_READY,
+                source=kernel_identity,
+                correlationId=__import__('uuid').uuid4(),
                 payload={
                     "kernel_name": self._config.name,
                     "kernel_version": self._config.version,
                     "services_started": list(self._services.keys()),
                 },
             )
-        )
+            await self._event_bus.publish(event)
 
         self._running = True
         self._start_time = datetime.utcnow()
@@ -246,57 +291,71 @@ class HermesKernel:
 
         logger.info("Stopping Hermes Kernel...")
 
-        # Stop services
-        await self._stop_services()
+        # Stop engineering services via LifecycleManager / canonical C2
+        await self._stop_engineering_services()
+
+        # Task 9 — drive the LifecycleManager to TERMINATED (kernel lifecycle
+        # authority). LifecycleManager does NOT shut down C1–C4; the kernel owns
+        # those teardown orderings (§3.7.4). This only finalizes lifecycle state
+        # so StructuredLogger can still log the transition.
+        await self._shutdown_lifecycle_manager()
 
         # StructuredLogger shutdown (Phase S3 — FIRST Core Component to shut
         # down, §3.7.4). Flushes remaining logs before other components (the
-        # EventBus, which drains last in S0) are torn down. The kernel owns the
-        # lifecycle; no LifecycleManager is invented.
+        # EventBus, which drains last in S0) are torn down.
         await self._shutdown_structured_logger()
 
-        # Emit kernel stopped event
+        # Emit kernel stopped event using canonical C1 EventBus
+        # Map KernelStopped -> KERNEL_SHUTDOWN_STARTED (canonical EventType)
         if self._event_bus:
-            self._event_bus.publish(
-                KernelStopped(
-                    source_service="kernel",
-                    correlation_id=f"kernel_stop_{datetime.utcnow().timestamp()}",
-                    payload={
-                        "kernel_name": self._config.name,
-                        "uptime_seconds": (
-                            datetime.utcnow() - self._start_time
-                        ).total_seconds()
-                        if self._start_time
-                        else 0,
-                    },
-                )
+            from aios.events.core.identity import ComponentIdentity, ComponentType
+            from aios.events.core.event import Event
+            from aios.events.core.types import SemanticVersion
+
+            kernel_identity = ComponentIdentity(
+                component_type=ComponentType.CORE_COMPONENT,
+                component_name="HermesKernel",
+                version=SemanticVersion(0, 1, 0),
             )
 
-        # Shutdown event bus
+            event = Event(
+                eventType=EventType.KERNEL_SHUTDOWN_STARTED,
+                source=kernel_identity,
+                correlationId=__import__('uuid').uuid4(),
+                payload={
+                    "kernel_name": self._config.name,
+                    "uptime_seconds": (
+                        datetime.utcnow() - self._start_time
+                    ).total_seconds()
+                    if self._start_time
+                    else 0,
+                },
+            )
+            await self._event_bus.publish(event)
+
+        # Shutdown canonical EventBus (async await) - LAST per shutdown order
         if self._event_bus:
-            self._event_bus.shutdown()
+            await self._event_bus.shutdown()
 
         self._running = False
 
         logger.info("Hermes Kernel stopped")
 
     async def _init_core_components(self) -> None:
-        """Initialize all core components."""
-        logger.debug("Initializing core components...")
+        """Initialize all canonical Core Components (C1–C4)."""
+        logger.debug("Initializing canonical core components...")
 
-        # Event Bus - the Kernel owns the SINGLE global bus. Every manager
-        # below calls get_event_bus() at construction, so they must be created
-        # AFTER we publish the bus as the global singleton. Otherwise they
-        # would bind to a different bus and events would never cross.
-        self._event_bus = EventBus(max_history=self._config.event_bus_max_history)
-        set_event_bus(self._event_bus)
-        await self._event_bus.start()
+        # C1: Canonical EventBus (Task 5) — exactly one per process (INV-EB-001)
+        # Must be RUNNING before any component that publishes to it.
+        reset_core_event_bus_singleton()
+        self._event_bus = CoreEventBus(config=EventBusConfig(auto_start_dispatch_worker=False))
+        await self._event_bus.initialize()
 
-        # ConfigurationManager (C3, Phase 2) — depends on EventBus (§3.5).
-        # Constructed and owned by the kernel; set as the global singleton so
-        # other components resolve the SAME instance. Loads + merges the four
-        # configuration layers and validates schema during initialize(), then
-        # is frozen at the Phase 2->3 boundary below (INV-CM-FRZ-001/002).
+        # C2: Canonical ServiceRegistry (Phase 1) — depends on canonical EventBus
+        reset_core_service_registry_singleton()
+        self._service_registry = get_core_service_registry(event_bus=self._event_bus)
+
+        # C3: ConfigurationManager (Phase 2) — depends on canonical EventBus
         self._configuration = get_configuration_manager(
             event_bus=self._event_bus,
             config_path=self._config.config_path,
@@ -304,38 +363,29 @@ class HermesKernel:
         set_configuration_manager(self._configuration)
         await self._configuration.initialize()
         # Phase 2 -> 3 freeze boundary: freeze configuration before any Core
-        # Manager (Phase 4+) or Service (Phase 9+) can read it. This is the
-        # existing repository's freeze hook; no LifecycleManager is invented.
+        # Manager (Phase 4+) or Service (Phase 9+) can read it.
         self._configuration.freeze()
 
-        # StructuredLogger (C4, Phase 3 — last Core Component, §3.6 / §3.7.3).
-        # Depends on EventBus, ServiceRegistry (constructed below), and the now
-        # frozen ConfigurationManager. Constructed and owned exclusively by the
-        # kernel; set as the global singleton so every component resolves the
-        # same instance. Initializes after the ConfigurationManager freeze
-        # (INV-CC-INIT-003 / INV-CC-LC-005). ServiceRegistry is constructed
-        # during _init_service_registry (Phase 1 in the architecture); we inject
-        # the already-built EventBus + ConfigurationManager here and let the
-        # logger resolve ServiceRegistry lazily via the kernel accessor.
+        # C4: StructuredLogger (Phase 3 — last Core Component, §3.6 / §3.7.3).
+        # Depends on canonical EventBus, canonical ServiceRegistry (lazy via kernel),
+        # and frozen ConfigurationManager.
         self._structured_logger = get_logger()
         set_logger(self._structured_logger)
         await self._structured_logger.initialize(self)
 
-        # State Manager
+        # Managers (constructed after C1–C4, use canonical singletons)
         self._state_manager = StateManager(
             persistence_path=self._config.data_dir / "state"
         )
         set_state_manager(self._state_manager)
 
-        # Workflow Manager (shares state_manager + event bus)
         self._workflow_manager = WorkflowManager(self._state_manager)
         set_workflow_manager(self._workflow_manager)
 
-        # Resource Manager
         self._resource_manager = ResourceManager()
         set_resource_manager(self._resource_manager)
 
-        logger.debug("Core components initialized")
+        logger.debug("Canonical core components initialized")
 
     async def _shutdown_structured_logger(self) -> None:
         """Shut down the StructuredLogger Core Component (Phase S3, §3.7.4)."""
@@ -349,20 +399,63 @@ class HermesKernel:
         finally:
             self._structured_logger = None
 
-    async def _init_service_registry(self) -> None:
-        """Initialize the Service Registry and register it as global singleton."""
-        logger.debug("Initializing Service Registry...")
-        self._service_registry = ServiceRegistry(self._event_bus)
-        set_service_registry(self._service_registry)
-        logger.debug("Service Registry initialized")
+    async def _shutdown_lifecycle_manager(self) -> None:
+        """Task 9 — finalize the LifecycleManager lifecycle state.
+
+        Drives the LifecycleManager to TERMINATED. It does NOT shut down the Core
+        Components (C1–C4); the kernel owns those teardown orderings (§3.7.4).
+        Errors are logged and swallowed (lifecycle teardown must not block kernel
+        shutdown), matching the StructuredLogger-shutdown precedent.
+        """
+        lm = self._lifecycle
+        if lm is None:
+            return
+        try:
+            await lm.shutdown()
+        except Exception as e:  # noqa: BLE001
+            logger.error(f"Error shutting down LifecycleManager: {e}")
+        finally:
+            self._lifecycle = None
+
+    async def _init_lifecycle_manager(self) -> None:
+        """Task 9 — construct + integrate the LifecycleManager Core Manager.
+
+        Builds the LifecycleManager wired to the four Core Components (C1–C4),
+        registers it with the canonical ServiceRegistry (as ``core.lifecycle``),
+        sets the global singleton, and drives initialization to OPERATIONAL.
+        Later Core Managers are registered with ``lifecycle.register_manager``
+        as they are implemented in subsequent tasks.
+
+        The kernel owns Core Component shutdown order (§3.7.4); LifecycleManager
+        is the lifecycle *authority* but does not tear down C1–C4 here.
+        """
+        logger.debug("Initializing LifecycleManager (Task 9)...")
+
+        reset_lifecycle_manager_singleton()
+        lm = get_lifecycle_manager(
+            event_bus=self._event_bus,              # Canonical C1
+            service_registry=self._service_registry,  # Canonical C2
+            configuration_manager=self._configuration,  # C3
+            logger=self._structured_logger,           # C4 (already initialized)
+            kernel=self,
+        )
+        set_lifecycle_manager(lm)
+        self._lifecycle = lm
+        await lm.register_with_service_registry()
+        try:
+            await lm.initialize()
+        except Exception as exc:  # noqa: BLE001
+            # Initialization coordinated rollback internally; surface clearly.
+            logger.error(f"LifecycleManager initialization failed: {exc}")
+            raise
+        logger.debug("LifecycleManager initialized -> OPERATIONAL")
 
     async def _start_services(self) -> None:
         """Start all registered services."""
         logger.debug("Starting services...")
 
-        # Start core services first
+        # Start core services first (canonical managers)
         services = [
-            ("event_bus", self._start_event_bus),
             ("state_manager", self._start_state_manager),
             ("workflow_manager", self._start_workflow_manager),
             ("resource_manager", self._start_resource_manager),
@@ -386,32 +479,63 @@ class HermesKernel:
                     last_error=str(e),
                 )
 
-        # Start Engineering Services via Service Registry
+        # Start Engineering Services via canonical C2 ServiceRegistry.
+        #
+        # Engineering services are registered under the reserved ``engineering.``
+        # namespace prefix (Part 3 §3.4.8, INV-SR-NS-001 / INV-SR-NS-002). Core
+        # Components / Core Managers are ALSO visible through the canonical
+        # registry (they share the ``ServiceType.ENGINEERING`` classification
+        # envelope so they remain discoverable there), but their lifecycle is
+        # owned by the dedicated lifecycle/phase mechanism — NOT by the
+        # engineering service start/stop loops. We therefore filter the
+        # ENGINEERING-typed listing by the kernel's own canonical service-id
+        # convention (``engineering.<name>``, see ``register_service``): an entry
+        # that is not present under that id (e.g. ``core.lifecycle``) is a Core
+        # Component / Core Manager and is left to its dedicated lifecycle path.
         if self._service_registry:
-            results = await self._service_registry.start_all()
-            for name, success in results.items():
-                status = ServiceStatus(
-                    name=name,
-                    started=success,
-                    healthy=success,
-                    started_at=datetime.utcnow() if success else None,
+            from aios.core.service_registry import ServiceType
+
+            engineering_services = [
+                svc
+                for svc in self._service_registry.get_services_by_type(
+                    ServiceType.ENGINEERING
                 )
-                self._services[name] = status
-                if success:
-                    logger.debug(f"Started Engineering Service: {name}")
-                else:
-                    logger.error(f"Failed to start Engineering Service: {name}")
+                if self._service_registry.get_registration(
+                    f"engineering.{svc.name}"
+                )
+                is not None
+            ]
+
+            # Start each engineering service
+            for svc in engineering_services:
+                try:
+                    await svc.start()
+                    self._services[svc.name] = ServiceStatus(
+                        name=svc.name,
+                        started=True,
+                        healthy=True,
+                        started_at=datetime.utcnow(),
+                    )
+                    # Mark as RUNNING in canonical registry
+                    await self._service_registry.mark_service_running(f"engineering.{svc.name}")
+                    logger.debug(f"Started Engineering Service: {svc.name}")
+                except Exception as e:
+                    self._services[svc.name] = ServiceStatus(
+                        name=svc.name,
+                        started=False,
+                        healthy=False,
+                        last_error=str(e),
+                    )
+                    logger.error(f"Failed to start Engineering Service: {svc.name}: {e}")
 
     async def _stop_services(self) -> None:
-        """Stop all running services."""
-        logger.debug("Stopping services...")
+        """Stop core services in reverse order."""
+        logger.debug("Stopping core services...")
 
-        # Stop in reverse order
         stop_order = [
             "resource_manager",
             "workflow_manager",
             "state_manager",
-            "event_bus",
         ]
 
         for name in stop_order:
@@ -425,10 +549,45 @@ class HermesKernel:
                 except Exception as e:
                     logger.error(f"Error stopping service {name}: {e}")
 
-    # Service start/stop methods
-    async def _start_event_bus(self) -> None:
-        pass  # Already started in init
+    async def _stop_engineering_services(self) -> None:
+        """Stop all engineering services via canonical registry.
 
+        Symmetric to :meth:`_start_services`: only entries with the canonical
+        ``engineering.`` namespace prefix (``Part 3 §3.4.8``,
+        ``INV-SR-NS-001``) are stopped — Core Components / Core Managers are
+        NOT touched here. Lifecycle for those is owned by the dedicated
+        lifecycle/phase mechanism.
+        """
+        logger.debug("Stopping engineering services...")
+        if self._service_registry:
+            from aios.core.service_registry import ServiceType
+
+            # Same discriminator as ``_start_services``: only entries present
+            # under the canonical ``engineering.<name>`` service-id are stopped.
+            # Core Components / Core Managers (e.g. ``core.lifecycle``) are not
+            # touched here — their lifecycle is owned by the dedicated
+            # lifecycle/phase mechanism.
+            engineering_services = [
+                svc
+                for svc in self._service_registry.get_services_by_type(
+                    ServiceType.ENGINEERING
+                )
+                if self._service_registry.get_registration(
+                    f"engineering.{svc.name}"
+                )
+                is not None
+            ]
+
+            for svc in engineering_services:
+                try:
+                    await svc.stop()
+                    # Mark as SHUTDOWN in canonical registry
+                    await self._service_registry.mark_service_shutdown(f"engineering.{svc.name}")
+                    logger.debug(f"Stopped Engineering Service: {svc.name}")
+                except Exception as e:
+                    logger.error(f"Error stopping engineering service {svc.name}: {e}")
+
+    # Service start/stop methods
     async def _start_state_manager(self) -> None:
         self._state_manager.load_persisted_snapshots()
 
@@ -437,10 +596,6 @@ class HermesKernel:
 
     async def _start_resource_manager(self) -> None:
         self._resource_manager.start_cleanup_task()
-
-    async def _stop_event_bus(self) -> None:
-        if self._event_bus:
-            self._event_bus.shutdown()
 
     async def _stop_resource_manager(self) -> None:
         self._resource_manager.stop_cleanup_task()
@@ -468,7 +623,7 @@ class HermesKernel:
             else 0
        )
         return {
-           "kernel": {
+            "kernel": {
                 "name": self._config.name,
                 "version": self._config.version,
                 "running": self._running,
@@ -484,10 +639,35 @@ class HermesKernel:
             "service_count": total_services,
             "healthy_services": healthy_services,
             "event_bus": self._event_bus.get_stats() if self._event_bus else None,
+            "service_registry": self._service_registry.get_stats() if self._service_registry else None,
             "resource_manager": (
                 self._resource_manager.get_stats() if self._resource_manager else None
             ),
        }
+
+
+def _run_sync(coro: Any) -> Any:
+    """Run a coroutine to completion from a synchronous call site.
+
+    The canonical Core Components (EventBus, ServiceRegistry, ...) expose async
+    lifecycle/registration methods (Core Component pattern). The kernel's public
+    ``register_service`` is synchronous (pre-Task-9 contract), so the canonical
+    coroutine is bridged here — same approach as the Task 6 legacy compatibility
+    layer (``aios/services/registry.py:_run_sync``). If a loop is already running
+    in this thread (e.g. an async test), the coroutine is driven on a dedicated
+    thread with its own loop so it still completes synchronously from the
+    caller's perspective.
+    """
+    try:
+        running = asyncio.get_running_loop()
+    except RuntimeError:
+        running = None
+    if running is None:
+        return asyncio.run(coro)
+    import concurrent.futures
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as ex:
+        return ex.submit(asyncio.run, coro).result()
 
 
 # Global kernel instance
