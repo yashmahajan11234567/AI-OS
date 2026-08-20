@@ -143,6 +143,15 @@ from aios.core.state import (
     get_state_manager,
     set_state_manager,
 )
+from aios.core.storage import (
+    StorageManager,
+    StorageNamespace,
+    StorageObject,
+    StorageManagerError,
+    get_storage_manager,
+    set_storage_manager,
+    reset_storage_manager_singleton,
+)
 from aios.core.workflow import (
     WorkflowManager,
     WorkflowDefinition,
@@ -449,6 +458,13 @@ __all__ = [
     "StateSnapshot",
     "get_state_manager",
     "set_state_manager",
+    "StorageManager",
+    "StorageNamespace",
+    "StorageObject",
+    "StorageManagerError",
+    "get_storage_manager",
+    "set_storage_manager",
+    "reset_storage_manager_singleton",
     "WorkflowManager",
     "WorkflowDefinition",
     "WorkflowStep",

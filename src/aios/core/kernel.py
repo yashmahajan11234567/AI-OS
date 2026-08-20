@@ -52,6 +52,11 @@ from aios.core.lifecycle_manager import (
 )
 # Managers (these use canonical EventBus / ServiceRegistry via global singletons)
 from aios.core.state import StateManager, get_state_manager, set_state_manager
+from aios.core.storage import (
+    StorageManager,
+    get_storage_manager,
+    set_storage_manager,
+)
 from aios.core.workflow import (
     WorkflowManager,
     get_workflow_manager,
@@ -135,6 +140,7 @@ class HermesKernel:
 
         # Managers (constructed after C1–C4, use canonical singletons)
         self._state_manager: StateManager | None = None
+        self._storage_manager: StorageManager | None = None
         self._workflow_manager: WorkflowManager | None = None
         self._resource_manager: ResourceManager | None = None
 
@@ -168,6 +174,11 @@ class HermesKernel:
     def state_manager(self) -> StateManager | None:
         """Get state manager."""
         return self._state_manager
+
+    @property
+    def storage_manager(self) -> StorageManager | None:
+        """Get the StorageManager Core Manager (Part 4 §4.5, Task 11)."""
+        return self._storage_manager
 
     @property
     def workflow_manager(self) -> WorkflowManager | None:
@@ -387,6 +398,24 @@ class HermesKernel:
         )
         set_state_manager(self._state_manager)
 
+        # Task 11 — StorageManager is a Phase-2 Core Manager (Part 4 §4.5, "State &
+        # Storage" phase, alongside StateManager). It receives the canonical
+        # C2/C3/C4 refs via DI so its initialize() can register with
+        # ServiceRegistry, read frozen ConfigurationManager, and log through
+        # StructuredLogger. LifecycleManager (constructed next) will register and
+        # drive it. Per the Phase Dependency Rule, StorageManager does NOT declare
+        # StateManager as a formal dependency — deterministic alphabetical ordering
+        # within Phase 2 (StateManager before StorageManager) guarantees correct
+        # sequencing, and their operational coordination is event-driven (EventBus),
+        # not a lifecycle dependency edge.
+        self._storage_manager = StorageManager(
+            persistence_path=self._config.data_dir / "storage",
+            service_registry=self._service_registry,
+            configuration_manager=self._configuration,
+            logger=self._structured_logger,
+        )
+        set_storage_manager(self._storage_manager)
+
         self._workflow_manager = WorkflowManager(self._state_manager)
         set_workflow_manager(self._workflow_manager)
 
@@ -459,6 +488,16 @@ class HermesKernel:
         if self._state_manager is not None:
             lm.register_manager(self._state_manager)
             logger.debug("Registered StateManager with LifecycleManager (Phase 2).")
+
+        # Task 11 — register the StorageManager Core Manager (Phase 2, "State &
+        # Storage") for LifecycleManager orchestration. StorageManager was
+        # constructed in _init_core_components(); its initialize()/shutdown() are
+        # driven by LifecycleManager's phase topology, NOT by the engineering
+        # service start/stop loops. Phase-2 ordering is deterministic (alphabetical:
+        # StateManager before StorageManager).
+        if self._storage_manager is not None:
+            lm.register_manager(self._storage_manager)
+            logger.debug("Registered StorageManager with LifecycleManager (Phase 2).")
 
         try:
             await lm.initialize()
