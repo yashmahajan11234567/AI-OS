@@ -182,8 +182,8 @@ class TestStructuredLoggerPhase:
             et_name = et.name if isinstance(et, EventType) else str(et)
             if "COMPONENT" in et_name:
                 assert et_name in allowed
-        # Sanity: the legacy LOG_ANOMALY_DETECTED bridge type is only used by
-        # EventBusSink when WARN+ entries are forwarded, never as a new type.
+        # Sanity: the EventBusSink uses the canonical CORE_COMPONENT_DEGRADED
+        # type as the log-forwarding carrier when WARN+ entries are forwarded.
         assert EventType.CORE_COMPONENT_INITIALIZED is not None
         assert EventType.CORE_COMPONENT_SHUTDOWN is not None
 

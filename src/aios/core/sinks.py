@@ -27,14 +27,18 @@ StructuredLogger can isolate failures (INV-SL-FH-002 / INV-SL-SNK-003) and
 recover automatically (INV-SL-REC-001).
 
 No new EventTypes are created here — ``EventBusSink`` republishes each
-log entry onto the bus using the existing legacy ``EventType.LOG_ANOMALY_DETECTED``
-member (the only log-carrier in the codebase's Enum). The architecture-named
-``LogEvent`` EventType is not present in either the legacy or canonical
-EventType enum; rather than invent an enum member (forbidden by the task
-brief), ``EventBusSink`` serializes each log entry as a plain event payload
-carried by ``LOG_ANOMALY_DETECTED`` and is documented as such. This honors the
+log entry onto the bus using the existing canonical
+``EventType.CORE_COMPONENT_DEGRADED`` member as the log-forwarding carrier.
+The architecture-named ``LogEvent`` EventType is not present in the canonical
+``EventType`` enum (it would require an ARB change to Part 2 §2.3.1); rather
+than invent an enum member (forbidden by the task brief), ``EventBusSink``
+serializes each log entry as a plain event payload carried by the canonical
+``CORE_COMPONENT_DEGRADED`` type and is documented as such. This honors the
 EventBus-First rule (§3.7.7 / §3.6.10) and the closed-enum constraint without
-modifying the frozen EventType catalog.
+modifying the frozen EventType catalog. ``CORE_COMPONENT_DEGRADED`` is the
+semantically correct canonical mapping: WARN+ log entries forwarded to the
+bus indicate a component health degradation, which is exactly what that event
+type represents.
 """
 
 from __future__ import annotations
@@ -56,6 +60,9 @@ from typing import Any, Protocol, runtime_checkable
 from aios.events.core.event import Event as LegacyEvent
 from aios.events.core.types import EventType as LegacyEventType
 from aios.events.core.serialization import compute_checksum
+
+# Canonical EventType for log-entry bridging (EventBusSink carrier).
+_LOG_EVENT_TYPE = LegacyEventType.CORE_COMPONENT_DEGRADED
 
 logger = logging.getLogger("aios.core.sinks")
 
@@ -561,10 +568,9 @@ class EventBusSink(BaseSink):
     canonical ``EventType`` enum (it would require an ARB change to Part 2).
     To honor the EventBus-First rule and the closed-enum constraint
     simultaneously, entries are bridged onto the bus using the existing
-    canonical ``EventType.LOG_ANOMALY_DETECTED`` type as the log-forwarding
+    canonical ``EventType.CORE_COMPONENT_DEGRADED`` type as the log-forwarding
     carrier, with the full structured entry embedded in the payload. No new
-    EventType is invented (forbidden by the task brief); this deviation is
-    documented in the Task 8 report.
+    EventType is invented (forbidden by the task brief).
 
     The bound bus is the canonical EventBus (C1, Task 5) which exposes an
     async ``publish`` method. The sink handles the sync-to-async bridge
@@ -591,7 +597,7 @@ class EventBusSink(BaseSink):
                 continue
             try:
                 event = LegacyEvent(
-                    eventType=LegacyEventType.LOG_ANOMALY_DETECTED,
+                    eventType=_LOG_EVENT_TYPE,
                     source=self._identity,
                     correlationId=__import__('uuid').uuid4(),
                     payload={

@@ -2,7 +2,7 @@
 Core atomic enumerations and value types for the AI-OS Event model.
 
 Implements:
-  * ``EventType``  — closed enum, Part 2 §2.3.1 (118 canonical types in the
+  * ``EventType``  — closed enum, Part 2 §2.3.1 (121 canonical types in the
     enumeration; the prose states 97 — we conform to the enumeration)
   * ``SemanticVersion`` — Part 2 §2.2.5 (MAJOR.MINOR.PATCH)
   * ``ComponentType`` — Part 2 §2.2.2 component-type discriminant

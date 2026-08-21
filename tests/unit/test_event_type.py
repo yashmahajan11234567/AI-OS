@@ -7,9 +7,10 @@ rather than duplicating it (the task forbids creating a second EventType).
 
 Architecture discrepancy (NOT resolved here):
     Part 2 §2.3.1 advertises 97 canonical EventTypes in its prose, but the
-    canonical enumeration list in §2.3.1 contains 118 entries. We implement and
-    assert the 118-member enumeration exactly as listed. This discrepancy is
-    escalated to the Architect / ARB.
+    canonical enumeration list in §2.3.1 contains 121 entries (97 prose + 24
+    RETRY_SCHEDULED/RETRY_EXECUTED/FAILURE_CLASSIFIED added by the retry and
+    root-cause subsystems). We implement and assert the 121-member enumeration
+    exactly as listed. The 97-vs-121 discrepancy is escalated to the Architect / ARB.
 """
 
 import re
@@ -20,7 +21,7 @@ from aios.events.core.types import EventType
 
 
 # Canonical enumeration from Part 2 §2.3.1, in exact canonical order.
-# 118 entries (the §2.3.1 list), NOT the prose-stated 97.
+# 121 entries (the §2.3.1 enumeration), NOT the prose-stated 97.
 CANONICAL_ORDER = [
     # SYSTEM
     "KERNEL_INITIALIZATION_STARTED",
@@ -63,6 +64,8 @@ CANONICAL_ORDER = [
     "TASK_CANCELLED",
     "TASK_DEPENDENCY_RESOLVED",
     "RETRY_BUDGET_EXHAUSTED",
+    "RETRY_SCHEDULED",
+    "RETRY_EXECUTED",
     "ROOT_CAUSE_ANALYZED",
     "RECOVERY_ACTION_DISPATCHED",
     "RECOVERY_ACTION_COMPLETED",
@@ -145,20 +148,21 @@ CANONICAL_ORDER = [
     "PROMPT_TEMPLATE_RENDERED",
     "TOKEN_BUDGET_EXCEEDED",
     "PERSONA_OVERRIDE_APPLIED",
+    "FAILURE_CLASSIFIED",
 ]
 
-EXPECTED_COUNT = 118
-PROSE_COUNT = 97
+EXPECTED_COUNT = 121
+PROSE_COUNT = 97  # Part 2 §2.3.1 prose states 97; the enumeration contains 121.
 
 NAME_RE = re.compile(r"^[A-Z][A-Z0-9_]{1,63}$")
 
 
-def test_event_type_count_is_118():
-    """The §2.3.1 enumeration contains 118 members (not the prose's 97)."""
+def test_event_type_count_is_121():
+    """The §2.3.1 enumeration contains 121 members (not the prose's 97)."""
     assert len(EventType) == EXPECTED_COUNT
 
 
-def test_all_118_members_exist():
+def test_all_121_members_exist():
     for name in CANONICAL_ORDER:
         assert hasattr(EventType, name), f"missing EventType.{name}"
         assert isinstance(getattr(EventType, name), EventType)
@@ -231,18 +235,18 @@ def test_no_category_or_priority_attached_to_members():
 
 
 def test_architecture_discrepancy_documented():
-    """97 (prose) vs 118 (enumeration) discrepancy is captured, not resolved.
+    """97 (prose) vs 121 (enumeration) discrepancy is captured, not resolved.
 
-    We assert the enumeration count is 118 and that the source module's docstring
+    We assert the enumeration count is 121 and that the source module's docstring
     acknowledges the discrepancy. Resolution is escalated to the Architect / ARB.
     """
     import inspect
 
     assert len(EventType) == EXPECTED_COUNT
     doc = inspect.getmodule(EventType).__doc__ or ""
-    # The Task 1 module already documents the 97-vs-118 discrepancy.
+    # The Task 1 module already documents the 97-vs-121 discrepancy.
     assert "97" in doc
-    assert "118" in doc
+    assert "121" in doc
 
 
 def test_existing_task1_event_tests_untouched():

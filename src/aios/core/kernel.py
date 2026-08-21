@@ -77,6 +77,36 @@ from aios.core.health_manager import (
     get_health_manager,
     set_health_manager,
 )
+# Task 14 — SecurityManager (Phase-3 Governance Core Manager). Constructed in
+# _init_core_components(); LifecycleManager will register and drive it. It is NOT
+# added to _start_services/_stop_engineering_services (same-phase sibling of
+# ResourceManager/HealthManager; alphabetical ordering within Phase 3 is
+# deterministic: HealthManager, ResourceManager, SecurityManager).
+from aios.core.security_manager import (
+    SecurityManager,
+    get_security_manager,
+    set_security_manager,
+    reset_security_manager_singleton,
+)
+# Task 15 — CapabilityManager (Phase-4 Execution Core Manager). Constructed in
+# _init_core_components(); LifecycleManager (constructed in _init_lifecycle_manager)
+# will register and drive it. Phase-4 ordering is deterministic (alphabetical:
+# CapabilityManager before WorkflowManager).
+from aios.core.capability_manager import (
+    CapabilityManager,
+    get_capability_manager,
+    set_capability_manager,
+    reset_capability_manager_singleton,
+)
+# Task 15 — ObservabilityManager (Phase-5 Observability Core Manager). Constructed
+# in _init_core_components(); LifecycleManager will register and drive it. It is
+# the only manager in its phase.
+from aios.core.observability_manager import (
+    ObservabilityManager,
+    get_observability_manager,
+    set_observability_manager,
+    reset_observability_manager_singleton,
+)
 # Engineering services use the canonical ServiceRegistry
 from aios.services.base import BaseService
 from aios.events.core.types import EventType
@@ -154,6 +184,12 @@ class HermesKernel:
         self._workflow_manager: WorkflowManager | None = None
         self._resource_manager: ResourceManager | None = None
         self._health_manager: HealthManager | None = None
+        # Task 14 — SecurityManager (Phase-3 Governance Core Manager)
+        self._security_manager: SecurityManager | None = None
+        # Task 15 — CapabilityManager (Phase-4 Execution Core Manager)
+        self._capability_manager: CapabilityManager | None = None
+        # Task 15 — ObservabilityManager (Phase-5 Observability Core Manager)
+        self._observability_manager: ObservabilityManager | None = None
 
         # Service tracking
         self._services: dict[str, ServiceStatus] = {}
@@ -205,6 +241,21 @@ class HermesKernel:
     def health_manager(self) -> HealthManager | None:
         """Get the HealthManager Core Manager (Part 4 §4.6, Task 12)."""
         return self._health_manager
+
+    @property
+    def security_manager(self) -> SecurityManager | None:
+        """Get the SecurityManager Core Manager (Part 4 §4.7, Task 14)."""
+        return self._security_manager
+
+    @property
+    def capability_manager(self) -> CapabilityManager | None:
+        """Get the CapabilityManager Core Manager (Part 4 §4.8, Task 15)."""
+        return self._capability_manager
+
+    @property
+    def observability_manager(self) -> ObservabilityManager | None:
+        """Get the ObservabilityManager Core Manager (Part 4 §4.11, Task 15)."""
+        return self._observability_manager
 
     @property
     def configuration(self) -> ConfigurationManager | None:
@@ -467,6 +518,49 @@ class HermesKernel:
         )
         set_health_manager(self._health_manager)
 
+        # Task 14 — SecurityManager is a Phase-3 (Governance) Core Manager. It
+        # receives the canonical C2/C3/C4 refs via DI so its initialize() can
+        # register with ServiceRegistry as ``core.security``, read frozen
+        # ConfigurationManager (``kernel.security.*``), and log through
+        # StructuredLogger. LifecycleManager (constructed next) will register and
+        # drive it. Per the Phase Dependency Rule, SecurityManager does NOT declare
+        # ResourceManager or HealthManager as formal dependencies — deterministic
+        # alphabetical ordering within Phase 3 (HealthManager, ResourceManager,
+        # SecurityManager) guarantees correct sequencing.
+        self._security_manager = SecurityManager(
+            service_registry=self._service_registry,
+            configuration_manager=self._configuration,
+            logger=self._structured_logger,
+        )
+        set_security_manager(self._security_manager)
+
+        # Task 15 — CapabilityManager is a Phase-4 (Execution) Core Manager. It
+        # receives the canonical C2/C3/C4 refs via DI so its initialize() can
+        # register with ServiceRegistry as ``core.capability``, read frozen
+        # ConfigurationManager (``kernel.capability.*``), and log through
+        # StructuredLogger. LifecycleManager (constructed next) will register and
+        # drive it. Phase-4 ordering is deterministic (alphabetical:
+        # CapabilityManager before WorkflowManager).
+        self._capability_manager = CapabilityManager(
+            service_registry=self._service_registry,
+            configuration_manager=self._configuration,
+            logger=self._structured_logger,
+        )
+        set_capability_manager(self._capability_manager)
+
+        # Task 15 — ObservabilityManager is a Phase-5 (Observability) Core Manager.
+        # It receives the canonical C2/C3/C4 refs via DI so its initialize() can
+        # register with ServiceRegistry as ``core.observability``, read frozen
+        # ConfigurationManager (``kernel.observability.*``), and log through
+        # StructuredLogger. LifecycleManager (constructed next) will register and
+        # drive it. It is the only manager in its phase.
+        self._observability_manager = ObservabilityManager(
+            service_registry=self._service_registry,
+            configuration_manager=self._configuration,
+            logger=self._structured_logger,
+        )
+        set_observability_manager(self._observability_manager)
+
         logger.debug("Canonical core components initialized")
 
     async def _shutdown_structured_logger(self) -> None:
@@ -565,6 +659,34 @@ class HermesKernel:
         if self._resource_manager is not None:
             lm.register_manager(self._resource_manager)
             logger.debug("Registered ResourceManager with LifecycleManager (Phase 3).")
+
+        # Task 14 — register the SecurityManager Core Manager (Phase 3,
+        # "Governance") for LifecycleManager orchestration. SecurityManager was
+        # constructed in _init_core_components(); its initialize()/shutdown() are
+        # driven by LifecycleManager's Phase-3 phase topology, NOT by the
+        # engineering service start/stop loops. Phase-3 ordering is deterministic
+        # (alphabetical: HealthManager, ResourceManager, SecurityManager).
+        if self._security_manager is not None:
+            lm.register_manager(self._security_manager)
+            logger.debug("Registered SecurityManager with LifecycleManager (Phase 3).")
+
+        # Task 15 — register the CapabilityManager Core Manager (Phase 4,
+        # "Execution") for LifecycleManager orchestration. CapabilityManager was
+        # constructed in _init_core_components(); its initialize()/shutdown() are
+        # driven by LifecycleManager's Phase-4 phase topology. Phase-4 ordering is
+        # deterministic (alphabetical: CapabilityManager before WorkflowManager).
+        if self._capability_manager is not None:
+            lm.register_manager(self._capability_manager)
+            logger.debug("Registered CapabilityManager with LifecycleManager (Phase 4).")
+
+        # Task 15 — register the ObservabilityManager Core Manager (Phase 5,
+        # "Observability") for LifecycleManager orchestration. It was constructed
+        # in _init_core_components(); its initialize()/shutdown() are driven by
+        # LifecycleManager's Phase-5 phase topology. It is the only manager in its
+        # phase.
+        if self._observability_manager is not None:
+            lm.register_manager(self._observability_manager)
+            logger.debug("Registered ObservabilityManager with LifecycleManager (Phase 5).")
 
         try:
             await lm.initialize()

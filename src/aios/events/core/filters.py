@@ -48,7 +48,9 @@ def _resolve(event: "Event", field: str) -> Any:
     """Resolve a dot-notation field path against an Event (§2.5.3).
 
     ``payload.taskId`` reads ``event.payload.get('taskId')`` (supporting deeper
-    dotted payload paths). A bare ``payload`` yields the payload view. Any other
+    dotted payload paths). Both ``dict`` and dict-like objects exposing a
+    callable ``.get()`` are supported; non-dict-like objects fall back to
+    attribute lookup. A bare ``payload`` yields the payload view. Any other
     name resolves against the Event's base-contract properties. Missing paths
     return ``_MISSING`` so callers can treat them as non-matches.
     """
@@ -60,7 +62,7 @@ def _resolve(event: "Event", field: str) -> Any:
         for part in rest.lstrip(".").split("."):
             if cur is None:
                 return _MISSING
-            if isinstance(cur, dict):
+            if callable(getattr(cur, "get", None)):
                 cur = cur.get(part, _MISSING)
             else:
                 cur = getattr(cur, part, _MISSING)

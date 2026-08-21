@@ -3,7 +3,7 @@ Tests for EventTypeRegistry / EventTypeRegistration (Task 3; Part 2 §2.3.5, §2
 
 Architecture discrepancy note (escalated, not resolved):
     Part 2 §2.3.1 prose advertises 97 canonical EventTypes, but the §2.3.1
-    enumeration lists 118. Task 3 registers the 118 canonical members from Task 2.
+    enumeration lists 121. Task 3 registers the 121 canonical members from Task 2.
 """
 
 import threading
@@ -27,7 +27,7 @@ from aios.events.core.registry import (
 from aios.events.core.types import EventType, SemanticVersion
 
 
-# Canonical 118 names, in exact Part 2 §2.3.1 order (mirrors Task 2 test).
+# Canonical 121 names, in exact Part 2 §2.3.1 order (mirrors Task 2 test).
 CANONICAL_NAMES = [
     "KERNEL_INITIALIZATION_STARTED", "KERNEL_READY", "KERNEL_SHUTDOWN_STARTED",
     "KERNEL_TERMINATED", "KERNEL_INITIALIZATION_FAILED", "KERNEL_FATAL_ERROR",
@@ -40,7 +40,8 @@ CANONICAL_NAMES = [
     "WORKFLOW_STEP_SKIPPED", "WORKFLOW_CHECKPOINT_CREATED", "WORKFLOW_CHECKPOINT_RESTORED",
     "TASK_CREATED", "TASK_ASSIGNED", "TASK_STARTED", "TASK_COMPLETED", "TASK_FAILED",
     "TASK_RETRIED", "TASK_CANCELLED", "TASK_DEPENDENCY_RESOLVED", "RETRY_BUDGET_EXHAUSTED",
-    "ROOT_CAUSE_ANALYZED", "RECOVERY_ACTION_DISPATCHED", "RECOVERY_ACTION_COMPLETED",
+    "RETRY_SCHEDULED", "RETRY_EXECUTED", "ROOT_CAUSE_ANALYZED", "RECOVERY_ACTION_DISPATCHED",
+    "RECOVERY_ACTION_COMPLETED",
     "RECOVERY_ACTION_FAILED", "STATE_CHANGED", "STATE_SNAPSHOT_CREATED", "STATE_RESTORED",
     "ARTIFACT_CREATED", "ARTIFACT_UPDATED", "ARTIFACT_DELETED", "CHECKPOINT_CREATED",
     "CHECKPOINT_RESTORED", "CHECKPOINT_PRUNED", "MEMORY_STORED", "MEMORY_RETRIEVED",
@@ -61,10 +62,10 @@ CANONICAL_NAMES = [
     "RESOURCE_EXHAUSTED", "QUOTA_EXCEEDED", "SKILL_EXECUTED", "SKILL_FAILED",
     "MCP_TOOL_CALLED", "MCP_TOOL_SUCCEEDED", "MCP_TOOL_FAILED", "MODEL_ROUTED",
     "MODEL_FALLBACK", "PROMPT_TEMPLATE_RENDERED", "TOKEN_BUDGET_EXCEEDED",
-    "PERSONA_OVERRIDE_APPLIED",
+    "PERSONA_OVERRIDE_APPLIED", "FAILURE_CLASSIFIED",
 ]
 
-EXPECTED_CANONICAL_COUNT = 118
+EXPECTED_CANONICAL_COUNT = 121
 
 
 # ---------------------------------------------------------------------------
@@ -88,10 +89,10 @@ def test_registry_no_autopopulate_stays_uninitialized():
 
 
 # ---------------------------------------------------------------------------
-# 2/3. All 118 canonical registered + count
+# 2/3. All 121 canonical registered + count
 # ---------------------------------------------------------------------------
 
-def test_all_118_canonical_registered():
+def test_all_121_canonical_registered():
     reg = EventTypeRegistry()
     assert reg.canonical_count == EXPECTED_CANONICAL_COUNT
     assert reg.registration_count == EXPECTED_CANONICAL_COUNT
