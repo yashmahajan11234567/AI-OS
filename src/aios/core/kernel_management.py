@@ -14,6 +14,22 @@ from typing import Any
 from aios.core import HermesKernel, KernelConfig
 from aios.config.loader import load_config
 
+# Import singleton reset functions for all core components and managers
+from aios.events.core.bus import reset_event_bus_singleton as reset_core_event_bus_singleton
+from aios.core.service_registry import reset_service_registry_singleton as reset_core_service_registry_singleton
+from aios.core.configuration_manager import reset_configuration_manager_singleton
+from aios.core.structured_logger import reset_structured_logger_singleton
+from aios.core.lifecycle_manager import reset_lifecycle_manager_singleton
+from aios.core.state import reset_state_manager_singleton
+from aios.core.storage import reset_storage_manager_singleton
+from aios.core.workflow import reset_workflow_manager_singleton
+from aios.core.resource_manager import reset_resource_manager_singleton
+from aios.core.health_manager import reset_health_manager_singleton
+from aios.core.security_manager import reset_security_manager_singleton
+from aios.core.capability_manager import reset_capability_manager_singleton
+from aios.core.observability_manager import reset_observability_manager_singleton
+from aios.core.checkpoint import set_checkpoint_manager
+
 logger = logging.getLogger(__name__)
 
 # Global kernel instance
@@ -68,7 +84,7 @@ async def run_kernel(config: KernelConfig | None = None) -> HermesKernel:
 
 
 async def stop_kernel() -> None:
-    """Stop the Hermes Kernel."""
+    """Stop the Hermes Kernel and reset all singletons for test isolation."""
     global _kernel
 
     if _kernel and _kernel._running:
@@ -77,6 +93,25 @@ async def stop_kernel() -> None:
         logger.info("Hermes Kernel stopped")
     else:
         logger.warning("Kernel not running")
+
+    # Reset all canonical singletons to ensure test isolation
+    # Order: managers first (reverse phase order), then core components
+    reset_observability_manager_singleton()
+    reset_capability_manager_singleton()
+    reset_security_manager_singleton()
+    reset_health_manager_singleton()
+    reset_resource_manager_singleton()
+    reset_workflow_manager_singleton()
+    reset_storage_manager_singleton()
+    reset_state_manager_singleton()
+    reset_lifecycle_manager_singleton()
+    reset_structured_logger_singleton()
+    reset_configuration_manager_singleton()
+    reset_core_service_registry_singleton()
+    reset_core_event_bus_singleton()
+
+    # Also reset checkpoint manager if it exists
+    set_checkpoint_manager(None)
 
 
 def get_kernel() -> HermesKernel | None:

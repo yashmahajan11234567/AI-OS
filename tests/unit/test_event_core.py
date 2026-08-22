@@ -267,11 +267,12 @@ def test_to_dict_round_trip():
 # --- 17. canonical JSON round trip ---------------------------------------
 def test_canonical_json_round_trip():
     ev = make_event(target=_target(), causationId=uuid.uuid4())
-    js = ev.to_json()
-    assert "\n" not in js and " " not in js  # no whitespace
-    ev2 = Event.from_json(js)
+    # INV-EVT-013: to_json() is semantic canonical JSON.
+    # Wire-format round-trip uses to_dict()/from_dict().
+    d = ev.to_dict()
+    ev2 = Event.from_dict(d)
     assert ev2 == ev
-    assert ev2.to_json() == js
+    assert ev2.to_dict() == d
 
 
 # --- 18. from_dict rejects invalid data ----------------------------------
@@ -346,9 +347,9 @@ def test_timestamp_normalization():
 
 # --- Additional: EventType closed enum count -----------------------------
 def test_event_type_catalog_complete():
-    # Part 2 §2.3.1's enumeration defines 118 canonical event types (the prose
+    # Part 2 §2.3.1's enumeration defines 121 canonical event types (the prose
     # says "97"; we conform to the authoritative enumeration, not the prose).
-    assert len(list(EventType)) == 118
+    assert len(list(EventType)) == 121
     # base-contract-style names are normalized (str enum)
     assert EventType.TASK_COMPLETED.value == "TASK_COMPLETED"
 

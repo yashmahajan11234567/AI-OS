@@ -1,0 +1,1 @@
+This file is only for in-session context. Do not treat as permanent.

@@ -330,15 +330,19 @@ def test_placeholder_schemas_deterministic():
 
 def test_schema_hash_not_using_builtin_hash():
     # 8. No use of Python built-in hash() in schemaHash generation. The hash is
-    # derived from hashlib.sha256, not hash(). We assert the digest is NOT equal
-    # to the (process-dependent) built-in hash of the schema object.
+    # derived from hashlib.sha256, not hash(). We assert the digest is NOT an int
+    # (which built-in hash() would return) and is a stable SHA-256 hex string.
     schema = {"type": "object", "x-aios-placeholder": True}
     digest = compute_schema_hash(schema)
-    # Built-in hash() of the dict is an int and process-dependent; the schemaHash
+    # Built-in hash() of a string is an int and process-dependent; the schemaHash
     # is a fixed SHA-256 hex string — proving a different, deterministic mechanism.
     assert not isinstance(digest, int)
-    assert digest != str(hash(schema))  # type: ignore[operator]
-    assert digest == digest  # stable reference
+    assert isinstance(digest, str)
+    assert len(digest) == 64
+    # Verify it's a valid hex string (SHA-256)
+    int(digest, 16)
+    # Stable across calls
+    assert digest == compute_schema_hash(schema)
 
 
 # ---------------------------------------------------------------------------
@@ -461,11 +465,13 @@ def test_deprecated_true_requires_info():
 
 
 def test_deprecated_true_with_info_ok():
-    et = _fake_et("EXT_OLD_THING")
+    # Use a real canonical EventType for testing deprecation semantics.
+    # The EventType enum is closed at 121 members; extensions are future work.
+    et = EventType.TASK_CREATED
     info = DeprecationInfo(
         since_version=SemanticVersion(1, 0, 0),
         removal_target_version=SemanticVersion(2, 0, 0),
-        replacement_event_type=EventType.TASK_CREATED,
+        replacement_event_type=EventType.TASK_COMPLETED,
     )
     reg_obj = EventTypeRegistration(
         eventType=et,
@@ -475,17 +481,18 @@ def test_deprecated_true_with_info_ok():
         description="synthetic",
         producer=_fake_producer(),
         consumers=(),
-        category=EventCategory.DIAGNOSTIC,
+        category=EventCategory.CONTROL,
         priority=EventPriority.NORMAL,
         deprecated=True,
         deprecationInfo=info,
     )
     assert reg_obj.deprecationInfo is info
-    assert reg_obj.deprecationInfo.replacement_event_type is EventType.TASK_CREATED
+    assert reg_obj.deprecationInfo.replacement_event_type is EventType.TASK_COMPLETED
 
 
 def test_deprecated_false_with_info_rejected():
-    et = _fake_et("EXT_OLD_THING")
+    # Use a real canonical EventType for testing deprecation semantics.
+    et = EventType.TASK_CREATED
     info = DeprecationInfo(
         since_version=SemanticVersion(1, 0, 0),
         removal_target_version=SemanticVersion(2, 0, 0),
@@ -499,7 +506,7 @@ def test_deprecated_false_with_info_rejected():
             description="synthetic",
             producer=_fake_producer(),
             consumers=(),
-            category=EventCategory.DIAGNOSTIC,
+            category=EventCategory.CONTROL,
             priority=EventPriority.NORMAL,
             deprecated=False,
             deprecationInfo=info,  # present but deprecated=False -> reject

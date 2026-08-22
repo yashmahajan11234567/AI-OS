@@ -61,6 +61,7 @@ from aios.core.workflow import (
     WorkflowManager,
     get_workflow_manager,
     set_workflow_manager,
+    reset_workflow_manager_singleton,
 )
 from aios.core.resource_manager import (
     ResourceManager,
@@ -483,7 +484,20 @@ class HermesKernel:
         )
         set_storage_manager(self._storage_manager)
 
-        self._workflow_manager = WorkflowManager(self._state_manager)
+        # Task 16 — WorkflowManager is a Phase-4 (Execution) Core Manager. It
+        # receives the canonical C2/C3/C4 refs via DI so its initialize() can
+        # register with ServiceRegistry as ``core.workflow``, read frozen
+        # ConfigurationManager (``kernel.workflow.*``), and log through
+        # StructuredLogger. LifecycleManager (constructed in
+        # _init_lifecycle_manager) will register and drive it. Phase-4 ordering
+        # is deterministic (alphabetical: CapabilityManager before
+        # WorkflowManager).
+        self._workflow_manager = WorkflowManager(
+            state_manager=self._state_manager,
+            service_registry=self._service_registry,
+            configuration_manager=self._configuration,
+            logger=self._structured_logger,
+        )
         set_workflow_manager(self._workflow_manager)
 
         # Task 13 — ResourceManager is a Phase-3 (Governance) Core Manager. It
@@ -600,7 +614,8 @@ class HermesKernel:
         registers it with the canonical ServiceRegistry (as ``core.lifecycle``),
         sets the global singleton, and drives initialization to OPERATIONAL.
         Later Core Managers are registered with ``lifecycle.register_manager``
-        as they are implemented in subsequent tasks.
+        as they are implemented in subsequent tasks (now including Phase 2
+        through Phase 5).
 
         The kernel owns Core Component shutdown order (§3.7.4); LifecycleManager
         is the lifecycle *authority* but does not tear down C1–C4 here.
@@ -679,6 +694,16 @@ class HermesKernel:
             lm.register_manager(self._capability_manager)
             logger.debug("Registered CapabilityManager with LifecycleManager (Phase 4).")
 
+        # Task 16 — register the WorkflowManager Core Manager (Phase 4,
+        # "Execution") for LifecycleManager orchestration. WorkflowManager was
+        # constructed in _init_core_components(); its initialize()/shutdown() are
+        # driven by LifecycleManager's Phase-4 phase topology, NOT by the
+        # engineering service start/stop loops. Phase-4 ordering is deterministic
+        # (alphabetical: CapabilityManager before WorkflowManager).
+        if self._workflow_manager is not None:
+            lm.register_manager(self._workflow_manager)
+            logger.debug("Registered WorkflowManager with LifecycleManager (Phase 4).")
+
         # Task 15 — register the ObservabilityManager Core Manager (Phase 5,
         # "Observability") for LifecycleManager orchestration. It was constructed
         # in _init_core_components(); its initialize()/shutdown() are driven by
@@ -705,8 +730,16 @@ class HermesKernel:
         # owned by LifecycleManager (initialized during Phase 2, shut down in
         # reverse phase order). It is thus excluded from the engineering-service
         # startup path per the Core Manager topology (Part 4 §4.2.3).
+        # Start core services first (canonical managers). NOTE: Lifecycle-owned
+        # Core Managers (StateManager, StorageManager, HealthManager,
+        # ResourceManager, SecurityManager, CapabilityManager, WorkflowManager,
+        # ObservabilityManager) are NOT started here — as Phase-owned Core
+        # Managers their lifecycle is owned by LifecycleManager (initialized
+        # during their phase, shut down in reverse phase order). They are thus
+        # excluded from the engineering-service startup path per the Core Manager
+        # topology (Part 4 §4.2.3). ResourceManager's background cleanup task is
+        # an exception kept for backward compatibility.
         services = [
-            ("workflow_manager", self._start_workflow_manager),
             ("resource_manager", self._start_resource_manager),
         ]
 
@@ -783,7 +816,6 @@ class HermesKernel:
 
         stop_order = [
             "resource_manager",
-            "workflow_manager",
         ]
 
         for name in stop_order:
@@ -836,9 +868,6 @@ class HermesKernel:
                     logger.error(f"Error stopping engineering service {svc.name}: {e}")
 
     # Service start/stop methods
-    async def _start_workflow_manager(self) -> None:
-        pass
-
     async def _start_resource_manager(self) -> None:
         self._resource_manager.start_cleanup_task()
 

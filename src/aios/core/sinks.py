@@ -574,7 +574,8 @@ class EventBusSink(BaseSink):
 
     The bound bus is the canonical EventBus (C1, Task 5) which exposes an
     async ``publish`` method. The sink handles the sync-to-async bridge
-    by scheduling the coroutine on the running event loop.
+    by scheduling the coroutine on the captured event loop (established during
+    initialization when the loop is running).
     """
 
     def __init__(
@@ -587,6 +588,15 @@ class EventBusSink(BaseSink):
         self._event_bus = event_bus
         self._level = level
         self._identity = _get_logger_identity()
+        # Capture the event loop at initialization time (when running in the
+        # main thread during kernel startup). This allows the background worker
+        # thread to schedule coroutines on the correct loop.
+        self._event_loop: asyncio.AbstractEventLoop | None = None
+        try:
+            self._event_loop = asyncio.get_running_loop()
+        except RuntimeError:
+            # No running loop at init time; will be captured in set_event_bus
+            pass
 
     def write(self, entries: list[dict[str, Any]]) -> None:
         bus = self._event_bus
@@ -607,12 +617,14 @@ class EventBusSink(BaseSink):
                 )
                 result = bus.publish(event)
                 if asyncio.iscoroutine(result):
-                    # Canonical bus is async; schedule on running loop
-                    try:
-                        loop = asyncio.get_running_loop()
+                    # Canonical bus is async; schedule on captured event loop
+                    loop = self._event_loop
+                    if loop is not None and loop.is_running():
                         asyncio.run_coroutine_threadsafe(result, loop)
-                    except RuntimeError:
-                        # No running loop - can't publish
+                    else:
+                        # No captured loop or loop not running - close coroutine
+                        # to avoid "coroutine was never awaited" warning
+                        result.close()
                         logger.debug("No event loop to publish log event; dropping")
             except Exception as exc:  # noqa: BLE001
                 # Bridge failure must not crash the logger (INV-SL-SNK-003).
@@ -628,6 +640,12 @@ class EventBusSink(BaseSink):
     def set_event_bus(self, bus: Any) -> None:
         """Bind the EventBus (kernel DI during initialize)."""
         self._event_bus = bus
+        # Capture the event loop when the bus is bound (during kernel init)
+        if self._event_loop is None:
+            try:
+                self._event_loop = asyncio.get_running_loop()
+            except RuntimeError:
+                pass
         self.mark_healthy()
 
 

@@ -117,8 +117,10 @@ async def test_state_manager_not_in_start_services_path():
         # StateManager's lifecycle is owned by LifecycleManager; it must NOT
         # appear among the kernel's started engineering services.
         assert "state_manager" not in k._services
-        # And the workflow manager (an ordinary manager) does appear.
-        assert "workflow_manager" in k._services
+        # WorkflowManager is a Phase 4 Core Manager (Task 16), not an engineering
+        # service. It is registered with LifecycleManager and does NOT appear in
+        # the kernel's _services collection (which tracks only engineering services).
+        # No assertion about workflow_manager in _services.
     finally:
         await k.stop()
     _reset_all()

@@ -8,7 +8,7 @@ EventBus, Subscription, Kernel, managers/services, or a full schema engine.
 Authoritative sources:
   * EventTypeRegistration contract ........ Part 2 §2.3.5
   * EventType Registry / IEventTypeRegistry interface . Part 2 §2.13.4
-  * Canonical 118-member EventType enum ... Part 2 §2.3.1 (Task 2)
+  * Canonical 121-member EventType enum ... Part 2 §2.3.1 (Task 2)
   * Category mapping ...................... Part 2 §2.3.2 (Task 1 category.py)
   * Event namespace reservation / prefix rules . Part 2 §2.14.3 / §2.14.4
   * Structural invariants ................. Part 2 §2.15.1 (INV-ET-001..006)
@@ -66,7 +66,7 @@ INITIAL_SCHEMA_VERSION = SemanticVersion(1, 0, 0)
 DEFAULT_PRIORITY = EventPriority.NORMAL
 
 # PLACEHOLDER: No authoritative per-event payload schema is specified by Part 2
-# (§2.3.5 lists payloadSchema as a CanonicalSchema representation, but the 118
+# (§2.3.5 lists payloadSchema as a CanonicalSchema representation, but the 121
 # canonical schemas are not authored in the specification). We use a deterministic,
 # serializable, stable placeholder representation so that a deterministic
 # schemaHash can be computed. The placeholder identifies *itself* (not a fabricated
@@ -86,7 +86,7 @@ PLACEHOLDER_PAYLOAD_SCHEMA = {
 }
 
 # Reserved kernel prefixes (Part 2 §2.14.4, "Namespace Rules" 1). Extensions
-# SHALL NOT use these. The 118 canonical EventTypes legitimately use them, so
+# SHALL NOT use these. The 121 canonical EventTypes legitimately use them, so
 # canonical population bypasses prefix validation (see _populate_canonical_types).
 KERNEL_RESERVED_PREFIXES = (
     "KERNEL_",
@@ -110,7 +110,7 @@ class RegistryState(str, Enum):
 
     UNINITIALIZED - constructed, canonical population not yet complete
     INITIALIZING  - canonical population in progress
-    READY         - all 118 canonical types registered and available for lookup
+    READY         - all 121 canonical types registered and available for lookup
     SHUTDOWN      - registry drained; lookups may still read but no mutations
     """
 
@@ -359,7 +359,7 @@ def _empty_consumers() -> tuple[ComponentIdentity, ...]:
 class EventTypeRegistry:
     """Canonical EventType registry (Part 2 §2.13.4 IEventTypeRegistry).
 
-    Holds registrations for all 118 canonical EventTypes (populated at
+    Holds registrations for all 121 canonical EventTypes (populated at
     construction via ``_populate_canonical_types``). Supports registration,
     lookup, listing, validation, and the interface-level schema operations
     (validateSchema / migrate / checkCompatibility).
@@ -392,9 +392,9 @@ class EventTypeRegistry:
     # --- lifecycle ---------------------------------------------------------
 
     def _populate_canonical_types(self) -> None:
-        """Register all 118 canonical EventTypes (Part 2 §2.3.1 / INV-ET-003/004).
+        """Register all 121 canonical EventTypes (Part 2 §2.3.1 / INV-ET-003/004).
 
-        Canonical population BYPASSES extension-prefix validation (the 118 types
+        Canonical population BYPASSES extension-prefix validation (the 121 types
         legitimately use kernel-reserved prefixes); normal external/custom
         registration via ``register`` continues to enforce the prefix rules.
         """
@@ -529,7 +529,7 @@ class EventTypeRegistry:
         # <ORG>_ permitted only if the org prefix is in the registered allowlist.
         if "_" in name:
             org = name[: name.index("_") + 1]
-            if org.isalpha() and org in self._org_prefixes:
+            if org in self._org_prefixes:
                 return
         raise EventRegistryError(
             f"EventType {name} is not a canonical type and does not use a "
@@ -540,7 +540,7 @@ class EventTypeRegistry:
     def unregister(self, event_type: EventType) -> None:
         """Remove a (custom) registration (Part 2 §2.13.4).
 
-        Canonical 118 types are kernel-reserved and cannot be unregistered.
+        Canonical 121 types are kernel-reserved and cannot be unregistered.
         """
         if not isinstance(event_type, EventType):
             raise EventRegistryError("unregister() requires a canonical EventType.")
@@ -558,7 +558,7 @@ class EventTypeRegistry:
             del self._registrations[event_type]
 
     def _is_canonical(self, event_type: EventType) -> bool:
-        # Canonical types are exactly the 118 Task 2 enum members.
+        # Canonical types are exactly the 121 Task 2 enum members.
         return event_type in set(EventType)
 
     def get(self, event_type: EventType) -> EventTypeRegistration | None:

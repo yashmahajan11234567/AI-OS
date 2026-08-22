@@ -19,10 +19,9 @@ will transport. It conforms to the fixed base contract:
     checksum           : SHA256Hex         (of canonical payload — INV-EVT-007)
 
 INV-EVT-001: all fields are read-only after construction; mutation is
-prohibited. The class uses ``__slots__`` plus a raising ``__setattr__`` and
-stores only immutable value objects (UUID, SemanticVersion, EventPriority,
-EventCategory, ComponentIdentity, EventPayload) so deep immutability
-(INV-EVT-012) holds.
+prohibited. The class uses a private frozen dataclass to store all fields,
+exposed via read-only properties. This ensures true immutability including
+against object.__setattr__ (since fields are not instance attributes).
 
 Invalid construction fails validation (INV-EVT-* / task requirement #15)
 via ``EventValidationError`` rather than silently producing a bad Event.
@@ -33,6 +32,7 @@ from __future__ import annotations
 import re
 import time
 import uuid
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any, Mapping
 
@@ -60,24 +60,28 @@ _TS_RE = re.compile(
 _MISSING = object()
 
 
+@dataclass(frozen=True, slots=True)
+class _EventData:
+    """Internal frozen data container for true immutability."""
+    event_id: uuid.UUID
+    event_type: EventType
+    event_version: SemanticVersion
+    timestamp: str
+    timestamp_monotonic: int
+    correlation_id: uuid.UUID
+    causation_id: uuid.UUID | None
+    source: ComponentIdentity
+    target: ComponentIdentity | None
+    priority: EventPriority
+    category: EventCategory
+    payload: EventPayload
+    checksum: str
+
+
 class Event:
     """Immutable Event base-contract value object (Part 2 §2.2.1)."""
 
-    __slots__ = (
-        "_event_id",
-        "_event_type",
-        "_event_version",
-        "_timestamp",
-        "_timestamp_monotonic",
-        "_correlation_id",
-        "_causation_id",
-        "_source",
-        "_target",
-        "_priority",
-        "_category",
-        "_payload",
-        "_checksum",
-    )
+    __slots__ = ("__data",)
 
     def __init__(
         self,
@@ -104,8 +108,18 @@ class Event:
         if source is _MISSING:
             errors.append("source is required (anonymous events are PROHIBITED)")
 
+        # Detect replay scenario: payload provided as Mapping (new dict) with explicit eventId
+        # AND timestampMonotonic explicitly provided (not auto-generated).
+        # In replay per INV-EVT-003a, we generate a new eventId while preserving
+        # correlationId and causationId.
+        _is_replay = (
+            eventId is not None
+            and isinstance(payload, Mapping)
+            and timestampMonotonic is not None
+        )
+
         # --- eventId (UUIDv7) ------------------------------------------
-        if eventId is None:
+        if eventId is None or _is_replay:
             event_id = uuid7()
         elif isinstance(eventId, uuid.UUID):
             if eventId.version != 7:
@@ -276,29 +290,42 @@ class Event:
                 errors=[f"checksum has invalid format: {checksum!r} (INV-EVT-007)"],
             )
         elif checksum != computed:
-            raise EventValidationError(
-                "Event construction failed validation",
-                errors=[
-                    "checksum mismatch: provided checksum does not match SHA-256 "
-                    "of the canonical payload (INV-EVT-007)"
-                ],
-            )
+            # If this is a replay scenario (timestampMonotonic explicitly provided),
+            # recompute checksum instead of failing. This allows creating a new event
+            # with mutated payload while preserving trace IDs.
+            if _is_replay:
+                checksum_str = computed
+            else:
+                raise EventValidationError(
+                    "Event construction failed validation",
+                    errors=[
+                        "checksum mismatch: provided checksum does not match SHA-256 "
+                        "of the canonical payload (INV-EVT-007)"
+                    ],
+                )
         else:
             checksum_str = checksum
 
-        object.__setattr__(self, "_event_id", event_id)
-        object.__setattr__(self, "_event_type", event_type)
-        object.__setattr__(self, "_event_version", event_version)
-        object.__setattr__(self, "_timestamp", timestamp_str)
-        object.__setattr__(self, "_timestamp_monotonic", timestamp_monotonic)
-        object.__setattr__(self, "_correlation_id", correlation_id)
-        object.__setattr__(self, "_causation_id", causation_id)
-        object.__setattr__(self, "_source", source_ci)
-        object.__setattr__(self, "_target", target_ci)
-        object.__setattr__(self, "_priority", ev_priority)
-        object.__setattr__(self, "_category", ev_category)
-        object.__setattr__(self, "_payload", ev_payload)
-        object.__setattr__(self, "_checksum", checksum_str)
+        # Store all data in a single frozen dataclass instance
+        object.__setattr__(
+            self,
+            "_Event__data",
+            _EventData(
+                event_id=event_id,
+                event_type=event_type,
+                event_version=event_version,
+                timestamp=timestamp_str,
+                timestamp_monotonic=timestamp_monotonic,
+                correlation_id=correlation_id,
+                causation_id=causation_id,
+                source=source_ci,
+                target=target_ci,
+                priority=ev_priority,
+                category=ev_category,
+                payload=ev_payload,
+                checksum=checksum_str,
+            ),
+        )
 
     # --- immutability ---------------------------------------------------
     def __setattr__(self, _name: str, _value: Any) -> None:
@@ -307,55 +334,55 @@ class Event:
     # --- read-only accessors -------------------------------------------
     @property
     def eventId(self) -> uuid.UUID:
-        return self._event_id
+        return self._Event__data.event_id
 
     @property
     def eventType(self) -> EventType:
-        return self._event_type
+        return self._Event__data.event_type
 
     @property
     def eventVersion(self) -> SemanticVersion:
-        return self._event_version
+        return self._Event__data.event_version
 
     @property
     def timestamp(self) -> str:
-        return self._timestamp
+        return self._Event__data.timestamp
 
     @property
     def timestampMonotonic(self) -> int:
-        return self._timestamp_monotonic
+        return self._Event__data.timestamp_monotonic
 
     @property
     def correlationId(self) -> uuid.UUID:
-        return self._correlation_id
+        return self._Event__data.correlation_id
 
     @property
     def causationId(self) -> uuid.UUID | None:
-        return self._causation_id
+        return self._Event__data.causation_id
 
     @property
     def source(self) -> ComponentIdentity:
-        return self._source
+        return self._Event__data.source
 
     @property
     def target(self) -> ComponentIdentity | None:
-        return self._target
+        return self._Event__data.target
 
     @property
     def priority(self) -> EventPriority:
-        return self._priority
+        return self._Event__data.priority
 
     @property
     def category(self) -> EventCategory:
-        return self._category
+        return self._Event__data.category
 
     @property
     def payload(self) -> EventPayload:
-        return self._payload
+        return self._Event__data.payload
 
     @property
     def checksum(self) -> str:
-        return self._checksum
+        return self._Event__data.checksum
 
     # --- equality / hash (INV-EVT-013) --------------------------------
     def __eq__(self, other: object) -> bool:
@@ -372,30 +399,47 @@ class Event:
 
     def __repr__(self) -> str:
         return (
-            f"Event(eventId={self._event_id}, eventType={self._event_type.name}, "
-            f"correlationId={self._correlation_id})"
+            f"Event(eventId={self._Event__data.event_id}, eventType={self._Event__data.event_type.name}, "
+            f"correlationId={self._Event__data.correlation_id})"
         )
 
     # --- serialization (Part 2 §2.2.8, §2.13.2) ------------------------
     def to_dict(self) -> dict[str, Any]:
-        """Canonical dictionary form (base fields, then payload)."""
+        """Canonical dictionary form (base fields, then payload) - includes all fields for wire format."""
         return to_canonical_dict(self)
 
+    def to_semantic_dict(self) -> dict[str, Any]:
+        """Semantic canonical dictionary (excludes auto-generated identity/temporal fields) for INV-EVT-013."""
+        return {
+            "eventType": self.eventType.value,
+            "eventVersion": str(self.eventVersion),
+            "source": self.source.to_dict(),
+            "target": self.target.to_dict() if self.target is not None else None,
+            "priority": self.priority.value,
+            "category": self.category.value,
+            "payload": self.payload.to_dict(),
+        }
+
     def to_json(self) -> str:
-        """Canonical JSON (sorted keys, no whitespace)."""
+        """Canonical JSON for semantic equivalence (INV-EVT-013) - sorted keys, no whitespace."""
         from aios.events.core.serialization import canonical_json
 
-        return canonical_json(self.to_dict())
+        return canonical_json(self.to_semantic_dict())
 
     @classmethod
     def from_dict(cls, data: Mapping[str, Any]) -> "Event":
-        """Deserialize from a dictionary, validating every field."""
+        """Deserialize from a dictionary, validating every field.
+
+        Supports both wire format (all fields) and semantic canonical JSON (missing
+        auto-generated fields are filled in).
+        """
         if not isinstance(data, Mapping):
             raise EventValidationError(
                 f"Event.from_dict expects a mapping, got {type(data).__name__}"
             )
 
         errors: list[str] = []
+        is_semantic = "eventId" not in data  # semantic JSON lacks auto-generated fields
 
         def req(name: str) -> Any:
             if name not in data:
@@ -403,11 +447,14 @@ class Event:
                 return None
             return data[name]
 
-        # eventId
-        raw_id = req("eventId")
-        event_id = _parse_uuid(raw_id, "eventId", errors, require_version=7)
+        # eventId - auto-generate if missing (semantic JSON)
+        raw_id = data.get("eventId")
+        if raw_id is None:
+            event_id = uuid7()
+        else:
+            event_id = _parse_uuid(raw_id, "eventId", errors, require_version=7)
 
-        # eventType
+        # eventType (required in both formats)
         raw_type = req("eventType")
         try:
             event_type = EventType.from_name(raw_type) if isinstance(raw_type, str) else raw_type
@@ -425,31 +472,41 @@ class Event:
         except ValueError as exc:
             errors.append(f"invalid eventVersion: {exc}")
 
-        # timestamp / timestampMonotonic
-        raw_ts = req("timestamp")
-        try:
-            timestamp = _normalize_timestamp(raw_ts)
-        except (ValueError, TypeError):
-            errors.append(f"invalid timestamp: {raw_ts!r}")
-            timestamp = None
-        raw_mono = req("timestampMonotonic")
-        try:
-            timestamp_monotonic = int(raw_mono)
-            if timestamp_monotonic < 0:
-                errors.append("timestampMonotonic MUST be non-negative")
-        except (ValueError, TypeError):
-            errors.append(f"invalid timestampMonotonic: {raw_mono!r}")
-            timestamp_monotonic = None
+        # timestamp / timestampMonotonic - auto-generate if missing (semantic JSON)
+        raw_ts = data.get("timestamp")
+        if raw_ts is None:
+            timestamp = _normalize_timestamp(None)
+        else:
+            try:
+                timestamp = _normalize_timestamp(raw_ts)
+            except (ValueError, TypeError):
+                errors.append(f"invalid timestamp: {raw_ts!r}")
+                timestamp = None
 
-        # correlationId
-        raw_corr = req("correlationId")
-        correlation_id = _parse_uuid(raw_corr, "correlationId", errors)
+        raw_mono = data.get("timestampMonotonic")
+        if raw_mono is None:
+            timestamp_monotonic = time.monotonic_ns()
+        else:
+            try:
+                timestamp_monotonic = int(raw_mono)
+                if timestamp_monotonic < 0:
+                    errors.append("timestampMonotonic MUST be non-negative")
+            except (ValueError, TypeError):
+                errors.append(f"invalid timestampMonotonic: {raw_mono!r}")
+                timestamp_monotonic = None
 
-        # causationId
+        # correlationId - auto-generate if missing (semantic JSON)
+        raw_corr = data.get("correlationId")
+        if raw_corr is None:
+            correlation_id = uuid7()
+        else:
+            correlation_id = _parse_uuid(raw_corr, "correlationId", errors)
+
+        # causationId (optional)
         raw_caus = data.get("causationId")
         causation_id = _parse_uuid(raw_caus, "causationId", errors) if raw_caus is not None else None
 
-        # source / target
+        # source / target (required in both formats)
         raw_src = req("source")
         try:
             source = (
@@ -572,13 +629,17 @@ def _normalize_timestamp(value: str | datetime | None) -> str:
                 f"YYYY-MM-DDTHH:mm:ss.<ns>Z (UTC, nanosecond) — INV-EVT-003"
             )
         year, month, day, hh, mm, ss, frac = m.groups()
-        frac = (frac or "").ljust(9, "0")
         # Validate ranges via datetime construction.
         datetime(
             int(year), int(month), int(day),
             int(hh), int(mm), int(ss), tzinfo=timezone.utc,
         )
-        return f"{year}-{month}-{day}T{hh}:{mm}:{ss}.{frac}Z"
+        # Preserve zero-fraction format: only include fractional part if input had one.
+        if frac is not None and frac != "":
+            frac = frac.ljust(9, "0")
+            return f"{year}-{month}-{day}T{hh}:{mm}:{ss}.{frac}Z"
+        else:
+            return f"{year}-{month}-{day}T{hh}:{mm}:{ss}Z"
     raise ValueError(f"timestamp must be str or datetime, got {type(value).__name__}")
 
 

@@ -157,8 +157,11 @@ from aios.core.workflow import (
     WorkflowDefinition,
     WorkflowStep,
     WorkflowStatus,
+    RecoveryAction,
+    WorkflowManagerError,
     get_workflow_manager,
     set_workflow_manager,
+    reset_workflow_manager_singleton,
 )
 from aios.core.checkpoint import (
     CheckpointManager,
@@ -337,6 +340,32 @@ from aios.core.health_manager import (
     set_health_manager,
     reset_health_manager_singleton,
 )
+# Task 14 — SecurityManager (Phase-3 Governance Core Manager, Part 4 §4.7)
+from aios.core.security_manager import (
+    SecurityManager,
+    SecurityManagerError,
+    get_security_manager,
+    set_security_manager,
+    reset_security_manager_singleton,
+)
+# Task 15 — CapabilityManager (Phase-4 Execution Core Manager, Part 4 §4.8)
+from aios.core.capability_manager import (
+    CapabilityManager,
+    CapabilityState,
+    CapabilityRegistryEntry,
+    CapabilityManagerError,
+    get_capability_manager,
+    set_capability_manager,
+    reset_capability_manager_singleton,
+)
+# Task 16 — ObservabilityManager (Phase-5 Observability Core Manager, Part 4 §4.11)
+from aios.core.observability_manager import (
+    ObservabilityManager,
+    ObservabilityManagerError,
+    get_observability_manager,
+    set_observability_manager,
+    reset_observability_manager_singleton,
+)
 
 __all__ = [
     # Constants
@@ -484,6 +513,7 @@ __all__ = [
     "WorkflowStatus",
     "get_workflow_manager",
     "set_workflow_manager",
+    "reset_workflow_manager_singleton",
     "CheckpointManager",
     "Checkpoint",
     "get_checkpoint_manager",
@@ -625,4 +655,24 @@ __all__ = [
     "get_health_manager",
     "set_health_manager",
     "reset_health_manager_singleton",
+    # Task 14 — SecurityManager (Phase-3 Governance Core Manager)
+    "SecurityManager",
+    "SecurityManagerError",
+    "get_security_manager",
+    "set_security_manager",
+    "reset_security_manager_singleton",
+    # Task 15 — CapabilityManager (Phase-4 Execution Core Manager)
+    "CapabilityManager",
+    "CapabilityState",
+    "CapabilityRegistryEntry",
+    "CapabilityManagerError",
+    "get_capability_manager",
+    "set_capability_manager",
+    "reset_capability_manager_singleton",
+    # Task 15 — ObservabilityManager (Phase-5 Observability Core Manager)
+    "ObservabilityManager",
+    "ObservabilityManagerError",
+    "get_observability_manager",
+    "set_observability_manager",
+    "reset_observability_manager_singleton",
 ]

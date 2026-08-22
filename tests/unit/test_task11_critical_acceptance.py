@@ -127,11 +127,11 @@ async def test_critical_acceptance_identities(tmp_path):
         assert "storage_manager" not in kernel._services
 
         # --- Criterion 5: NOT routed through engineering-service startup ---
-        # The engineering services list should NOT contain storage_manager.
+        # The engineering services list should NOT contain storage_manager or
+        # workflow_manager — both are now Core Managers owned by LifecycleManager.
         started_services = list(kernel._services.keys())
         assert "storage_manager" not in started_services
-        # But workflow_manager (an actual service) IS started.
-        assert "workflow_manager" in started_services
+        assert "workflow_manager" not in started_services
 
         # --- Criterion 6: Canonical ServiceRegistry is used ---
         sr = kernel.service_registry
