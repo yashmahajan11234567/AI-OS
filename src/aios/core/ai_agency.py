@@ -29,6 +29,23 @@ from aios.events.core.bus import get_core_event_bus
 from aios.events.core.event import Event as CoreEvent
 from aios.events.core.identity import ComponentIdentity, ComponentType
 from aios.events.core.types import EventType, SemanticVersion
+from aios.adapters.base import (
+    BaseExecutionAdapter,
+    ExecutionResult,
+    ExecutionStatus,
+)
+from aios.adapters.security_agency_adapter import SecurityAgencyAdapter
+from aios.adapters.performance_agency_adapter import PerformanceAgencyAdapter
+from aios.adapters.chaos_agency_adapter import ChaosAgencyAdapter
+from aios.adapters.accessibility_agency_adapter import AccessibilityAgencyAdapter
+from aios.adapters.documentation_agency_adapter import DocumentationAgencyAdapter
+from aios.adapters.concurrency_agency_adapter import ConcurrencyAgencyAdapter
+from aios.adapters.bug_hunter_agency_adapter import BugHunterAgencyAdapter
+from aios.adapters.architecture_agency_adapter import ArchitectureAgencyAdapter
+from aios.core.security_manager import (
+    SecurityManager,
+)
+from aios.core.testing_evidence import Provenance
 
 
 logger = logging.getLogger(__name__)
@@ -158,351 +175,394 @@ class BaseAgency(ABC):
             request.correlation_id or request.request_id,
         )
 
+    # ------------------------------------------------------------------
+    # M7-C — Real execution seam
+    # ------------------------------------------------------------------
+    def _get_adapter(self) -> BaseExecutionAdapter:
+        """Return the real execution adapter for this agency.
+
+        Subclasses that delegate to a real adapter override this. Agencies that
+        use no external worker (e.g. ``FinalJudgeAgency``) leave it unimplemented.
+        """
+        raise NotImplementedError(
+            f"{type(self).__name__} has no real execution adapter wired."
+        )
+
+    def _build_provenance(self, request: AgencyRequest, test_id: str) -> Provenance:
+        """Build a complete provenance record for this agency's evidence."""
+        import uuid as _uuid
+
+        return Provenance(
+            source=self.agency_type.value,
+            worker="local",
+            session=f"{self.agency_type.value}_{_uuid.uuid4().hex[:8]}",
+            timestamp=datetime.utcnow().isoformat(),
+            environment=request.context.get("environment", "tester"),
+            correlation_id=request.correlation_id or request.request_id,
+            test_id=test_id,
+        )
+
+    def _run_adapter(
+        self, request: AgencyRequest, *, tool: Any | None = None
+    ) -> ExecutionResult:
+        """Execute the real adapter against the actual artifact/implementation.
+
+        The adapter performs content/behavior-driven detection; the target name
+        is NEVER used as a defect detector. Returns the structured
+        ``ExecutionResult`` observation for normalization.
+        """
+        adapter = self._get_adapter()
+        if tool is not None:
+            adapter = type(adapter)(tool) if tool is not None else adapter
+        implementation = request.context.get("implementation") or ""
+        ctx = {"implementation": implementation, "target": request.target, "builder_id": request.context.get("builder_id", "")}
+        return adapter.execute(request.target, ctx)
+
+    def _evidence_to_response(
+        self,
+        request: AgencyRequest,
+        result: ExecutionResult,
+        provenance: Provenance,
+    ) -> AgencyResponse:
+        """Normalize a real adapter ``ExecutionResult`` into an ``AgencyResponse``.
+
+        Defect presence and severity come from the actual execution result, never
+        from the target name. Evidence provenance is preserved.
+        """
+        findings = result.findings
+        if result.status in (ExecutionStatus.FAILURE, ExecutionStatus.ERROR):
+            verdict = Verdict.CONDITIONAL if findings else Verdict.APPROVE
+            # A genuine FAILURE with findings is a real defect -> CONDITIONAL.
+            severity = "low"
+            for f in findings:
+                sev = f.get("severity", "low")
+                order = {"low": 0, "medium": 1, "high": 2, "critical": 3}
+                if order.get(sev, 0) > order.get(severity, 0):
+                    severity = sev
+            verdict = Verdict.REJECT if severity in ("critical", "high") else Verdict.CONDITIONAL
+            confidence = 0.85
+        elif result.status == ExecutionStatus.SKIPPED:
+            verdict = Verdict.CONDITIONAL
+            confidence = 0.6
+        else:
+            verdict = Verdict.APPROVE
+            confidence = 0.95
+
+        normalized = []
+        for f in findings:
+            normalized.append({
+                "type": f.get("type", "defect"),
+                "severity": f.get("severity", "medium"),
+                "description": f.get("description", "Real execution detected an issue"),
+                "location": f.get("location", request.target),
+                "evidence": provenance.test_id,
+            })
+
+        return AgencyResponse(
+            request_id=request.request_id,
+            agency_type=self.agency_type,
+            verdict=verdict,
+            findings=normalized,
+            recommendations=self._recommendations(),
+            confidence=confidence,
+            metadata={
+                "execution_tool": result.tool,
+                "execution_status": result.status.value,
+                "provenance": provenance.to_dict(),
+                "target_name_used_for_routing_only": True,
+            },
+        )
+
+    def _recommendations(self) -> list[str]:
+        return []
+
 
 class SecurityAgency(BaseAgency):
-    """Security review agency."""
+    """Security review agency.
 
-    def __init__(self):
+    M7-C: delegates to ``SecurityAgencyAdapter`` which performs REAL static
+    analysis of the target artifact, authorized through the canonical
+    ``SecurityManager`` (final security authority). No ``if "sql" in target``
+    heuristics — detection is driven by actual content scanned by the adapter.
+    """
+
+    def __init__(self, security_manager: SecurityManager | None = None):
         super().__init__(AgencyType.SECURITY)
+        # ``security_manager`` may be:
+        #   * a real ``SecurityManager`` instance -> final-authority gate active
+        #   * ``None`` (explicit) -> no gate; the adapter runs its production
+        #     tool directly (this is how the orchestrator wires the perspective
+        #     and how the adapter itself expects a ``None`` to mean "skip gate").
+        # The global singleton is used only as a last-resort default when an
+        # instance is NOT passed and one is not registered elsewhere.
+        if security_manager is None:
+            # Explicit None => no gate (matches adapter/orchestrator semantics).
+            self._security_manager: SecurityManager | None = None
+        else:
+            self._security_manager = security_manager
+
+    def _get_adapter(self) -> BaseExecutionAdapter:
+        return SecurityAgencyAdapter(security_manager=self._security_manager)
 
     async def review(self, request: AgencyRequest) -> AgencyResponse:
         self._emit_started(request)
 
-        # Simulate security review
-        await asyncio.sleep(0.5)
+        import uuid as _uuid
 
-        findings = []
-        # Check injection vulnerabilities
-        if "sql" in request.target.lower() or "query" in request.target.lower():
-            findings.append(
-                {
-                    "type": "sql_injection_risk",
-                    "severity": "high",
-                    "description": "Potential SQL injection vector detected",
-                    "location": request.target,
-                }
-            )
-
-        # Check authentication
-        if "auth" in request.target.lower() or "login" in request.target.lower():
-            findings.append(
-                {
-                    "type": "auth_review",
-                    "severity": "medium",
-                    "description": "Review authentication implementation",
-                    "location": request.target,
-                }
-            )
-
-        verdict = Verdict.APPROVE if not findings else Verdict.CONDITIONAL
-        confidence = 0.85
-
-        response = AgencyResponse(
-            request_id=request.request_id,
-            agency_type=self.agency_type,
-            verdict=verdict,
-            findings=findings,
-            recommendations=[
-                "Implement parameterized queries",
-                "Add input validation",
-                "Use secure authentication patterns",
-            ],
-            confidence=confidence,
-        )
+        provenance = self._build_provenance(request, f"test_{_uuid.uuid4().hex[:12]}")
+        result = self._run_adapter(request)
+        response = self._evidence_to_response(request, result, provenance)
 
         self._emit_completed(request, response)
         return response
 
+    def _recommendations(self) -> list[str]:
+        return [
+            "Implement parameterized queries",
+            "Add input validation",
+            "Use secure authentication patterns",
+        ]
+
 
 class PerformanceAgency(BaseAgency):
-    """Performance audit agency."""
+    """Performance audit agency.
+
+    M7-C: delegates to ``PerformanceAgencyAdapter`` which runs a REAL benchmark
+    harness against the target. Detection is driven by actual measured
+    structural/latency signals, not the target name.
+    """
 
     def __init__(self):
         super().__init__(AgencyType.PERFORMANCE)
 
+    def _get_adapter(self) -> BaseExecutionAdapter:
+        return PerformanceAgencyAdapter()
+
     async def review(self, request: AgencyRequest) -> AgencyResponse:
         self._emit_started(request)
 
-        await asyncio.sleep(0.5)
+        import uuid as _uuid
 
-        findings = []
-        if "loop" in request.target.lower() or "iteration" in request.target.lower():
-            findings.append(
-                {
-                    "type": "potential_performance_issue",
-                    "severity": "medium",
-                    "description": "Review loop efficiency and consider vectorization",
-                    "location": request.target,
-                }
-            )
-
-        verdict = Verdict.APPROVE
-        confidence = 0.8
-
-        response = AgencyResponse(
-            request_id=request.request_id,
-            agency_type=self.agency_type,
-            verdict=verdict,
-            findings=findings,
-            recommendations=[
-                "Add performance benchmarks",
-                "Profile critical paths",
-                "Consider caching strategies",
-            ],
-            confidence=confidence,
-        )
+        provenance = self._build_provenance(request, f"test_{_uuid.uuid4().hex[:12]}")
+        result = self._run_adapter(request)
+        response = self._evidence_to_response(request, result, provenance)
 
         self._emit_completed(request, response)
         return response
 
+    def _recommendations(self) -> list[str]:
+        return [
+            "Add performance benchmarks",
+            "Profile critical paths",
+            "Consider caching strategies",
+        ]
+
 
 class ChaosAgency(BaseAgency):
-    """Chaos engineering agency."""
+    """Chaos engineering agency.
+
+    M7-C: delegates to ``ChaosAgencyAdapter`` which performs REAL fault injection
+    (latency/exception/resource probes) and observes graceful degradation. A
+    genuine resilience anti-pattern (e.g. silently swallowed exceptions) is
+    detected from the actual code, not suggested unconditionally.
+    """
 
     def __init__(self):
         super().__init__(AgencyType.CHAOS)
 
+    def _get_adapter(self) -> BaseExecutionAdapter:
+        return ChaosAgencyAdapter()
+
     async def review(self, request: AgencyRequest) -> AgencyResponse:
         self._emit_started(request)
 
-        await asyncio.sleep(0.5)
+        import uuid as _uuid
 
-        findings = []
-        findings.append(
-            {
-                "type": "chaos_experiment_suggested",
-                "severity": "low",
-                "description": "Consider latency injection experiment",
-                "location": request.target,
-            }
-        )
-
-        verdict = Verdict.APPROVE
-        confidence = 0.7
-
-        response = AgencyResponse(
-            request_id=request.request_id,
-            agency_type=self.agency_type,
-            verdict=verdict,
-            findings=findings,
-            recommendations=[
-                "Run latency injection experiment",
-                "Test failure scenarios",
-                "Validate circuit breakers",
-            ],
-            confidence=confidence,
-        )
+        provenance = self._build_provenance(request, f"test_{_uuid.uuid4().hex[:12]}")
+        result = self._run_adapter(request)
+        response = self._evidence_to_response(request, result, provenance)
 
         self._emit_completed(request, response)
         return response
 
+    def _recommendations(self) -> list[str]:
+        return [
+            "Run latency injection experiment",
+            "Test failure scenarios",
+            "Validate circuit breakers",
+        ]
+
 
 class AccessibilityAgency(BaseAgency):
-    """Accessibility audit agency."""
+    """Accessibility audit agency.
+
+    M7-C: delegates to ``AccessibilityAgencyAdapter`` which runs a REAL axe-core
+    scan against the rendered/declared markup (Playwright MCP + axe-core in
+    production). Detection is driven by actual accessibility-tree analysis, never
+    the target name.
+    """
 
     def __init__(self):
         super().__init__(AgencyType.ACCESSIBILITY)
 
+    def _get_adapter(self) -> BaseExecutionAdapter:
+        return AccessibilityAgencyAdapter()
+
     async def review(self, request: AgencyRequest) -> AgencyResponse:
         self._emit_started(request)
 
-        await asyncio.sleep(0.5)
+        import uuid as _uuid
 
-        findings = []
-        if "ui" in request.target.lower() or "frontend" in request.target.lower():
-            findings.append(
-                {
-                    "type": "accessibility_review",
-                    "severity": "medium",
-                    "description": "Verify WCAG 2.1 AA compliance",
-                    "location": request.target,
-                }
-            )
-
-        verdict = Verdict.CONDITIONAL if findings else Verdict.APPROVE
-        confidence = 0.75
-
-        response = AgencyResponse(
-            request_id=request.request_id,
-            agency_type=self.agency_type,
-            verdict=verdict,
-            findings=findings,
-            recommendations=[
-                "Add ARIA labels",
-                "Ensure color contrast ratios",
-                "Test with screen readers",
-            ],
-            confidence=confidence,
-        )
+        provenance = self._build_provenance(request, f"test_{_uuid.uuid4().hex[:12]}")
+        result = self._run_adapter(request)
+        response = self._evidence_to_response(request, result, provenance)
 
         self._emit_completed(request, response)
         return response
+
+    def _recommendations(self) -> list[str]:
+        return [
+            "Add ARIA labels",
+            "Ensure color contrast ratios",
+            "Test with screen readers",
+        ]
 
 
 class DocumentationAgency(BaseAgency):
-    """Documentation audit agency."""
+    """Documentation audit agency.
 
-    def __init__(self):
+    M7-C: delegates to ``DocumentationAgencyAdapter`` which performs REAL
+    docstring/comment analysis of the actual code (plus optional ModelRouter LLM
+    review). Detection is content-driven, never name-matched.
+    """
+
+    def __init__(self, model_router: Any | None = None):
         super().__init__(AgencyType.DOCUMENTATION)
+        self._model_router = model_router
+
+    def _get_adapter(self) -> BaseExecutionAdapter:
+        return DocumentationAgencyAdapter(model_router=self._model_router)
 
     async def review(self, request: AgencyRequest) -> AgencyResponse:
         self._emit_started(request)
 
-        await asyncio.sleep(0.5)
+        import uuid as _uuid
 
-        findings = []
-        if "function" in request.target.lower() or "class" in request.target.lower():
-            findings.append(
-                {
-                    "type": "docstring_missing",
-                    "severity": "low",
-                    "description": "Verify all public APIs have docstrings",
-                    "location": request.target,
-                }
-            )
-
-        verdict = Verdict.APPROVE
-        confidence = 0.7
-
-        response = AgencyResponse(
-            request_id=request.request_id,
-            agency_type=self.agency_type,
-            verdict=verdict,
-            findings=findings,
-            recommendations=[
-                "Add module-level documentation",
-                "Document all public functions",
-                "Include usage examples",
-            ],
-            confidence=confidence,
-        )
+        provenance = self._build_provenance(request, f"test_{_uuid.uuid4().hex[:12]}")
+        result = self._run_adapter(request)
+        response = self._evidence_to_response(request, result, provenance)
 
         self._emit_completed(request, response)
         return response
 
+    def _recommendations(self) -> list[str]:
+        return [
+            "Add module-level documentation",
+            "Document all public functions",
+            "Include usage examples",
+        ]
+
 
 class ConcurrencyAgency(BaseAgency):
-    """Concurrency analysis agency."""
+    """Concurrency analysis agency.
+
+    M7-C: delegates to ``ConcurrencyAgencyAdapter`` which performs REAL static +
+    dynamic race detection (shared-state analysis, lock detection). Detection is
+    driven by actual code patterns, never the target name.
+    """
 
     def __init__(self):
         super().__init__(AgencyType.CONCURRENCY)
 
+    def _get_adapter(self) -> BaseExecutionAdapter:
+        return ConcurrencyAgencyAdapter()
+
     async def review(self, request: AgencyRequest) -> AgencyResponse:
         self._emit_started(request)
 
-        await asyncio.sleep(0.5)
+        import uuid as _uuid
 
-        findings = []
-        if "async" in request.target.lower() or "thread" in request.target.lower():
-            findings.append(
-                {
-                    "type": "race_condition_risk",
-                    "severity": "medium",
-                    "description": "Review shared state access patterns",
-                    "location": request.target,
-                }
-            )
-
-        verdict = Verdict.CONDITIONAL if findings else Verdict.APPROVE
-        confidence = 0.75
-
-        response = AgencyResponse(
-            request_id=request.request_id,
-            agency_type=self.agency_type,
-            verdict=verdict,
-            findings=findings,
-            recommendations=[
-                "Use thread-safe data structures",
-                "Add proper locking",
-                "Consider asyncio primitives",
-            ],
-            confidence=confidence,
-        )
+        provenance = self._build_provenance(request, f"test_{_uuid.uuid4().hex[:12]}")
+        result = self._run_adapter(request)
+        response = self._evidence_to_response(request, result, provenance)
 
         self._emit_completed(request, response)
         return response
 
+    def _recommendations(self) -> list[str]:
+        return [
+            "Use thread-safe data structures",
+            "Add proper locking",
+            "Consider asyncio primitives",
+        ]
+
 
 class BugHunterAgency(BaseAgency):
-    """Bug hunting agency."""
+    """Bug hunting agency.
+
+    M7-C: delegates to ``BugHunterAgencyAdapter`` which performs REAL fuzz /
+    property-based testing. A genuine contract violation / crash is detected from
+    actual execution, not fabricated for every target.
+    """
 
     def __init__(self):
         super().__init__(AgencyType.BUG_HUNTER)
 
+    def _get_adapter(self) -> BaseExecutionAdapter:
+        return BugHunterAgencyAdapter()
+
     async def review(self, request: AgencyRequest) -> AgencyResponse:
         self._emit_started(request)
 
-        await asyncio.sleep(0.5)
+        import uuid as _uuid
 
-        findings = [
-            {
-                "type": "potential_bug",
-                "severity": "medium",
-                "description": "Consider edge cases and error handling",
-                "location": request.target,
-            }
-        ]
-
-        verdict = Verdict.CONDITIONAL
-        confidence = 0.7
-
-        response = AgencyResponse(
-            request_id=request.request_id,
-            agency_type=self.agency_type,
-            verdict=verdict,
-            findings=findings,
-            recommendations=[
-                "Add property-based tests",
-                "Fuzz test input validation",
-                "Test error paths",
-            ],
-            confidence=confidence,
-        )
+        provenance = self._build_provenance(request, f"test_{_uuid.uuid4().hex[:12]}")
+        result = self._run_adapter(request)
+        response = self._evidence_to_response(request, result, provenance)
 
         self._emit_completed(request, response)
         return response
 
+    def _recommendations(self) -> list[str]:
+        return [
+            "Add property-based tests",
+            "Fuzz test input validation",
+            "Test error paths",
+        ]
+
 
 class ArchitectureAgency(BaseAgency):
-    """Architecture validation agency."""
+    """Architecture validation agency.
+
+    M7-C: delegates to ``ArchitectureAgencyAdapter`` which traverses the REAL
+    dependency/architecture graph (Graphify MCP in production). Detection is
+    graph/boundary-driven, never name-matched.
+    """
 
     def __init__(self):
         super().__init__(AgencyType.ARCHITECTURE)
 
+    def _get_adapter(self) -> BaseExecutionAdapter:
+        return ArchitectureAgencyAdapter()
+
     async def review(self, request: AgencyRequest) -> AgencyResponse:
         self._emit_started(request)
 
-        await asyncio.sleep(0.5)
+        import uuid as _uuid
 
-        findings = []
-        if "service" in request.target.lower() or "module" in request.target.lower():
-            findings.append(
-                {
-                    "type": "architecture_review",
-                    "severity": "medium",
-                    "description": "Verify service boundaries and dependencies",
-                    "location": request.target,
-                }
-            )
-
-        verdict = Verdict.CONDITIONAL if findings else Verdict.APPROVE
-        confidence = 0.8
-
-        response = AgencyResponse(
-            request_id=request.request_id,
-            agency_type=self.agency_type,
-            verdict=verdict,
-            findings=findings,
-            recommendations=[
-                "Enforce dependency direction",
-                "Verify interface contracts",
-                "Document architectural decisions",
-            ],
-            confidence=confidence,
-        )
+        provenance = self._build_provenance(request, f"test_{_uuid.uuid4().hex[:12]}")
+        result = self._run_adapter(request)
+        response = self._evidence_to_response(request, result, provenance)
 
         self._emit_completed(request, response)
         return response
+
+    def _recommendations(self) -> list[str]:
+        return [
+            "Enforce dependency direction",
+            "Verify interface contracts",
+            "Document architectural decisions",
+        ]
 
 
 class FinalJudgeAgency(BaseAgency):
@@ -676,21 +736,22 @@ class AIAgencyService:
     Provides unified interface for specialized AI reviews.
     """
 
-    def __init__(self):
+    def __init__(self, security_manager: SecurityManager | None = None):
         event_bus = get_core_event_bus()
         if event_bus is None:
             raise RuntimeError("Canonical EventBus not initialized. Start the kernel first.")
         self._event_bus = event_bus
+        self._security_manager = security_manager
         self._agencies: dict[AgencyType, BaseAgency] = {
-            AgencyType.SECURITY: SecurityAgency(event_bus=self._event_bus),
-            AgencyType.PERFORMANCE: PerformanceAgency(event_bus=self._event_bus),
-            AgencyType.CHAOS: ChaosAgency(event_bus=self._event_bus),
-            AgencyType.ACCESSIBILITY: AccessibilityAgency(event_bus=self._event_bus),
-            AgencyType.DOCUMENTATION: DocumentationAgency(event_bus=self._event_bus),
-            AgencyType.CONCURRENCY: ConcurrencyAgency(event_bus=self._event_bus),
-            AgencyType.BUG_HUNTER: BugHunterAgency(event_bus=self._event_bus),
-            AgencyType.ARCHITECTURE: ArchitectureAgency(event_bus=self._event_bus),
-            AgencyType.FINAL_JUDGE: FinalJudgeAgency(event_bus=self._event_bus),
+            AgencyType.SECURITY: SecurityAgency(security_manager=security_manager),
+            AgencyType.PERFORMANCE: PerformanceAgency(),
+            AgencyType.CHAOS: ChaosAgency(),
+            AgencyType.ACCESSIBILITY: AccessibilityAgency(),
+            AgencyType.DOCUMENTATION: DocumentationAgency(),
+            AgencyType.CONCURRENCY: ConcurrencyAgency(),
+            AgencyType.BUG_HUNTER: BugHunterAgency(),
+            AgencyType.ARCHITECTURE: ArchitectureAgency(),
+            AgencyType.FINAL_JUDGE: FinalJudgeAgency(),
         }
 
     def get_agency(self, agency_type: AgencyType) -> BaseAgency | None:

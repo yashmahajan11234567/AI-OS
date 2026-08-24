@@ -110,8 +110,15 @@ from aios.core.observability_manager import (
 )
 from aios.core.memory import MemoryManager, get_memory_manager, set_memory_manager
 from aios.core.mcp_manager import MCPManager, get_mcp_manager, set_mcp_manager
+# M7 — Multi-Perspective Testing & User Simulation (Terminal 2 wiring).
+# These components are registered on the kernel so production code can reach them
+# through a single instance. They reuse the canonical singletons (CouncilManager,
+# EventBus, SecurityManager, ModelRouter) — NO duplicates are created here.
+from aios.services.testing import TestOrchestratorService
+from aios.core.user_simulation_agent import UserSimulationAgent
+from aios.core.simplification_gate import SimplificationGate
+from aios.adapters.hermes_bridge import HermesBridge
 from aios.core.model_router import ModelRouter, get_model_router, set_model_router
-from aios.core.security_manager import SecurityManager, get_security_manager, set_security_manager
 # Engineering services use the canonical ServiceRegistry
 from aios.services.base import BaseService
 from aios.events.core.types import EventType
@@ -197,6 +204,12 @@ class HermesKernel:
         # Task 15 — ObservabilityManager (Phase-5 Observability Core Manager)
         self._observability_manager: ObservabilityManager | None = None
 
+        # M7 — Multi-Perspective Testing & User Simulation components
+        # (registered after the canonical Core Managers; reuse their singletons).
+        self._test_orchestrator: TestOrchestratorService | None = None
+        self._user_simulation_agent: UserSimulationAgent | None = None
+        self._simplification_gate: SimplificationGate | None = None
+
         # Service tracking
         self._services: dict[str, ServiceStatus] = {}
 
@@ -262,6 +275,21 @@ class HermesKernel:
     def observability_manager(self) -> ObservabilityManager | None:
         """Get the ObservabilityManager Core Manager (Part 4 §4.11, Task 15)."""
         return self._observability_manager
+
+    @property
+    def test_orchestrator(self) -> TestOrchestratorService | None:
+        """Get the M7 TestOrchestratorService (extends WorkflowManager)."""
+        return self._test_orchestrator
+
+    @property
+    def user_simulation_agent(self) -> UserSimulationAgent | None:
+        """Get the M7 UserSimulationAgent (10th testing perspective)."""
+        return self._user_simulation_agent
+
+    @property
+    def simplification_gate(self) -> SimplificationGate | None:
+        """Get the M7 SimplificationGate (pre-acceptance complexity gate)."""
+        return self._simplification_gate
 
     @property
     def memory_manager(self) -> MemoryManager | None:
@@ -352,6 +380,11 @@ class HermesKernel:
         # Phase-1 wiring only; later managers are registered as they land (Tasks 10+).
         # The kernel retains ownership of Core Component shutdown order.
         await self._init_lifecycle_manager()
+
+        # M7 — register the multi-perspective testing components, reusing the
+        # canonical CouncilManager / EventBus / SecurityManager / ModelRouter
+        # singletons (no duplicates). Safe to run after the Core Managers exist.
+        await self._init_m7_testing()
 
         # Start services if enabled
         if self._config.auto_start_services:
@@ -756,6 +789,49 @@ class HermesKernel:
             logger.error(f"LifecycleManager initialization failed: {exc}")
             raise
         logger.debug("LifecycleManager initialized -> OPERATIONAL")
+
+    async def _init_m7_testing(self) -> None:
+        """Register the M7 multi-perspective testing components.
+
+        All collaborators are the canonical singletons already constructed by the
+        kernel (CouncilManager, EventBus, SecurityManager, ModelRouter). No
+        second council / bus / router / security manager is created here (this is
+        enforced by the architectural invariants INV-005/007/012/014).
+
+        The ``UserSimulationAgent`` is wired to a real ``HermesBridge`` (M5 MCP
+        fallback) which talks to the external, untrusted hermes-agent(EXT). It
+        accepts ONLY app_url / user_goal / exploration_brief (INV-008).
+        """
+        # Single canonical CouncilManager instance (reused, never duplicated).
+        from aios.core.council_manager import get_council_manager
+
+        council = get_council_manager()
+
+        # TestOrchestratorService EXTENDS the canonical WorkflowManager (INV-015):
+        # it reuses the existing workflow lifecycle, never duplicates it.
+        self._test_orchestrator = TestOrchestratorService(
+            self._workflow_manager,
+            council_manager=council,
+            final_judge=None,  # uses the built-in FinalJudgeAgency singleton path
+            simplification_gate=SimplificationGate(),
+            security_manager=self._security_manager,
+        )
+
+        # UserSimulationAgent drives the EXTERNAL hermes-agent(EXT) via HermesBridge.
+        hermes_bridge = HermesBridge(
+            mcp_manager=self._mcp_manager if hasattr(self, "_mcp_manager") else None,
+            server_id="hermes_agent_ext",
+        )
+        self._user_simulation_agent = UserSimulationAgent(hermes_bridge)
+
+        # SimplificationGate instance (already created above for the orchestrator;
+        # share the same instance so the gate verdict is stable across the run).
+        self._simplification_gate = self._test_orchestrator._gate
+
+        logger.debug(
+            "M7 testing components registered "
+            "(TestOrchestratorService, UserSimulationAgent, SimplificationGate)"
+        )
 
     async def _start_services(self) -> None:
         """Start all registered services."""
