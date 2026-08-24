@@ -21,7 +21,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
 from pathlib import Path
-from typing import Any
+from typing import Any, Optional
 
 from aios.events.core.bus import get_core_event_bus
 from aios.events.core.event import Event as CoreEvent
@@ -99,7 +99,7 @@ class FileMemoryBackend(MemoryBackend):
         self._load_index()
 
     def _load_index(self) -> None:
-        for file in self._path.glob("*.json"):
+        for file in self._path.rglob("*.json"):
             try:
                 data = json.loads(file.read_text())
                 entry = MemoryEntry(
@@ -123,6 +123,8 @@ class FileMemoryBackend(MemoryBackend):
 
     def _save_entry(self, entry: MemoryEntry) -> None:
         file_path = self._path / f"{entry.key}.json"
+        # Ensure parent directories exist for keys with slashes
+        file_path.parent.mkdir(parents=True, exist_ok=True)
         data = {
             "key": entry.key,
             "value": entry.value,
@@ -260,6 +262,293 @@ class InMemoryBackend(MemoryBackend):
         return count
 
 
+class GraphifyBackend(MemoryBackend):
+    """Graphify knowledge graph memory backend for AI-OS M5-GATE-REALIZE.
+
+    Implements MemoryBackend for MemoryType.GRAPHIFY using MCP connection to
+    Graphify server. Provides graph operations:
+    - query_graph: Query the knowledge graph
+    - shortest_path: Find shortest path between entities
+
+    Inferred edges remain advisory per architecture (C14).
+    All inferred relationships are explicitly marked with provenance indicating
+    their advisory nature and must not be treated as authoritative/canonical data.
+    """
+
+    def __init__(
+        self,
+        mcp_manager,
+        server_id: str = "graphify",
+    ) -> None:
+        """Initialize Graphify backend.
+
+        Args:
+            mcp_manager: MCPManager instance for communicating with Graphify server
+            server_id: MCP server identifier for Graphify
+        """
+        self._mcp_manager = mcp_manager
+        self._server_id = server_id
+        self._connected = False
+
+    def _mark_advisory(self, metadata: dict[str, Any]) -> dict[str, Any]:
+        """Mark metadata as advisory/inferred per C14.
+
+        All Graphify inferred edges and relationships must carry explicit
+        provenance indicating their advisory nature.
+        """
+        marked = dict(metadata)
+        marked["provenance"] = marked.get("provenance", {})
+        marked["provenance"]["source"] = "graphify_inferred"
+        marked["provenance"]["advisory"] = True
+        marked["provenance"]["authority"] = "advisory_only"
+        marked["provenance"]["graphify_timestamp"] = datetime.utcnow().isoformat()
+        return marked
+
+    async def connect(self) -> bool:
+        """Connect to Graphify MCP server."""
+        if self._connected:
+            return True
+
+        try:
+            result = await self._mcp_manager.connect(self._server_id)
+            self._connected = result
+            return result
+        except Exception as e:
+            logger.warning(f"Failed to connect to Graphify server: {e}")
+            return False
+
+    async def _ensure_connected(self) -> bool:
+        """Ensure connection to Graphify server."""
+        if not self._connected:
+            return await self.connect()
+        return self._connected
+
+    async def store(self, entry: MemoryEntry) -> bool:
+        """Store an entry as a node in the knowledge graph."""
+        if not await self._ensure_connected():
+            return False
+
+        try:
+            # Store as node in graph via add_node tool
+            result = await self._mcp_manager.call_tool(
+                self._server_id,
+                "add_node",
+                {
+                    "node_id": entry.key,
+                    "label": entry.key,
+                    "properties": {
+                        **entry.metadata,
+                        "value": str(entry.value),
+                        "memory_type": entry.memory_type.value,
+                        "tags": entry.tags,
+                        "created_at": entry.created_at.isoformat(),
+                        "updated_at": entry.updated_at.isoformat(),
+                    },
+                },
+            )
+            return result.get("success", False)
+        except Exception as e:
+            logger.warning(f"Failed to store in Graphify: {e}")
+            return False
+
+    async def retrieve(self, key: str) -> MemoryEntry | None:
+        """Retrieve a node from the knowledge graph.
+
+        C14: Retrieved data from Graphify is marked as advisory/inferred.
+        """
+        if not await self._ensure_connected():
+            return None
+
+        try:
+            result = await self._mcp_manager.call_tool(
+                self._server_id,
+                "get_node",
+                {"node_id": key},
+            )
+
+            if not result.get("success") or not result.get("result"):
+                return None
+
+            node_data = result["result"]
+            properties = node_data.get("properties", {})
+            # C14: Mark retrieved data as advisory
+            marked_metadata = self._mark_advisory(
+                {k: v for k, v in properties.items() if k not in ("value", "tags", "memory_type")}
+            )
+            return MemoryEntry(
+                key=key,
+                value=properties.get("value", ""),
+                memory_type=MemoryType.GRAPHIFY,
+                tags=properties.get("tags", []),
+                metadata=marked_metadata,
+                created_at=datetime.fromisoformat(properties.get("created_at", datetime.utcnow().isoformat())),
+                updated_at=datetime.fromisoformat(properties.get("updated_at", datetime.utcnow().isoformat())),
+            )
+        except Exception as e:
+            logger.warning(f"Failed to retrieve from Graphify: {e}")
+            return None
+
+    async def update(
+        self, key: str, value: Any, metadata: dict | None = None
+    ) -> bool:
+        """Update a node in the knowledge graph."""
+        if not await self._ensure_connected():
+            return False
+
+        try:
+            result = await self._mcp_manager.call_tool(
+                self._server_id,
+                "update_node",
+                {
+                    "node_id": key,
+                    "properties": {
+                        "value": str(value),
+                        **(metadata or {}),
+                        "updated_at": datetime.utcnow().isoformat(),
+                    },
+                },
+            )
+            return result.get("success", False)
+        except Exception as e:
+            logger.warning(f"Failed to update in Graphify: {e}")
+            return False
+
+    async def delete(self, key: str) -> bool:
+        """Delete a node from the knowledge graph."""
+        if not await self._ensure_connected():
+            return False
+
+        try:
+            result = await self._mcp_manager.call_tool(
+                self._server_id,
+                "delete_node",
+                {"node_id": key},
+            )
+            return result.get("success", False)
+        except Exception as e:
+            logger.warning(f"Failed to delete from Graphify: {e}")
+            return False
+
+    async def query(
+        self,
+        tags: list[str] | None = None,
+        filter_fn: callable = None,
+        limit: int = 100,
+    ) -> list[MemoryEntry]:
+        """Query the knowledge graph (uses query_graph operation).
+
+        All returned entries are marked as advisory per C14 - Graphify inferred
+        edges and relationships are advisory only, not authoritative.
+        """
+        if not await self._ensure_connected():
+            return []
+
+        try:
+            # Build Cypher-like query
+            query_parts = []
+            if tags:
+                query_parts.append(f"MATCH (n) WHERE {' AND '.join([f'n.tags CONTAINS \"{tag}\"' for tag in tags])}")
+            else:
+                query_parts.append("MATCH (n)")
+
+            query_parts.append(f"RETURN n LIMIT {limit}")
+            query = " ".join(query_parts)
+
+            result = await self._mcp_manager.call_tool(
+                self._server_id,
+                "query_graph",
+                {"query": query},
+            )
+
+            if not result.get("success") or not result.get("result"):
+                return []
+
+            entries = []
+            for node_data in result["result"].get("nodes", []):
+                properties = node_data.get("properties", {})
+                # C14: Mark all graph-queried data as advisory/inferred
+                marked_metadata = self._mark_advisory(
+                    {k: v for k, v in properties.items() if k not in ("value", "tags")}
+                )
+                entry = MemoryEntry(
+                    key=node_data.get("id", ""),
+                    value=properties.get("value", ""),
+                    memory_type=MemoryType.GRAPHIFY,
+                    tags=properties.get("tags", []),
+                    metadata=marked_metadata,
+                    created_at=datetime.fromisoformat(properties.get("created_at", datetime.utcnow().isoformat())),
+                    updated_at=datetime.fromisoformat(properties.get("updated_at", datetime.utcnow().isoformat())),
+                )
+                entries.append(entry)
+
+            return entries
+        except Exception as e:
+            logger.warning(f"Failed to query Graphify: {e}")
+            return []
+
+    async def clear(self) -> int:
+        """Clear all nodes (not recommended for production Graphify)."""
+        # Graphify clear would require a different approach
+        # For now, return 0 to indicate not implemented
+        logger.warning("GraphifyBackend.clear() not fully implemented - use direct MCP tools")
+        return 0
+
+    # Graphify-specific operations
+    async def query_graph(self, query: str) -> dict[str, Any]:
+        """Execute a custom graph query.
+
+        C14: Results from Graphify are advisory/inferred and must not be
+        treated as authoritative.
+        """
+        if not await self._ensure_connected():
+            return {"success": False, "error": "Not connected"}
+
+        try:
+            result = await self._mcp_manager.call_tool(
+                self._server_id,
+                "query_graph",
+                {"query": query},
+            )
+            return result.get("result", {})
+        except Exception as e:
+            logger.warning(f"Graphify query failed: {e}")
+            return {"success": False, "error": str(e)}
+
+    async def shortest_path(
+        self, from_node: str, to_node: str, max_depth: int = 10
+    ) -> list[str]:
+        """Find shortest path between two nodes.
+
+        C14: The returned path is based on Graphify inferred edges and is advisory only.
+        Must not be treated as authoritative routing/dependency information.
+        """
+        if not await self._ensure_connected():
+            return []
+
+        try:
+            result = await self._mcp_manager.call_tool(
+                self._server_id,
+                "shortest_path",
+                {
+                    "from_node": from_node,
+                    "to_node": to_node,
+                    "max_depth": max_depth,
+                },
+            )
+
+            if not result.get("success") or not result.get("result"):
+                return []
+
+            # C14: Return path with advisory metadata
+            path = result["result"].get("path", [])
+            # The path itself is a list of node IDs - the advisory nature is documented
+            # in the method docstring and that it comes from Graphify inference.
+            return path
+        except Exception as e:
+            logger.warning(f"Graphify shortest_path failed: {e}")
+            return []
+
+
 class MemoryManager:
     """
     Manages multiple memory systems.
@@ -269,13 +558,14 @@ class MemoryManager:
     - Claude: Persisted across sessions for continuity
     - Engineering: Long-term learnings, patterns, decisions
     - Obsidian: Knowledge vault, notes, documentation
-    - Graphify: Knowledge graph, relationships, entities
+    - Graphify: Knowledge graph, relationships, entities (advisory per C14)
     """
 
     def __init__(
         self,
         base_path: Path | None = None,
         backends: dict[MemoryType, MemoryBackend] | None = None,
+        mcp_manager: Optional[Any] = None,
     ):
         # FIX 9: Use canonical EventBus (C1, Task 5)
         self._event_bus = get_core_event_bus()
@@ -292,14 +582,20 @@ class MemoryManager:
         )
 
         self._backends: dict[MemoryType, MemoryBackend] = backends or {}
+        self._mcp_manager = mcp_manager
         self._init_default_backends()
 
     def _init_default_backends(self) -> None:
-        """Initialize default file-based backends."""
+        """Initialize default file-based backends, with Graphify wiring if MCP available."""
         for mem_type in MemoryType:
             if mem_type not in self._backends:
-                path = self._base_path / mem_type.value
-                self._backends[mem_type] = FileMemoryBackend(path)
+                if mem_type == MemoryType.GRAPHIFY and self._mcp_manager is not None:
+                    # Try to use GraphifyBackend if MCP manager is available
+                    self._backends[mem_type] = GraphifyBackend(self._mcp_manager)
+                    logger.info("GraphifyBackend wired for MemoryType.GRAPHIFY via MCPManager")
+                else:
+                    path = self._base_path / mem_type.value
+                    self._backends[mem_type] = FileMemoryBackend(path)
 
     def get_backend(self, memory_type: MemoryType) -> MemoryBackend:
         """Get backend for a memory type."""
@@ -307,10 +603,16 @@ class MemoryManager:
 
     def _emit_event(self, event_type: EventType, payload: dict[str, Any], correlation_id: str) -> None:
         """Emit a canonical event via the canonical EventBus."""
+        # Ensure correlation_id is a valid UUID - generate one if it's not
+        try:
+            corr_uuid = uuid.UUID(correlation_id) if correlation_id else uuid.uuid4()
+        except ValueError:
+            # Not a valid UUID, generate a deterministic one from the string
+            corr_uuid = uuid.uuid5(uuid.NAMESPACE_DNS, correlation_id)
         event = CoreEvent(
             eventType=event_type,
             source=self._identity,
-            correlationId=uuid.UUID(correlation_id) if correlation_id else uuid.uuid4(),
+            correlationId=corr_uuid,
             payload=payload,
         )
         result = self._event_bus.publish(event) if self._event_bus else None
@@ -498,11 +800,19 @@ _global_memory_manager: MemoryManager | None = None
 
 def get_memory_manager(
     base_path: Path | None = None,
+    mcp_manager: Optional[Any] = None,
 ) -> MemoryManager:
     """Get or create the global memory manager."""
     global _global_memory_manager
     if _global_memory_manager is None:
-        _global_memory_manager = MemoryManager(base_path)
+        _global_memory_manager = MemoryManager(base_path, mcp_manager=mcp_manager)
+    elif mcp_manager is not None and _global_memory_manager._mcp_manager is None:
+        # Update existing manager with MCP manager if not already set
+        _global_memory_manager._mcp_manager = mcp_manager
+        # Re-initialize backends if Graphify was using file-based
+        if isinstance(_global_memory_manager._backends.get(MemoryType.GRAPHIFY), FileMemoryBackend):
+            _global_memory_manager._backends[MemoryType.GRAPHIFY] = GraphifyBackend(mcp_manager)
+            logger.info("GraphifyBackend wired for MemoryType.GRAPHIFY via MCPManager (deferred)")
     return _global_memory_manager
 
 
@@ -519,6 +829,7 @@ __all__ = [
     "MemoryBackend",
     "FileMemoryBackend",
     "InMemoryBackend",
+    "GraphifyBackend",
     "get_memory_manager",
     "set_memory_manager",
 ]

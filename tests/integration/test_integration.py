@@ -334,14 +334,33 @@ class TestWorkflowExecution:
 class TestCheckpointRecovery:
     """Test checkpoint recovery functionality."""
     @pytest_asyncio.fixture
-    async def checkpoint_manager(self):
+    async def test_state_manager(self, event_bus):
+        """Create StateManager with EventBus initialized."""
+        from aios.core.state import StateManager, StateScope, get_state_manager, set_state_manager
+        import tempfile
         temp_dir = Path(tempfile.mkdtemp())
-        manager = CheckpointManager(checkpoint_dir=temp_dir)
+        manager = StateManager(persistence_path=temp_dir)
+        # Set as global for checkpoint manager to use
+        set_state_manager(manager)
+        yield manager
+        # Cleanup
+        set_state_manager(None)
+        shutil.rmtree(temp_dir, ignore_errors=True)
+    @pytest_asyncio.fixture
+    async def checkpoint_manager(self, event_bus, test_state_manager):
+        """Create CheckpointManager with EventBus and StateManager initialized."""
+        temp_dir = Path(tempfile.mkdtemp())
+        manager = CheckpointManager(state_manager=test_state_manager, checkpoint_dir=temp_dir)
         yield manager
         shutil.rmtree(temp_dir, ignore_errors=True)
     @pytest.mark.asyncio
-    async def test_create_and_restore_checkpoint(self, checkpoint_manager):
+    async def test_create_and_restore_checkpoint(self, checkpoint_manager, test_state_manager):
         """Test creating and restoring a checkpoint."""
+        from aios.core.state import StateScope
+        # Set up workflow state first
+        test_state_manager.set_state(
+            StateScope.WORKFLOW, "exec_1", "workflow", {"workflow_id": "wf_1", "step": 2}
+        )
         cp = checkpoint_manager.create_checkpoint(
             execution_id="exec_1",
             step=2,
@@ -353,18 +372,27 @@ class TestCheckpointRecovery:
         restored = checkpoint_manager.restore_checkpoint("exec_1")
         assert restored.checkpoint_id == cp.checkpoint_id
     @pytest.mark.asyncio
-    async def test_list_checkpoints(self, checkpoint_manager):
+    async def test_list_checkpoints(self, checkpoint_manager, test_state_manager):
         """Test listing checkpoints."""
+        from aios.core.state import StateScope
+        # Set up workflow states
+        test_state_manager.set_state(StateScope.WORKFLOW, "exec_1", "workflow", {"workflow_id": "wf_1", "step": 1})
         checkpoint_manager.create_checkpoint("exec_1", 1)
+        test_state_manager.set_state(StateScope.WORKFLOW, "exec_1", "workflow", {"workflow_id": "wf_1", "step": 2})
         checkpoint_manager.create_checkpoint("exec_1", 2)
+        test_state_manager.set_state(StateScope.WORKFLOW, "exec_2", "workflow", {"workflow_id": "wf_2", "step": 1})
         checkpoint_manager.create_checkpoint("exec_2", 1)
         exec1_cps = checkpoint_manager.list_checkpoints(execution_id="exec_1")
         assert len(exec1_cps) == 2
         exec2_cps = checkpoint_manager.list_checkpoints(execution_id="exec_2")
         assert len(exec2_cps) == 1
     @pytest.mark.asyncio
-    async def test_checkpoint_persistence(self, checkpoint_manager):
+    async def test_checkpoint_persistence(self, checkpoint_manager, test_state_manager):
         """Test checkpoints persist to disk."""
+        from aios.core.state import StateScope
+        test_state_manager.set_state(
+            StateScope.WORKFLOW, "exec_persist", "workflow", {"workflow_id": "wf_persist", "step": 5}
+        )
         cp = checkpoint_manager.create_checkpoint(
             execution_id="exec_persist",
             step=5,
@@ -389,7 +417,7 @@ class TestRootCauseAnalysis:
             error_type="TimeoutError",
             service="external_api",
         )
-        analysis = analyzer.analyze(context)
+        analysis = await analyzer.analyze(context)
         assert analysis.category == FailureCategory.TRANSIENT
         assert analysis.recommended_action == RecoveryAction.RETRY_WITH_BACKOFF
     @pytest.mark.asyncio
@@ -402,7 +430,7 @@ class TestRootCauseAnalysis:
             error_type="ConfigError",
             service="planning",
         )
-        analysis = analyzer.analyze(context)
+        analysis = await analyzer.analyze(context)
         assert analysis.category == FailureCategory.CONFIGURATION
         assert analysis.responsible_service == "planning"
         assert analysis.recommended_action == RecoveryAction.RETURN_TO_PLANNING
@@ -416,7 +444,7 @@ class TestRootCauseAnalysis:
             error_type="SyntaxError",
             service="coding",
         )
-        analysis = analyzer.analyze(context)
+        analysis = await analyzer.analyze(context)
         assert analysis.category == FailureCategory.CODE_DEFECT
         assert analysis.responsible_service == "coding"
         assert analysis.recommended_action == RecoveryAction.RETURN_TO_CODING
@@ -431,7 +459,7 @@ class TestRootCauseAnalysis:
             service="deployment",
             attempt_history=[{}, {}, {}],
         )
-        analysis = analyzer.analyze(context, retry_budget_exhausted=True)
+        analysis = await analyzer.analyze(context, retry_budget_exhausted=True)
         assert analysis.recommended_action == RecoveryAction.ROLLBACK
         assert analysis.responsible_service == "deployment"
 class TestServiceRegistry:

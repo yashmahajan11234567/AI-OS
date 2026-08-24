@@ -384,6 +384,32 @@ class Event:
     def checksum(self) -> str:
         return self._Event__data.checksum
 
+    # --- legacy compatibility properties (for migration) -------------------
+    @property
+    def event_type(self) -> EventType:
+        """Legacy alias for eventType."""
+        return self.eventType
+
+    @property
+    def correlation_id(self) -> uuid.UUID:
+        """Legacy alias for correlationId."""
+        return self.correlationId
+
+    @property
+    def causation_id(self) -> uuid.UUID | None:
+        """Legacy alias for causationId."""
+        return self.causationId
+
+    @property
+    def source_service(self) -> str:
+        """Legacy alias for source.component_name."""
+        return self.source.component_name
+
+    @property
+    def payload_dict(self) -> dict[str, Any]:
+        """Legacy alias for payload.data (returns dict)."""
+        return self._Event__data.payload.data if hasattr(self._Event__data.payload, 'data') else dict(self._Event__data.payload)
+
     # --- equality / hash (INV-EVT-013) --------------------------------
     def __eq__(self, other: object) -> bool:
         if not isinstance(other, Event):

@@ -108,6 +108,10 @@ from aios.core.observability_manager import (
     set_observability_manager,
     reset_observability_manager_singleton,
 )
+from aios.core.memory import MemoryManager, get_memory_manager, set_memory_manager
+from aios.core.mcp_manager import MCPManager, get_mcp_manager, set_mcp_manager
+from aios.core.model_router import ModelRouter, get_model_router, set_model_router
+from aios.core.security_manager import SecurityManager, get_security_manager, set_security_manager
 # Engineering services use the canonical ServiceRegistry
 from aios.services.base import BaseService
 from aios.events.core.types import EventType
@@ -124,6 +128,7 @@ class KernelConfig:
     data_dir: Path = Path("./data")
     log_level: str = "INFO"
     event_bus_max_history: int = 10000
+    event_bus_max_dispatch_depth: int = 64  # Increased for workflows with retries
     auto_start_services: bool = True
 
 
@@ -257,6 +262,26 @@ class HermesKernel:
     def observability_manager(self) -> ObservabilityManager | None:
         """Get the ObservabilityManager Core Manager (Part 4 §4.11, Task 15)."""
         return self._observability_manager
+
+    @property
+    def memory_manager(self) -> MemoryManager | None:
+        """Get the MemoryManager."""
+        return get_memory_manager()
+
+    @property
+    def model_manager(self) -> ModelRouter | None:
+        """Get the ModelRouter (single instance per INV-002)."""
+        return get_model_router()
+
+    @property
+    def mcp_manager(self) -> MCPManager | None:
+        """Get the MCPManager."""
+        return get_mcp_manager()
+
+    @property
+    def security_manager(self) -> SecurityManager | None:
+        """Get the SecurityManager Core Manager (Part 4 §4.7, Task 14)."""
+        return get_security_manager()
 
     @property
     def configuration(self) -> ConfigurationManager | None:
@@ -427,7 +452,12 @@ class HermesKernel:
         # C1: Canonical EventBus (Task 5) — exactly one per process (INV-EB-001)
         # Must be RUNNING before any component that publishes to it.
         reset_core_event_bus_singleton()
-        self._event_bus = CoreEventBus(config=EventBusConfig(auto_start_dispatch_worker=False))
+        event_bus_config = EventBusConfig(
+            auto_start_dispatch_worker=False,
+            maxDispatchDepth=self._config.event_bus_max_dispatch_depth,
+            historyCapacity=self._config.event_bus_max_history,
+        )
+        self._event_bus = CoreEventBus(config=event_bus_config)
         await self._event_bus.initialize()
 
         # C2: Canonical ServiceRegistry (Phase 1) — depends on canonical EventBus
@@ -574,6 +604,12 @@ class HermesKernel:
             logger=self._structured_logger,
         )
         set_observability_manager(self._observability_manager)
+
+        # MemoryManager — initialize with kernel data_dir for persistence
+        # Pass MCPManager to enable GraphifyBackend wiring when available
+        mcp_mgr = get_mcp_manager()
+        memory_mgr = get_memory_manager(base_path=self._config.data_dir, mcp_manager=mcp_mgr)
+        set_memory_manager(memory_mgr)
 
         logger.debug("Canonical core components initialized")
 

@@ -3,6 +3,7 @@ Skill Manager for AI-OS Hermes Kernel.
 
 Manages skill loading, execution, and marketplace integration.
 Uses the canonical EventBus (C1, Task 5) and canonical EventType enum.
+Supports SKILL.md specification format (Vercel Skills canonical format) per M4-ADAPTER.
 """
 
 from __future__ import annotations
@@ -17,6 +18,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+from aios.core.skill_spec import SkillSpec, SkillSpecParser, discover_skill_specs
 from aios.events.core.bus import get_core_event_bus
 from aios.events.core.event import Event as CoreEvent
 from aios.events.core.identity import ComponentIdentity, ComponentType
@@ -74,21 +76,30 @@ class SkillManager:
         self,
         skills_dir: Path | None = None,
         marketplace_enabled: bool = True,
+        skill_specs_dir: Path | None = None,
     ):
         """
         Initialize the Skill Manager.
 
         Args:
-            skills_dir: Directory containing skills
+            skills_dir: Directory containing legacy JSON skills
             marketplace_enabled: Whether to enable marketplace
+            skill_specs_dir: Directory containing SKILL.md specifications (M4-ADAPTER)
         """
         self._skills_dir = skills_dir or Path("./.claude/skills")
         self._skills_dir.mkdir(parents=True, exist_ok=True)
+
+        # M4-ADAPTER: SKILL.md specifications directory
+        self._skill_specs_dir = skill_specs_dir or Path("./.claude/skill-specs")
+        self._skill_specs_dir.mkdir(parents=True, exist_ok=True)
 
         self._marketplace_enabled = marketplace_enabled
         self._skills: dict[str, Skill] = {}
         self._loaded_modules: dict[str, Any] = {}
         self._executions: list[SkillExecution] = []
+
+        # M4-ADAPTER: SKILL.md parser
+        self._spec_parser = SkillSpecParser()
 
         # FIX 9: Use canonical EventBus (C1, Task 5)
         self._event_bus = get_core_event_bus()
@@ -104,6 +115,9 @@ class SkillManager:
 
         # Load built-in skills
         self._load_builtin_skills()
+
+        # M4-ADAPTER: Discover and register SKILL.md specifications
+        self._discover_skill_specs()
 
     def _load_builtin_skills(self) -> None:
         """Load built-in skills."""
@@ -150,7 +164,7 @@ class SkillManager:
             self._skills[skill.skill_id] = skill
 
     def discover_skills(self) -> list[Skill]:
-        """Discover skills in the skills directory."""
+        """Discover skills in the skills directory (legacy JSON format)."""
         discovered = []
 
         for skill_file in self._skills_dir.glob("*.json"):
@@ -174,6 +188,52 @@ class SkillManager:
                 logger.warning(f"Failed to load skill from {skill_file}: {e}")
 
         return discovered
+
+    def _discover_skill_specs(self) -> list[Skill]:
+        """M4-ADAPTER: Discover and register SKILL.md specifications."""
+        discovered = []
+
+        specs = discover_skill_specs(self._skill_specs_dir)
+        for spec in specs:
+            try:
+                skill = spec.to_skill()
+                # Register the skill (will overwrite if same skill_id exists)
+                self.register_skill(skill)
+                discovered.append(skill)
+                logger.info(f"Registered skill from SKILL.md: {skill.skill_id}")
+            except Exception as e:
+                logger.warning(f"Failed to register skill from spec {spec.skill_id}: {e}")
+
+        return discovered
+
+    def discover_skill_specs_from_dir(self, specs_dir: Path | str) -> list[Skill]:
+        """Discover and register SKILL.md specifications from a custom directory."""
+        discovered = []
+        specs = discover_skill_specs(specs_dir)
+        for spec in specs:
+            try:
+                skill = spec.to_skill()
+                self.register_skill(skill)
+                discovered.append(skill)
+                logger.info(f"Registered skill from SKILL.md ({specs_dir}): {skill.skill_id}")
+            except Exception as e:
+                logger.warning(f"Failed to register skill from spec {spec.skill_id}: {e}")
+        return discovered
+
+    def load_skill_spec(self, spec_path: Path | str) -> Skill | None:
+        """Load a single SKILL.md specification file.
+
+        Parses through the manager's shared ``_spec_parser`` so that the parsed
+        spec is retrievable later via ``get_skill_spec`` (M4-ADAPTER adapter
+        round-trip).
+        """
+        spec = self._spec_parser.parse_file(spec_path)
+        if not spec:
+            return None
+
+        skill = spec.to_skill()
+        self.register_skill(skill)
+        return skill
 
     def register_skill(self, skill: Skill) -> None:
         """Register a skill."""

@@ -384,6 +384,34 @@ class CheckpointManager:
             "checkpoint_dir": str(self._checkpoint_dir),
         }
 
+    def _emit_event(
+        self, event_type: EventType, payload: dict[str, Any], correlation_id: str
+    ) -> None:
+        """Emit a canonical event via the canonical EventBus."""
+        import uuid as uuid_mod
+
+        # Handle invalid UUID strings by generating a new one
+        try:
+            correlation_uuid = uuid_mod.UUID(correlation_id) if correlation_id else uuid_mod.uuid4()
+        except ValueError:
+            correlation_uuid = uuid_mod.uuid4()
+
+        event = CoreEvent(
+            eventType=event_type,
+            source=self._identity,
+            correlationId=correlation_uuid,
+            payload=payload,
+        )
+        result = self._event_bus.publish(event)
+        # Fire and forget - result handling is async
+        if hasattr(result, "__await__"):
+            # Schedule on the event loop if available
+            try:
+                loop = asyncio.get_running_loop()
+                loop.create_task(result)
+            except RuntimeError:
+                pass
+
 
 # Global checkpoint manager instance
 _global_checkpoint_manager: CheckpointManager | None = None
@@ -404,29 +432,6 @@ def set_checkpoint_manager(manager: CheckpointManager) -> None:
     """Set the global checkpoint manager."""
     global _global_checkpoint_manager
     _global_checkpoint_manager = manager
-
-
-def _emit_event(
-        self, event_type: EventType, payload: dict[str, Any], correlation_id: str
-    ) -> None:
-        """Emit a canonical event via the canonical EventBus."""
-        import uuid as uuid_mod
-
-        event = CoreEvent(
-            eventType=event_type,
-            source=self._identity,
-            correlationId=uuid_mod.UUID(correlation_id) if correlation_id else uuid_mod.uuid4(),
-            payload=payload,
-        )
-        result = self._event_bus.publish(event)
-        # Fire and forget - result handling is async
-        if hasattr(result, "__await__"):
-            # Schedule on the event loop if available
-            try:
-                loop = asyncio.get_running_loop()
-                loop.create_task(result)
-            except RuntimeError:
-                pass
 
 
 __all__ = [

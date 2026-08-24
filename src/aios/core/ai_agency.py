@@ -135,7 +135,7 @@ class BaseAgency(ABC):
             event_type = EventType.AI_AGENT_TASK_REQUESTED  # fallback
         self._emit_event(
             event_type,
-            {"request_id": request.request_id, "target": request.target},
+            {"request_id": request.request_id, "review_target": request.target},
             request.correlation_id or request.request_id,
         )
 
@@ -153,6 +153,7 @@ class BaseAgency(ABC):
                 "verdict": response.verdict.value,
                 "confidence": response.confidence,
                 "findings_count": len(response.findings),
+                "review_target": request.target,
             },
             request.correlation_id or request.request_id,
         )
@@ -505,17 +506,33 @@ class ArchitectureAgency(BaseAgency):
 
 
 class FinalJudgeAgency(BaseAgency):
-    """Final judgment agency."""
+    """Final judgment agency.
+
+    M7: performs INDEPENDENT, evidence-first aggregation of ``TestingEvidence``
+    records. Prose-only input is rejected (INV-010). Builder-origin evidence is
+    excluded by the orchestrator before it reaches here, so the judge never
+    self-approves (INV-009). The external worker (user_simulation) supplies
+    observations only and is never treated as a verdict authority.
+    """
 
     def __init__(self):
         super().__init__(AgencyType.FINAL_JUDGE)
 
     async def review(self, request: AgencyRequest) -> AgencyResponse:
+        """Review an AgencyRequest (legacy path preserved for regression).
+
+        If ``request.context["testing_evidence"]`` is present, delegates to the
+        evidence-first aggregation path. Otherwise aggregates legacy
+        ``previous_findings`` dicts (original behavior).
+        """
         self._emit_started(request)
 
-        await asyncio.sleep(0.5)
+        evidence = request.context.get("testing_evidence")
+        if evidence is not None:
+            return await self.review_evidence(evidence, request=request)
 
-        # Aggregate previous agency results
+        await asyncio.sleep(0.01)
+
         context_findings = request.context.get("previous_findings", [])
         critical_findings = [f for f in context_findings if f.get("severity") == "critical"]
         high_findings = [f for f in context_findings if f.get("severity") == "high"]
@@ -542,6 +559,113 @@ class FinalJudgeAgency(BaseAgency):
         )
 
         self._emit_completed(request, response)
+        return response
+
+    async def review_evidence(
+        self,
+        evidence_list: list[Any],
+        *,
+        request: AgencyRequest | None = None,
+        builder_id: str = "",
+    ) -> AgencyResponse:
+        """
+        INDEPENDENT, EVIDENCE-FIRST final verdict.
+
+        Aggregates ``TestingEvidence`` (or dict-equivalents). Rules:
+          * Rejects prose-only / empty evidence (INV-010).
+          * Critical failures -> REJECT (never APPROVE).
+          * High-severity failures -> CONDITIONAL.
+          * If any failing evidence remains unresolved -> CONDITIONAL/REJECT.
+          * Strong, all-pass evidence with safeguards -> APPROVE.
+          * Builder-origin evidence is dropped (defense-in-depth, INV-009).
+        """
+        request_id = request.request_id if request else f"fj_{uuid.uuid4().hex[:12]}"
+        correlation_id = request.correlation_id if request else ""
+        self._emit_started(request) if request else None
+
+        if not evidence_list:
+            # Evidence-first: no evidence => cannot approve (no prose-only verdicts).
+            response = AgencyResponse(
+                request_id=request_id,
+                agency_type=self.agency_type,
+                verdict=Verdict.REJECT,
+                findings=[{"type": "no_evidence", "detail": "FinalJudge received no TestingEvidence"}],
+                recommendations=["Provide multi-perspective evidence before judging"],
+                confidence=1.0,
+            )
+            if request:
+                self._emit_completed(request, response)
+            return response
+
+        # Normalize to dicts; exclude builder-origin evidence.
+        cleaned = []
+        for ev in evidence_list:
+            d = ev.to_dict() if hasattr(ev, "to_dict") else dict(ev)
+            prov = d.get("provenance", {}) or {}
+            if builder_id and prov.get("source") == builder_id:
+                continue  # builder cannot self-approve (INV-009)
+            cleaned.append(d)
+
+        if not cleaned:
+            # Every piece of evidence was builder-origin (excluded) — there is
+            # no independent evidence to judge on, so the verdict must be REJECT
+            # (evidence-first: cannot approve on the builder's own say-so).
+            response = AgencyResponse(
+                request_id=request_id,
+                agency_type=self.agency_type,
+                verdict=Verdict.REJECT,
+                findings=[{"type": "no_independent_evidence", "detail": "All evidence was builder-origin and excluded"}],
+                recommendations=["Provide independent testing-council evidence"],
+                confidence=1.0,
+                metadata={"evidence_first": True, "builder_excluded": bool(builder_id)},
+            )
+            if request:
+                self._emit_completed(request, response)
+            return response
+
+        critical = [e for e in cleaned if e.get("severity") == "critical" and e.get("verdict") == "fail"]
+        high = [e for e in cleaned if e.get("severity") == "high" and e.get("verdict") == "fail"]
+        failing = [e for e in cleaned if e.get("verdict") == "fail"]
+        passing = [e for e in cleaned if e.get("verdict") == "pass"]
+
+        # Weighted confidence: average of passing evidence confidence, penalized
+        # by failures.
+        if passing:
+            conf = sum(float(e.get("confidence", 0.0)) for e in passing) / len(passing)
+        else:
+            conf = 0.5
+        conf = max(0.0, min(1.0, conf - 0.1 * len(failing)))
+
+        verdict = Verdict.APPROVE
+        if critical:
+            verdict = Verdict.REJECT
+        elif failing:
+            verdict = Verdict.CONDITIONAL
+        elif high:
+            verdict = Verdict.CONDITIONAL
+
+        response = AgencyResponse(
+            request_id=request_id,
+            agency_type=self.agency_type,
+            verdict=verdict,
+            findings=[{
+                "type": "final_verdict",
+                "verdict": verdict.value,
+                "critical_failures": len(critical),
+                "high_failures": len(high),
+                "total_failures": len(failing),
+                "passing": len(passing),
+                "evidence_count": len(cleaned),
+            }],
+            recommendations=[
+                "Deploy with confidence" if verdict == Verdict.APPROVE
+                else "Address failing perspectives before deployment"
+            ],
+            confidence=round(conf, 3),
+            metadata={"evidence_first": True, "builder_excluded": bool(builder_id)},
+        )
+        if request:
+            self._emit_completed(request, response)
         return response
 
 

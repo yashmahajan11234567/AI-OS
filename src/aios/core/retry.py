@@ -172,14 +172,14 @@ class RetryManager:
         key = f"{task_id}:{service}"
         return self._budgets.get(key)
 
-    def retry_budget_exhausted(self, task_id: str, service: str, budget: RetryBudget, correlation_id: str) -> None:
+    async def retry_budget_exhausted(self, task_id: str, service: str, budget: RetryBudget, correlation_id: str) -> None:
         """Handle retry budget exhaustion."""
         key = f"{task_id}:{service}"
         if key in self._budgets:
             del self._budgets[key]
         logger.warning(f"Retry budget exhausted for task {task_id}: {budget}")
         # Publish canonical event
-        self._emit_event(
+        await self._emit_event(
             EventType.RETRY_BUDGET_EXHAUSTED,
             {
                 "task_id": task_id,
@@ -248,7 +248,7 @@ class RetryManager:
                     attempt = budget.record_attempt(e, error_type)
 
                     # Publish retry scheduled event
-                    self._emit_event(
+                    await self._emit_event(
                         EventType.RETRY_SCHEDULED,
                         {
                             "task_id": task_id,
@@ -263,24 +263,24 @@ class RetryManager:
                     await asyncio.sleep(attempt.delay_ms / 1000.0)
 
                     # Publish retry executed event
-                    self._emit_event(
+                    await self._emit_event(
                         EventType.RETRY_EXECUTED,
                         {
                             "task_id": task_id,
                             "service": service,
                             "retry_count": attempt.attempt,
                         },
-                        correlation_id=task_id,
+                        correlation_id=correlation_id,
                     )
                 else:
                     # Max retries reached
                     break
 
         # All retries exhausted
-        self.retry_budget_exhausted(task_id, service, budget, correlation_id)
+        await self.retry_budget_exhausted(task_id, service, budget, correlation_id)
 
         # Publish task failed event
-        self._emit_event(
+        await self._emit_event(
             EventType.TASK_FAILED,
             {
                 "task_id": task_id,
@@ -290,13 +290,14 @@ class RetryManager:
                 "retryable": True,
                 "retry_count": policy.max_retries,
             },
-            correlation_id=task_id,
+            correlation_id=correlation_id,
         )
 
         raise last_exception
 
-    def _emit_event(self, event_type: EventType, payload: dict[str, Any], correlation_id: str) -> None:
+    async def _emit_event(self, event_type: EventType, payload: dict[str, Any], correlation_id: str) -> None:
         """Emit a canonical event via the canonical EventBus."""
+        print(f"RETRY MANAGER: Emitting event {event_type} with correlation_id {correlation_id}")
         bus = self._ensure_bus()
         if bus is None:
             # EventBus not available, skip event emission
@@ -316,15 +317,12 @@ class RetryManager:
             correlationId=correlation_uuid,
             payload=payload,
         )
+        print(f"RETRY MANAGER: About to publish event {event_type}")
         result = bus.publish(event)
-        # Fire and forget - result handling is async
+        print(f"RETRY MANAGER: Published event {event_type}, result: {result}")
+        # Properly await the publish coroutine
         if hasattr(result, "__await__"):
-            # Schedule on the event loop if available
-            try:
-                loop = asyncio.get_running_loop()
-                loop.create_task(result)
-            except RuntimeError:
-                pass
+            await result
 
 
 # Global retry manager instance

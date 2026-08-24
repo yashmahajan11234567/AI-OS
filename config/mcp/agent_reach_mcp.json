@@ -1,0 +1,19 @@
+{
+  "server_id": "agent_reach",
+  "name": "Agent-Reach",
+  "transport": "stdio",
+  "command": [
+    "python",
+    "-m",
+    "aios.adapters.mock_agent_reach_server"
+  ],
+  "url": null,
+  "env": {},
+  "headers": {},
+  "timeout_seconds": 30,
+  "auto_reconnect": true,
+  "max_retries": 3,
+  "metadata": {
+    "description": "Agent-Reach web/social content ingestion MCP server (mock for testing)"
+  }
+}

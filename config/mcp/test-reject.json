@@ -1,0 +1,13 @@
+{
+  "server_id": "test-reject",
+  "name": "Test",
+  "transport": "stdio",
+  "command": [],
+  "url": null,
+  "env": {},
+  "headers": {},
+  "timeout_seconds": 30,
+  "auto_reconnect": true,
+  "max_retries": 3,
+  "metadata": {}
+}

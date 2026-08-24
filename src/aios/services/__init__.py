@@ -12,6 +12,14 @@ from aios.services.registry import (
     get_service_registry,
     set_service_registry,
 )
+from aios.services.self_prompting import (
+    SelfPromptingService,
+    SelfPromptConfig,
+    PromptTrace,
+    SelfPromptResult,
+    get_self_prompting_service,
+    set_self_prompting_service,
+)
 
 __all__ = [
     "BaseService",
@@ -21,4 +29,11 @@ __all__ = [
     "ServiceNotFoundError",
     "get_service_registry",
     "set_service_registry",
+    # M6 Self-Prompting
+    "SelfPromptingService",
+    "SelfPromptConfig",
+    "PromptTrace",
+    "SelfPromptResult",
+    "get_self_prompting_service",
+    "set_self_prompting_service",
 ]

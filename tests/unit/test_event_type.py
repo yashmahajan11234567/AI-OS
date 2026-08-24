@@ -22,6 +22,7 @@ from aios.events.core.types import EventType
 
 # Canonical enumeration from Part 2 §2.3.1, in exact canonical order.
 # 121 entries (the §2.3.1 enumeration), NOT the prose-stated 97.
+# M5-GATE-REALIZE adds 11 new M5 event types: total 132.
 CANONICAL_ORDER = [
     # SYSTEM
     "KERNEL_INITIALIZATION_STARTED",
@@ -143,26 +144,37 @@ CANONICAL_ORDER = [
     "MCP_TOOL_CALLED",
     "MCP_TOOL_SUCCEEDED",
     "MCP_TOOL_FAILED",
+    "MCP_SERVER_DISCONNECTED",
+    "MCP_SERVER_CONNECTED",
+    "MCP_SERVER_VALIDATION_FAILED",
+    "MCP_TOOL_DISCOVERED",
     "MODEL_ROUTED",
     "MODEL_FALLBACK",
+    "MODEL_PROVIDER_REGISTERED",
+    "MEMORY_GRAPHIFY_QUERY",
+    "MEMORY_GRAPHIFY_PATH",
+    "AGENT_REACH_FETCH",
+    "AGENT_REACH_NORMALIZED",
+    "HERMES_BRIDGE_TASK",
+    "HERMES_BRIDGE_OBSERVATION",
     "PROMPT_TEMPLATE_RENDERED",
     "TOKEN_BUDGET_EXCEEDED",
     "PERSONA_OVERRIDE_APPLIED",
     "FAILURE_CLASSIFIED",
 ]
 
-EXPECTED_COUNT = 121
-PROSE_COUNT = 97  # Part 2 §2.3.1 prose states 97; the enumeration contains 121.
+EXPECTED_COUNT = 132
+PROSE_COUNT = 97  # Part 2 §2.3.1 prose states 97; the enumeration originally contained 121; M5 adds 11 = 132.
 
 NAME_RE = re.compile(r"^[A-Z][A-Z0-9_]{1,63}$")
 
 
-def test_event_type_count_is_121():
-    """The §2.3.1 enumeration contains 121 members (not the prose's 97)."""
+def test_event_type_count_is_132():
+    """The §2.3.1 enumeration contains 132 members (original 121 + 11 M5 additions)."""
     assert len(EventType) == EXPECTED_COUNT
 
 
-def test_all_121_members_exist():
+def test_all_132_members_exist():
     for name in CANONICAL_ORDER:
         assert hasattr(EventType, name), f"missing EventType.{name}"
         assert isinstance(getattr(EventType, name), EventType)
@@ -235,9 +247,9 @@ def test_no_category_or_priority_attached_to_members():
 
 
 def test_architecture_discrepancy_documented():
-    """97 (prose) vs 121 (enumeration) discrepancy is captured, not resolved.
+    """97 (prose) vs 121 (original enumeration) vs 132 (M5) discrepancy is captured, not resolved.
 
-    We assert the enumeration count is 121 and that the source module's docstring
+    We assert the enumeration count is 132 and that the source module's docstring
     acknowledges the discrepancy. Resolution is escalated to the Architect / ARB.
     """
     import inspect

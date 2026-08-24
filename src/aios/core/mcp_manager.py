@@ -10,6 +10,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import sys
 import uuid
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -21,6 +22,9 @@ from aios.events.core.bus import get_core_event_bus
 from aios.events.core.event import Event as CoreEvent
 from aios.events.core.identity import ComponentIdentity, ComponentType
 from aios.events.core.types import EventType, SemanticVersion
+
+# Import SecurityManager for gate-before-connect validation
+from aios.core.security_manager import get_security_manager
 
 logger = logging.getLogger(__name__)
 
@@ -184,6 +188,10 @@ class MCPManager:
         """
         Connect to an MCP server.
 
+        M5-GATE-REALIZE: Gate-before-connect enforcement (C18).
+        Validates server configuration through SecurityManager's MCPServerSecurityGate
+        BEFORE attempting connection.
+
         Args:
             server_id: Server identifier
 
@@ -199,6 +207,40 @@ class MCPManager:
         if status.connected:
             logger.info(f"Server {server_id} already connected")
             return True
+
+        # M5: Gate-before-connect - validate server configuration through SecurityManager
+        # before attempting any connection (C18: gate-before-connect)
+        security_manager = get_security_manager()
+        validation_result = security_manager.validate_mcp_server_before_connect(config)
+
+        if not validation_result.passed:
+            # Gate failed - do not connect
+            error_msg = f"MCP server {server_id} failed security validation: {len(validation_result.violations)} violations"
+            status.last_error = error_msg
+            status.retry_count += 1
+            logger.error(error_msg)
+
+            self._emit_event(
+                EventType.MCP_SERVER_VALIDATION_FAILED,
+                {
+                    "server_id": server_id,
+                    "name": config.name,
+                    "scan_id": validation_result.scan_id,
+                    "violations": [
+                        {
+                            "violation_id": v.violation_id,
+                            "severity": v.severity,
+                            "description": v.description,
+                            "category": v.category,
+                            "context": v.context,
+                        }
+                        for v in validation_result.violations
+                    ],
+                },
+                validation_result.scan_id,
+            )
+
+            return False
 
         try:
             if config.transport == MCPTransport.STDIO:
@@ -227,6 +269,7 @@ class MCPManager:
                     "name": config.name,
                     "transport": config.transport.value,
                     "tools": [t.name for t in tools],
+                    "action": "server_connected",
                 },
                 server_id,
             )
@@ -242,10 +285,16 @@ class MCPManager:
 
     def _emit_event(self, event_type: EventType, payload: dict[str, Any], correlation_id: str) -> None:
         """Emit a canonical event via the canonical EventBus."""
+        # Ensure correlation_id is a valid UUID - generate one if it's not
+        try:
+            corr_uuid = uuid.UUID(correlation_id) if correlation_id else uuid.uuid4()
+        except ValueError:
+            # Not a valid UUID, generate a deterministic one from the string
+            corr_uuid = uuid.uuid5(uuid.NAMESPACE_DNS, correlation_id)
         event = CoreEvent(
             eventType=event_type,
             source=self._identity,
-            correlationId=uuid.UUID(correlation_id) if correlation_id else uuid.uuid4(),
+            correlationId=corr_uuid,
             payload=payload,
         )
         result = self._event_bus.publish(event) if self._event_bus else None
@@ -260,7 +309,7 @@ class MCPManager:
     async def _connect_stdio(
         self, config: MCPServerConfig, status: MCPServerStatus
     ) -> None:
-        """Connect via stdio transport."""
+        """Connect via stdio transport with MCP protocol initialization."""
         if not config.command:
             raise ValueError("STDIO transport requires command")
 
@@ -273,10 +322,61 @@ class MCPManager:
         )
         self._processes[config.server_id] = process
 
+        # Initialize MCP connection
+        await self._initialize_mcp_stdio(config.server_id, process, config)
+
+    async def _initialize_mcp_stdio(
+        self, server_id: str, process: asyncio.subprocess.Process, config: MCPServerConfig
+    ) -> None:
+        """Initialize MCP protocol over stdio."""
+        import json
+
+        # Send initialize request
+        init_request = {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "initialize",
+            "params": {
+                "protocolVersion": "2024-11-05",
+                "capabilities": {},
+                "clientInfo": {
+                    "name": "AI-OS MCP Manager",
+                    "version": "0.1.0",
+                },
+            },
+        }
+
+        request_data = json.dumps(init_request) + "\n"
+        process.stdin.write(request_data.encode())
+        await process.stdin.drain()
+
+        # Read response
+        response_line = await asyncio.wait_for(
+            process.stdout.readline(), timeout=config.timeout_seconds
+        )
+        if not response_line:
+            raise RuntimeError("MCP server closed connection during initialization")
+
+        try:
+            response = json.loads(response_line.decode().strip())
+            if "error" in response:
+                raise RuntimeError(f"MCP initialization failed: {response['error']}")
+        except json.JSONDecodeError as e:
+            raise RuntimeError(f"Invalid JSON response from MCP server: {e}")
+
+        # Send initialized notification
+        initialized_notification = {
+            "jsonrpc": "2.0",
+            "method": "notifications/initialized",
+        }
+        notification_data = json.dumps(initialized_notification) + "\n"
+        process.stdin.write(notification_data.encode())
+        await process.stdin.drain()
+
     async def _connect_http(
         self, config: MCPServerConfig, status: MCPServerStatus
     ) -> None:
-        """Connect via HTTP transport."""
+        """Connect via HTTP transport with MCP protocol initialization."""
         import aiohttp
 
         if not config.url:
@@ -287,6 +387,39 @@ class MCPManager:
             timeout=aiohttp.ClientTimeout(total=config.timeout_seconds),
         )
         self._processes[config.server_id] = session
+
+        # Initialize MCP connection
+        await self._initialize_mcp_http(config.server_id, session, config)
+
+    async def _initialize_mcp_http(
+        self, server_id: str, session: aiohttp.ClientSession, config: MCPServerConfig
+    ) -> None:
+        """Initialize MCP protocol over HTTP."""
+        import json
+
+        init_request = {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "initialize",
+            "params": {
+                "protocolVersion": "2024-11-05",
+                "capabilities": {},
+                "clientInfo": {
+                    "name": "AI-OS MCP Manager",
+                    "version": "0.1.0",
+                },
+            },
+        }
+
+        async with session.post(
+            config.url.rstrip("/") + "/mcp",
+            json=init_request,
+        ) as resp:
+            if resp.status != 200:
+                raise RuntimeError(f"MCP initialization failed: HTTP {resp.status}")
+            response = await resp.json()
+            if "error" in response:
+                raise RuntimeError(f"MCP initialization failed: {response['error']}")
 
     async def _connect_sse(
         self, config: MCPServerConfig, status: MCPServerStatus
@@ -308,6 +441,42 @@ class MCPManager:
             config.url, extra_headers=config.headers
         )
         self._processes[config.server_id] = websocket
+
+        # Initialize MCP connection
+        await self._initialize_mcp_websocket(config.server_id, websocket, config)
+
+    async def _initialize_mcp_websocket(
+        self, server_id: str, websocket, config: MCPServerConfig
+    ) -> None:
+        """Initialize MCP protocol over WebSocket."""
+        import json
+
+        init_request = {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "initialize",
+            "params": {
+                "protocolVersion": "2024-11-05",
+                "capabilities": {},
+                "clientInfo": {
+                    "name": "AI-OS MCP Manager",
+                    "version": "0.1.0",
+                },
+            },
+        }
+
+        await websocket.send(json.dumps(init_request))
+        response_str = await asyncio.wait_for(websocket.recv(), timeout=config.timeout_seconds)
+        response = json.loads(response_str)
+        if "error" in response:
+            raise RuntimeError(f"MCP initialization failed: {response['error']}")
+
+        # Send initialized notification
+        initialized_notification = {
+            "jsonrpc": "2.0",
+            "method": "notifications/initialized",
+        }
+        await websocket.send(json.dumps(initialized_notification))
 
     async def disconnect(self, server_id: str) -> bool:
         """
@@ -347,22 +516,160 @@ class MCPManager:
         return True
 
     async def _discover_tools(self, server_id: str) -> list[MCPTool]:
-        """Discover tools from an MCP server (placeholder)."""
-        # In real implementation, this would call the MCP server's tools/list
-        # For now, return mock tools based on server config
+        """Discover tools from an MCP server using tools/list."""
         config = self._servers.get(server_id)
         if not config:
             return []
 
-        # Mock tools for demo
-        return [
-            MCPTool(
-                name=f"{config.name}_tool",
-                description=f"Tool from {config.name}",
-                input_schema={"type": "object", "properties": {}},
+        process = self._processes.get(server_id)
+        if not process:
+            return []
+
+        try:
+            if config.transport == MCPTransport.STDIO:
+                return await self._discover_tools_stdio(server_id, process, config)
+            elif config.transport in (MCPTransport.HTTP, MCPTransport.SSE):
+                return await self._discover_tools_http(server_id, process, config)
+            elif config.transport == MCPTransport.WEBSOCKET:
+                return await self._discover_tools_websocket(server_id, process, config)
+        except Exception as e:
+            logger.warning(f"Failed to discover tools from {server_id}: {e}")
+
+        return []
+
+    async def _discover_tools_stdio(
+        self, server_id: str, process: asyncio.subprocess.Process, config: MCPServerConfig
+    ) -> list[MCPTool]:
+        """Discover tools via stdio transport."""
+        import json
+
+        request = {
+            "jsonrpc": "2.0",
+            "id": 2,
+            "method": "tools/list",
+            "params": {},
+        }
+
+        request_data = json.dumps(request) + "\n"
+        process.stdin.write(request_data.encode())
+        await process.stdin.drain()
+
+        response_line = await asyncio.wait_for(
+            process.stdout.readline(), timeout=config.timeout_seconds
+        )
+        if not response_line:
+            return []
+
+        response = json.loads(response_line.decode().strip())
+        if "error" in response:
+            logger.warning(f"tools/list failed for {server_id}: {response['error']}")
+            return []
+
+        tools = []
+        for tool_data in response.get("result", {}).get("tools", []):
+            tools.append(MCPTool(
+                name=tool_data.get("name", ""),
+                description=tool_data.get("description", ""),
+                input_schema=tool_data.get("inputSchema", {}),
                 server_id=server_id,
-            )
-        ]
+            ))
+
+        self._emit_event(
+            EventType.MCP_TOOL_DISCOVERED,
+            {
+                "server_id": server_id,
+                "tools": [t.name for t in tools],
+            },
+            server_id,
+        )
+
+        return tools
+
+    async def _discover_tools_http(
+        self, server_id: str, session: aiohttp.ClientSession, config: MCPServerConfig
+    ) -> list[MCPTool]:
+        """Discover tools via HTTP transport."""
+        import json
+
+        request = {
+            "jsonrpc": "2.0",
+            "id": 2,
+            "method": "tools/list",
+            "params": {},
+        }
+
+        async with session.post(
+            config.url.rstrip("/") + "/mcp",
+            json=request,
+        ) as resp:
+            if resp.status != 200:
+                return []
+            response = await resp.json()
+
+        if "error" in response:
+            logger.warning(f"tools/list failed for {server_id}: {response['error']}")
+            return []
+
+        tools = []
+        for tool_data in response.get("result", {}).get("tools", []):
+            tools.append(MCPTool(
+                name=tool_data.get("name", ""),
+                description=tool_data.get("description", ""),
+                input_schema=tool_data.get("inputSchema", {}),
+                server_id=server_id,
+            ))
+
+        self._emit_event(
+            EventType.MCP_TOOL_DISCOVERED,
+            {
+                "server_id": server_id,
+                "tools": [t.name for t in tools],
+            },
+            server_id,
+        )
+
+        return tools
+
+    async def _discover_tools_websocket(
+        self, server_id: str, websocket, config: MCPServerConfig
+    ) -> list[MCPTool]:
+        """Discover tools via WebSocket transport."""
+        import json
+
+        request = {
+            "jsonrpc": "2.0",
+            "id": 2,
+            "method": "tools/list",
+            "params": {},
+        }
+
+        await websocket.send(json.dumps(request))
+        response_str = await asyncio.wait_for(websocket.recv(), timeout=config.timeout_seconds)
+        response = json.loads(response_str)
+
+        if "error" in response:
+            logger.warning(f"tools/list failed for {server_id}: {response['error']}")
+            return []
+
+        tools = []
+        for tool_data in response.get("result", {}).get("tools", []):
+            tools.append(MCPTool(
+                name=tool_data.get("name", ""),
+                description=tool_data.get("description", ""),
+                input_schema=tool_data.get("inputSchema", {}),
+                server_id=server_id,
+            ))
+
+        self._emit_event(
+            EventType.MCP_TOOL_DISCOVERED,
+            {
+                "server_id": server_id,
+                "tools": [t.name for t in tools],
+            },
+            server_id,
+        )
+
+        return tools
 
     async def call_tool(
         self,
@@ -372,7 +679,10 @@ class MCPManager:
         call_id: str | None = None,
     ) -> dict[str, Any]:
         """
-        Call an MCP tool.
+        Call an MCP tool with full provenance tracking.
+
+        M5-GATE-REALIZE: Every interaction carries provenance (session_id, worker/server,
+        timestamp, environment, interaction/tool, source).
 
         Args:
             server_id: Server identifier
@@ -381,7 +691,7 @@ class MCPManager:
             call_id: Optional call ID for tracking
 
         Returns:
-            Tool result
+            Tool result with provenance
         """
         call_id = call_id or f"call_{datetime.utcnow().timestamp()}"
         status = self._status.get(server_id)
@@ -394,6 +704,22 @@ class MCPManager:
         if not tool:
             raise ValueError(f"Tool {tool_name} not found on server {server_id}")
 
+        config = self._servers.get(server_id)
+        process = self._processes.get(server_id)
+
+        # Provenance metadata
+        provenance = {
+            "call_id": call_id,
+            "session_id": f"mcp_{server_id}_{datetime.utcnow().timestamp()}",
+            "worker": config.name if config else "unknown",
+            "server": server_id,
+            "timestamp": datetime.utcnow().isoformat(),
+            "environment": "ai_os_mcp",
+            "interaction": "tool_call",
+            "tool": tool_name,
+            "source": "mcp_manager",
+        }
+
         self._emit_event(
             EventType.MCP_TOOL_CALLED,
             {
@@ -401,24 +727,32 @@ class MCPManager:
                 "server_id": server_id,
                 "tool_name": tool_name,
                 "arguments": arguments,
+                "provenance": provenance,
             },
             call_id,
         )
 
         try:
-            # Placeholder for actual tool call
-            # In real implementation, this would send via the appropriate transport
-            await asyncio.sleep(0.1)
+            if config.transport == MCPTransport.STDIO:
+                result = await self._call_tool_stdio(server_id, process, config, tool_name, arguments, call_id)
+            elif config.transport in (MCPTransport.HTTP, MCPTransport.SSE):
+                result = await self._call_tool_http(server_id, process, config, tool_name, arguments, call_id)
+            elif config.transport == MCPTransport.WEBSOCKET:
+                result = await self._call_tool_websocket(server_id, process, config, tool_name, arguments, call_id)
+            else:
+                raise ValueError(f"Unsupported transport: {config.transport}")
 
-            result = {"success": True, "result": f"Mock result from {tool_name}"}
+            # Add provenance to result
+            result["provenance"] = provenance
 
             self._emit_event(
-                EventType.MCP_TOOL_RESULT,
+                EventType.MCP_TOOL_SUCCEEDED,
                 {
                     "call_id": call_id,
                     "success": True,
                     "result": result,
                     "error": None,
+                    "provenance": provenance,
                 },
                 call_id,
             )
@@ -426,20 +760,110 @@ class MCPManager:
             return result
 
         except Exception as e:
-            error_result = {"success": False, "error": str(e)}
+            error_result = {"success": False, "error": str(e), "provenance": provenance}
 
             self._emit_event(
-                EventType.MCP_TOOL_RESULT,
+                EventType.MCP_TOOL_FAILED,
                 {
                     "call_id": call_id,
                     "success": False,
                     "result": {},
                     "error": str(e),
+                    "provenance": provenance,
                 },
                 call_id,
             )
 
             raise
+
+    async def _call_tool_stdio(
+        self, server_id: str, process: asyncio.subprocess.Process,
+        config: MCPServerConfig, tool_name: str, arguments: dict[str, Any], call_id: str
+    ) -> dict[str, Any]:
+        """Call tool via stdio transport."""
+        import json
+
+        request = {
+            "jsonrpc": "2.0",
+            "id": int(call_id.split("_")[-1].replace(".", "")) if "_" in call_id else 3,
+            "method": "tools/call",
+            "params": {
+                "name": tool_name,
+                "arguments": arguments,
+            },
+        }
+
+        request_data = json.dumps(request) + "\n"
+        process.stdin.write(request_data.encode())
+        await process.stdin.drain()
+
+        response_line = await asyncio.wait_for(
+            process.stdout.readline(), timeout=config.timeout_seconds
+        )
+        if not response_line:
+            raise RuntimeError("MCP server closed connection during tool call")
+
+        response = json.loads(response_line.decode().strip())
+        if "error" in response:
+            raise RuntimeError(f"MCP tool call failed: {response['error']}")
+
+        return response.get("result", {})
+
+    async def _call_tool_http(
+        self, server_id: str, session: aiohttp.ClientSession,
+        config: MCPServerConfig, tool_name: str, arguments: dict[str, Any], call_id: str
+    ) -> dict[str, Any]:
+        """Call tool via HTTP transport."""
+        import json
+
+        request = {
+            "jsonrpc": "2.0",
+            "id": int(call_id.split("_")[-1].replace(".", "")) if "_" in call_id else 3,
+            "method": "tools/call",
+            "params": {
+                "name": tool_name,
+                "arguments": arguments,
+            },
+        }
+
+        async with session.post(
+            config.url.rstrip("/") + "/mcp",
+            json=request,
+        ) as resp:
+            if resp.status != 200:
+                raise RuntimeError(f"MCP tool call failed: HTTP {resp.status}")
+            response = await resp.json()
+
+        if "error" in response:
+            raise RuntimeError(f"MCP tool call failed: {response['error']}")
+
+        return response.get("result", {})
+
+    async def _call_tool_websocket(
+        self, server_id: str, websocket,
+        config: MCPServerConfig, tool_name: str, arguments: dict[str, Any], call_id: str
+    ) -> dict[str, Any]:
+        """Call tool via WebSocket transport."""
+        import json
+
+        request = {
+            "jsonrpc": "2.0",
+            "id": int(call_id.split("_")[-1].replace(".", "")) if "_" in call_id else 3,
+            "method": "tools/call",
+            "params": {
+                "name": tool_name,
+                "arguments": arguments,
+            },
+        }
+
+        await websocket.send(json.dumps(request))
+        response_str = await asyncio.wait_for(websocket.recv(), timeout=config.timeout_seconds)
+        response = json.loads(response_str)
+
+        if "error" in response:
+            raise RuntimeError(f"MCP tool call failed: {response['error']}")
+
+        return response.get("result", {})
 
     def get_server_status(self, server_id: str) -> MCPServerStatus | None:
         """Get server connection status."""

@@ -271,8 +271,32 @@ from aios.core.council_manager import (
     CouncilSession,
     CouncilRole,
     ConsensusAlgorithm,
+    CritiqueRanking,
+    CritiqueResult,
     get_council_manager,
     set_council_manager,
+)
+from aios.core.llm_council import (
+    LLMCouncil,
+    LLMRole,
+    LLMCouncilConfig,
+)
+# M7 — Multi-Perspective Testing & User Simulation
+from aios.core.testing_evidence import (
+    Provenance,
+    TestingEvidence,
+    UserSimulationCompleted,
+    normalize_user_simulation,
+    Severity,
+    PerspectiveVerdict,
+    VALID_SEVERITIES,
+    VALID_VERDICTS,
+)
+from aios.core.user_simulation_agent import UserSimulationAgent
+from aios.core.simplification_gate import (
+    SimplificationGate,
+    GateVerdict,
+    GateResult,
 )
 
 # Kernel
@@ -601,8 +625,27 @@ __all__ = [
     "CouncilSession",
     "CouncilRole",
     "ConsensusAlgorithm",
+    "CritiqueRanking",
+    "CritiqueResult",
     "get_council_manager",
     "set_council_manager",
+    # LLM Council (M6)
+    "LLMCouncil",
+    "LLMRole",
+    "LLMCouncilConfig",
+    # M7 — Multi-Perspective Testing & User Simulation
+    "Provenance",
+    "TestingEvidence",
+    "UserSimulationCompleted",
+    "normalize_user_simulation",
+    "Severity",
+    "PerspectiveVerdict",
+    "VALID_SEVERITIES",
+    "VALID_VERDICTS",
+    "UserSimulationAgent",
+    "SimplificationGate",
+    "GateVerdict",
+    "GateResult",
     # Kernel
     "HermesKernel",
     "KernelConfig",

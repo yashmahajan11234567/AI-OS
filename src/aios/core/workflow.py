@@ -611,12 +611,23 @@ class WorkflowManager:
                             raise result
                     else:
                         completed.add(step.step_id)
+                        # Store result both as individual key and merge into workflow state
                         self._state_manager.set_state(
                             StateScope.WORKFLOW,
                             execution_id,
                             f"step_results.{step.step_id}",
                             result,
                         )
+                        # Update the main workflow state with step_results
+                        state = self._state_manager.get_state(
+                            StateScope.WORKFLOW, execution_id, "workflow"
+                        )
+                        if state:
+                            step_results = state.get("step_results", {})
+                            step_results[step.step_id] = result
+                            self._state_manager.set_state(
+                                StateScope.WORKFLOW, execution_id, "step_results", step_results
+                            )
 
                 required_failed = [s for s in failed if step_map[s].required]
                 if required_failed:
@@ -1103,6 +1114,21 @@ class WorkflowManager:
         task = asyncio.ensure_future(coro, loop=loop)
         self._pending_tasks.add(task)
         task.add_done_callback(self._pending_tasks.discard)
+
+    async def wait_for_pending_events(self, timeout: float = 5.0) -> None:
+        """Wait for all pending event publish tasks to complete.
+
+        This is useful in tests to ensure all events have been published
+        before checking for them.
+        """
+        if self._pending_tasks:
+            try:
+                await asyncio.wait_for(
+                    asyncio.gather(*self._pending_tasks, return_exceptions=True),
+                    timeout=timeout
+                )
+            except asyncio.TimeoutError:
+                self._log_warning(f"Timeout waiting for {len(self._pending_tasks)} pending event tasks")
 
     # ------------------------------------------------------------------
     # Business API — workflow lifecycle

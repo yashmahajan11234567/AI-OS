@@ -11,7 +11,8 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any
 
-from aios.events.base import Event, EventType
+from aios.events.base import Event
+from aios.events.core.types import EventType
 
 
 # =============================================================================
@@ -23,7 +24,7 @@ from aios.events.base import Event, EventType
 class KernelStarted(Event):
     """Kernel has started successfully."""
 
-    event_type: EventType = EventType.KERNEL_STARTED
+    event_type: EventType = EventType.KERNEL_READY
     payload: dict[str, Any] = field(default_factory=lambda: {"version": "0.1.0"})
 
 
@@ -31,7 +32,7 @@ class KernelStarted(Event):
 class KernelStopped(Event):
     """Kernel has stopped."""
 
-    event_type: EventType = EventType.KERNEL_STOPPED
+    event_type: EventType = EventType.KERNEL_TERMINATED
     payload: dict[str, Any] = field(default_factory=lambda: {"reason": "shutdown"})
 
 
@@ -39,7 +40,7 @@ class KernelStopped(Event):
 class KernelError(Event):
     """Kernel encountered an error."""
 
-    event_type: EventType = EventType.KERNEL_ERROR
+    event_type: EventType = EventType.KERNEL_FATAL_ERROR
     payload: dict[str, Any] = field(default_factory=lambda: {"error": "", "fatal": False})
 
 
@@ -105,7 +106,7 @@ class TaskFailed(Event):
 class TaskRetryRequested(Event):
     """A retry has been requested for a failed task."""
 
-    event_type: EventType = EventType.TASK_RETRY_REQUESTED
+    event_type: EventType = EventType.TASK_RETRIED
     payload: dict[str, Any] = field(default_factory=lambda: {
         "task_id": "",
         "service": "",
@@ -129,7 +130,7 @@ class TaskCancelled(Event):
 class WorkflowCreated(Event):
     """A new workflow has been created."""
 
-    event_type: EventType = EventType.WORKFLOW_CREATED
+    event_type: EventType = EventType.WORKFLOW_STARTED
     payload: dict[str, Any] = field(default_factory=lambda: {
         "workflow_id": "",
         "name": "",
@@ -246,7 +247,7 @@ class PlanningFailed(Event):
 class PlanApproved(Event):
     """A plan has been approved."""
 
-    event_type: EventType = EventType.PLAN_APPROVED
+    event_type: EventType = EventType.COUNCIL_CONSENSUS_REACHED
     payload: dict[str, Any] = field(default_factory=lambda: {
         "plan_id": "",
         "approved_by": "human",
@@ -275,7 +276,7 @@ class PlanRejected(Event):
 class CodingStarted(Event):
     """Coding task has started."""
 
-    event_type: EventType = EventType.CODING_STARTED
+    event_type: EventType = EventType.CODE_GENERATED
     payload: dict[str, Any] = field(default_factory=lambda: {
         "coding_id": "",
         "task_id": "",
@@ -356,7 +357,7 @@ class ReviewStarted(Event):
 class ReviewCompleted(Event):
     """Code review has completed."""
 
-    event_type: EventType = EventType.REVIEW_COMPLETED
+    event_type: EventType = EventType.REVIEW_APPROVED
     payload: dict[str, Any] = field(default_factory=lambda: {
         "review_id": "",
         "approved": True,
@@ -408,7 +409,7 @@ class ReviewRejected(Event):
 class TestingStarted(Event):
     """Testing has started."""
 
-    event_type: EventType = EventType.TESTING_STARTED
+    event_type: EventType = EventType.TESTING_COMPLETED
     payload: dict[str, Any] = field(default_factory=lambda: {
         "test_run_id": "",
         "test_types": [],
@@ -466,7 +467,7 @@ class TestsFailed(Event):
 class TestGenerated(Event):
     """Tests were generated for an artifact."""
 
-    event_type: EventType = EventType.TEST_GENERATED
+    event_type: EventType = EventType.TESTS_GENERATED
     payload: dict[str, Any] = field(default_factory=lambda: {
         "artifact_id": "",
         "tests": [],
@@ -578,7 +579,7 @@ class DeploymentRolledBack(Event):
 class ProductionIncident(Event):
     """Production incident detected."""
 
-    event_type: EventType = EventType.PRODUCTION_INCIDENT
+    event_type: EventType = EventType.SERVICE_FAILED
     payload: dict[str, Any] = field(default_factory=lambda: {
         "incident_id": "",
         "severity": "critical",
@@ -593,7 +594,7 @@ class ProductionIncident(Event):
 class MetricsAlert(Event):
     """Metrics alert triggered."""
 
-    event_type: EventType = EventType.METRICS_ALERT
+    event_type: EventType = EventType.METRIC_EMITTED
     payload: dict[str, Any] = field(default_factory=lambda: {
         "alert_id": "",
         "metric": "",
@@ -607,7 +608,7 @@ class MetricsAlert(Event):
 class LogAnomalyDetected(Event):
     """Log anomaly detected."""
 
-    event_type: EventType = EventType.LOG_ANOMALY_DETECTED
+    event_type: EventType = EventType.METRIC_EMITTED
     payload: dict[str, Any] = field(default_factory=lambda: {
         "anomaly_id": "",
         "pattern": "",
@@ -620,7 +621,7 @@ class LogAnomalyDetected(Event):
 class UserFeedbackReceived(Event):
     """User feedback received."""
 
-    event_type: EventType = EventType.USER_FEEDBACK_RECEIVED
+    event_type: EventType = EventType.METRIC_EMITTED
     payload: dict[str, Any] = field(default_factory=lambda: {
         "feedback_id": "",
         "type": "bug",
@@ -695,7 +696,7 @@ class MemoryConsolidated(Event):
 class SkillLoaded(Event):
     """Skill has been loaded."""
 
-    event_type: EventType = EventType.SKILL_LOADED
+    event_type: EventType = EventType.SKILL_EXECUTED
     payload: dict[str, Any] = field(default_factory=lambda: {
         "skill_id": "",
         "name": "",
@@ -708,7 +709,7 @@ class SkillLoaded(Event):
 class SkillUnloaded(Event):
     """Skill has been unloaded."""
 
-    event_type: EventType = EventType.SKILL_UNLOADED
+    event_type: EventType = EventType.SKILL_FAILED
     payload: dict[str, Any] = field(default_factory=lambda: {
         "skill_id": "",
         "reason": "",
@@ -751,7 +752,7 @@ class SkillFailed(Event):
 class MCPServerConnected(Event):
     """MCP server connected."""
 
-    event_type: EventType = EventType.MCP_SERVER_CONNECTED
+    event_type: EventType = EventType.MCP_TOOL_CALLED
     payload: dict[str, Any] = field(default_factory=lambda: {
         "server_id": "",
         "name": "",
@@ -764,7 +765,7 @@ class MCPServerConnected(Event):
 class MCPServerDisconnected(Event):
     """MCP server disconnected."""
 
-    event_type: EventType = EventType.MCP_SERVER_DISCONNECTED
+    event_type: EventType = EventType.MCP_TOOL_FAILED
     payload: dict[str, Any] = field(default_factory=lambda: {
         "server_id": "",
         "reason": "",
@@ -788,7 +789,7 @@ class MCPToolCalled(Event):
 class MCPToolResult(Event):
     """MCP tool result received."""
 
-    event_type: EventType = EventType.MCP_TOOL_RESULT
+    event_type: EventType = EventType.MCP_TOOL_SUCCEEDED
     payload: dict[str, Any] = field(default_factory=lambda: {
         "call_id": "",
         "success": True,
@@ -819,7 +820,7 @@ class CouncilConvened(Event):
 class CouncilDeliberated(Event):
     """Council has deliberated."""
 
-    event_type: EventType = EventType.COUNCIL_DELIBERATED
+    event_type: EventType = EventType.COUNCIL_VOTE_CAST
     payload: dict[str, Any] = field(default_factory=lambda: {
         "council_id": "",
         "round": 0,
@@ -831,7 +832,7 @@ class CouncilDeliberated(Event):
 class CouncilDecided(Event):
     """Council has reached a decision."""
 
-    event_type: EventType = EventType.COUNCIL_DECIDED
+    event_type: EventType = EventType.COUNCIL_CONSENSUS_REACHED
     payload: dict[str, Any] = field(default_factory=lambda: {
         "council_id": "",
         "decision": "",
@@ -844,7 +845,7 @@ class CouncilDecided(Event):
 class CouncilDissented(Event):
     """Council member dissented."""
 
-    event_type: EventType = EventType.COUNCIL_DISSENTED
+    event_type: EventType = EventType.COUNCIL_DISSENT_REGISTERED
     payload: dict[str, Any] = field(default_factory=lambda: {
         "council_id": "",
         "member": "",
@@ -861,7 +862,7 @@ class CouncilDissented(Event):
 class SecurityAuditRequested(Event):
     """Security audit requested."""
 
-    event_type: EventType = EventType.SECURITY_AUDIT_REQUESTED
+    event_type: EventType = EventType.AI_AGENT_AUDIT_EMITTED
     payload: dict[str, Any] = field(default_factory=lambda: {
         "audit_id": "",
         "target": "",
@@ -873,7 +874,7 @@ class SecurityAuditRequested(Event):
 class SecurityAuditCompleted(Event):
     """Security audit completed."""
 
-    event_type: EventType = EventType.SECURITY_AUDIT_COMPLETED
+    event_type: EventType = EventType.AI_AGENT_AUDIT_EMITTED
     payload: dict[str, Any] = field(default_factory=lambda: {
         "audit_id": "",
         "findings": [],
@@ -885,7 +886,7 @@ class SecurityAuditCompleted(Event):
 class PerformanceAuditRequested(Event):
     """Performance audit requested."""
 
-    event_type: EventType = EventType.PERFORMANCE_AUDIT_REQUESTED
+    event_type: EventType = EventType.AI_AGENT_AUDIT_EMITTED
     payload: dict[str, Any] = field(default_factory=lambda: {
         "audit_id": "",
         "target": "",
@@ -897,7 +898,7 @@ class PerformanceAuditRequested(Event):
 class PerformanceAuditCompleted(Event):
     """Performance audit completed."""
 
-    event_type: EventType = EventType.PERFORMANCE_AUDIT_COMPLETED
+    event_type: EventType = EventType.AI_AGENT_AUDIT_EMITTED
     payload: dict[str, Any] = field(default_factory=lambda: {
         "audit_id": "",
         "metrics": {},
@@ -909,7 +910,7 @@ class PerformanceAuditCompleted(Event):
 class ChaosExperimentRequested(Event):
     """Chaos experiment requested."""
 
-    event_type: EventType = EventType.CHAOS_EXPERIMENT_REQUESTED
+    event_type: EventType = EventType.AI_AGENT_AUDIT_EMITTED
     payload: dict[str, Any] = field(default_factory=lambda: {
         "experiment_id": "",
         "type": "latency",
@@ -922,7 +923,7 @@ class ChaosExperimentRequested(Event):
 class ChaosExperimentCompleted(Event):
     """Chaos experiment completed."""
 
-    event_type: EventType = EventType.CHAOS_EXPERIMENT_COMPLETED
+    event_type: EventType = EventType.AI_AGENT_AUDIT_EMITTED
     payload: dict[str, Any] = field(default_factory=lambda: {
         "experiment_id": "",
         "result": "passed",
@@ -934,7 +935,7 @@ class ChaosExperimentCompleted(Event):
 class AccessibilityAuditRequested(Event):
     """Accessibility audit requested."""
 
-    event_type: EventType = EventType.ACCESSIBILITY_AUDIT_REQUESTED
+    event_type: EventType = EventType.AI_AGENT_AUDIT_EMITTED
     payload: dict[str, Any] = field(default_factory=lambda: {
         "audit_id": "",
         "target": "",
@@ -946,7 +947,7 @@ class AccessibilityAuditRequested(Event):
 class AccessibilityAuditCompleted(Event):
     """Accessibility audit completed."""
 
-    event_type: EventType = EventType.ACCESSIBILITY_AUDIT_COMPLETED
+    event_type: EventType = EventType.AI_AGENT_AUDIT_EMITTED
     payload: dict[str, Any] = field(default_factory=lambda: {
         "audit_id": "",
         "violations": [],
@@ -958,7 +959,7 @@ class AccessibilityAuditCompleted(Event):
 class DocumentationAuditRequested(Event):
     """Documentation audit requested."""
 
-    event_type: EventType = EventType.DOCUMENTATION_AUDIT_REQUESTED
+    event_type: EventType = EventType.AI_AGENT_AUDIT_EMITTED
     payload: dict[str, Any] = field(default_factory=lambda: {
         "audit_id": "",
         "target": "",
@@ -971,7 +972,7 @@ class DocumentationAuditRequested(Event):
 class DocumentationAuditCompleted(Event):
     """Documentation audit completed."""
 
-    event_type: EventType = EventType.DOCUMENTATION_AUDIT_COMPLETED
+    event_type: EventType = EventType.AI_AGENT_AUDIT_EMITTED
     payload: dict[str, Any] = field(default_factory=lambda: {
         "audit_id": "",
         "coverage": 0.0,
@@ -983,7 +984,7 @@ class DocumentationAuditCompleted(Event):
 class ConcurrencyAuditRequested(Event):
     """Concurrency audit requested."""
 
-    event_type: EventType = EventType.CONCURRENCY_AUDIT_REQUESTED
+    event_type: EventType = EventType.AI_AGENT_AUDIT_EMITTED
     payload: dict[str, Any] = field(default_factory=lambda: {
         "audit_id": "",
         "target": "",
@@ -995,7 +996,7 @@ class ConcurrencyAuditRequested(Event):
 class ConcurrencyAuditCompleted(Event):
     """Concurrency audit completed."""
 
-    event_type: EventType = EventType.CONCURRENCY_AUDIT_COMPLETED
+    event_type: EventType = EventType.AI_AGENT_AUDIT_EMITTED
     payload: dict[str, Any] = field(default_factory=lambda: {
         "audit_id": "",
         "issues": [],
@@ -1006,7 +1007,7 @@ class ConcurrencyAuditCompleted(Event):
 class BugHuntRequested(Event):
     """Bug hunt requested."""
 
-    event_type: EventType = EventType.BUG_HUNT_REQUESTED
+    event_type: EventType = EventType.AI_AGENT_AUDIT_EMITTED
     payload: dict[str, Any] = field(default_factory=lambda: {
         "hunt_id": "",
         "target": "",
@@ -1018,7 +1019,7 @@ class BugHuntRequested(Event):
 class BugHuntCompleted(Event):
     """Bug hunt completed."""
 
-    event_type: EventType = EventType.BUG_HUNT_COMPLETED
+    event_type: EventType = EventType.AI_AGENT_AUDIT_EMITTED
     payload: dict[str, Any] = field(default_factory=lambda: {
         "hunt_id": "",
         "bugs_found": [],
@@ -1029,7 +1030,7 @@ class BugHuntCompleted(Event):
 class ArchitectureValidationRequested(Event):
     """Architecture validation requested."""
 
-    event_type: EventType = EventType.ARCHITECTURE_VALIDATION_REQUESTED
+    event_type: EventType = EventType.AI_AGENT_AUDIT_EMITTED
     payload: dict[str, Any] = field(default_factory=lambda: {
         "validation_id": "",
         "target": "",
@@ -1041,7 +1042,7 @@ class ArchitectureValidationRequested(Event):
 class ArchitectureValidationCompleted(Event):
     """Architecture validation completed."""
 
-    event_type: EventType = EventType.ARCHITECTURE_VALIDATION_COMPLETED
+    event_type: EventType = EventType.AI_AGENT_AUDIT_EMITTED
     payload: dict[str, Any] = field(default_factory=lambda: {
         "validation_id": "",
         "compliant": True,
@@ -1053,7 +1054,7 @@ class ArchitectureValidationCompleted(Event):
 class FinalJudgmentRequested(Event):
     """Final judgment requested."""
 
-    event_type: EventType = EventType.FINAL_JUDGMENT_REQUESTED
+    event_type: EventType = EventType.FINAL_JUDGE_DECISION
     payload: dict[str, Any] = field(default_factory=lambda: {
         "judgment_id": "",
         "artifact": "",
@@ -1065,7 +1066,7 @@ class FinalJudgmentRequested(Event):
 class FinalJudgmentCompleted(Event):
     """Final judgment completed."""
 
-    event_type: EventType = EventType.FINAL_JUDGMENT_COMPLETED
+    event_type: EventType = EventType.FINAL_JUDGE_DECISION
     payload: dict[str, Any] = field(default_factory=lambda: {
         "judgment_id": "",
         "verdict": "approve",
@@ -1107,7 +1108,7 @@ class CheckpointRestored(Event):
 class CheckpointDeleted(Event):
     """Checkpoint has been deleted."""
 
-    event_type: EventType = EventType.CHECKPOINT_DELETED
+    event_type: EventType = EventType.CHECKPOINT_PRUNED
     payload: dict[str, Any] = field(default_factory=lambda: {
         "checkpoint_id": "",
         "reason": "",
@@ -1181,7 +1182,7 @@ class RootCauseAnalyzed(Event):
 class RootCauseResolved(Event):
     """Root cause has been resolved."""
 
-    event_type: EventType = EventType.ROOT_CAUSE_RESOLVED
+    event_type: EventType = EventType.RECOVERY_ACTION_COMPLETED
     payload: dict[str, Any] = field(default_factory=lambda: {
         "analysis_id": "",
         "resolution": "",
@@ -1211,7 +1212,7 @@ class FailureClassified(Event):
 class LearningCaptured(Event):
     """Learning has been captured."""
 
-    event_type: EventType = EventType.LEARNING_CAPTURED
+    event_type: EventType = EventType.AI_AGENT_AUDIT_EMITTED
     payload: dict[str, Any] = field(default_factory=lambda: {
         "learning_id": "",
         "category": "pattern",
@@ -1225,7 +1226,7 @@ class LearningCaptured(Event):
 class PatternExtracted(Event):
     """Pattern has been extracted."""
 
-    event_type: EventType = EventType.PATTERN_EXTRACTED
+    event_type: EventType = EventType.AI_AGENT_AUDIT_EMITTED
     payload: dict[str, Any] = field(default_factory=lambda: {
         "pattern_id": "",
         "pattern_type": "success",
@@ -1239,7 +1240,7 @@ class PatternExtracted(Event):
 class KnowledgeUpdated(Event):
     """Engineering knowledge has been updated."""
 
-    event_type: EventType = EventType.KNOWLEDGE_UPDATED
+    event_type: EventType = EventType.AI_AGENT_AUDIT_EMITTED
     payload: dict[str, Any] = field(default_factory=lambda: {
         "knowledge_id": "",
         "topic": "",
@@ -1257,7 +1258,7 @@ class KnowledgeUpdated(Event):
 class StateTransitioned(Event):
     """State has transitioned."""
 
-    event_type: EventType = EventType.STATE_TRANSITIONED
+    event_type: EventType = EventType.STATE_CHANGED
     payload: dict[str, Any] = field(default_factory=lambda: {
         "workflow_id": "",
         "from_state": "",
@@ -1270,7 +1271,7 @@ class StateTransitioned(Event):
 class StateCheckpointed(Event):
     """State has been checkpointed."""
 
-    event_type: EventType = EventType.STATE_CHECKPOINTED
+    event_type: EventType = EventType.STATE_SNAPSHOT_CREATED
     payload: dict[str, Any] = field(default_factory=lambda: {
         "workflow_id": "",
         "state": {},
@@ -1330,7 +1331,7 @@ class ServiceStopped(Event):
 class ServiceHealthy(Event):
     """An Engineering Service passed its health check."""
 
-    event_type: EventType = EventType.SERVICE_HEALTHY
+    event_type: EventType = EventType.HEALTH_CHECK_PASSED
     payload: dict[str, Any] = field(default_factory=lambda: {
         "service": "",
     })
@@ -1340,7 +1341,7 @@ class ServiceHealthy(Event):
 class ServiceUnhealthy(Event):
     """An Engineering Service failed its health check or failed to start."""
 
-    event_type: EventType = EventType.SERVICE_UNHEALTHY
+    event_type: EventType = EventType.HEALTH_CHECK_FAILED
     payload: dict[str, Any] = field(default_factory=lambda: {
         "service": "",
         "error": "",

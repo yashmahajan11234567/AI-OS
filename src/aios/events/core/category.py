@@ -173,11 +173,23 @@ _EVENT_TYPE_CATEGORY: dict[EventType, EventCategory] = {
     EventType.MCP_TOOL_CALLED: EventCategory.DIAGNOSTIC,
     EventType.MCP_TOOL_SUCCEEDED: EventCategory.DIAGNOSTIC,
     EventType.MCP_TOOL_FAILED: EventCategory.DIAGNOSTIC,
+    EventType.MCP_SERVER_DISCONNECTED: EventCategory.DIAGNOSTIC,
+    EventType.MCP_SERVER_CONNECTED: EventCategory.DIAGNOSTIC,
+    EventType.MCP_SERVER_VALIDATION_FAILED: EventCategory.DIAGNOSTIC,
+    EventType.MCP_TOOL_DISCOVERED: EventCategory.DIAGNOSTIC,
     EventType.MODEL_ROUTED: EventCategory.DIAGNOSTIC,
     EventType.MODEL_FALLBACK: EventCategory.DIAGNOSTIC,
+    EventType.MODEL_PROVIDER_REGISTERED: EventCategory.DIAGNOSTIC,
+    EventType.MEMORY_GRAPHIFY_QUERY: EventCategory.DATA,
+    EventType.MEMORY_GRAPHIFY_PATH: EventCategory.DATA,
+    EventType.AGENT_REACH_FETCH: EventCategory.DATA,
+    EventType.AGENT_REACH_NORMALIZED: EventCategory.DATA,
+    EventType.HERMES_BRIDGE_TASK: EventCategory.CONTROL,
+    EventType.HERMES_BRIDGE_OBSERVATION: EventCategory.DATA,
     EventType.PROMPT_TEMPLATE_RENDERED: EventCategory.DIAGNOSTIC,
     EventType.TOKEN_BUDGET_EXCEEDED: EventCategory.DIAGNOSTIC,
     EventType.PERSONA_OVERRIDE_APPLIED: EventCategory.DIAGNOSTIC,
+    EventType.FAILURE_CLASSIFIED: EventCategory.CONTROL,
 }
 
 

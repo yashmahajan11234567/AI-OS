@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
 import uuid
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -22,6 +23,8 @@ from aios.events.core.identity import ComponentIdentity, ComponentType
 from aios.events.core.manager import SubscribeOptions
 from aios.events.core.subscription import HandlerPriority
 from aios.events.core.types import EventType, SemanticVersion
+from aios.events.types import LearningCaptured
+from aios.services.learning import LearningService, get_learning_service
 
 logger = logging.getLogger(__name__)
 
@@ -112,6 +115,7 @@ class RootCauseAnalyzer:
     """
 
     def __init__(self):
+        print("ROOT CAUSE ANALYZER: Constructor called")
         # FIX 9: Use canonical EventBus (C1, Task 5) — single authority per process
         self._event_bus = get_core_event_bus()
         if self._event_bus is None:
@@ -139,58 +143,120 @@ class RootCauseAnalyzer:
         )
 
         # Subscribe to failure events (only if event bus is available)
+        self._subscribed = False
         if self._event_bus is not None:
+            print("ROOT CAUSE ANALYZER: EventBus is available, subscribing to events")
+            self._subscribe_to_events()
+        else:
+            print("ROOT CAUSE ANALYZER: EventBus is NOT available")
+
+    async def shutdown(self) -> None:
+        """
+        Shutdown the RootCauseAnalyzer, unsubscribing from all EventBus events.
+
+        This ensures clean test isolation by removing handlers from the EventBus
+        before the singleton is reset or the EventBus is shut down.
+        """
+        print("ROOT CAUSE ANALYZER: Shutting down, unsubscribing from events")
+
+        try:
+            if self._event_bus is not None and self._subscribed:
+                # Use UnsubscribeOptions to unsubscribe all events for this subscriber
+                from aios.events.core.bus import UnsubscribeOptions
+                self._event_bus.unsubscribe(UnsubscribeOptions(
+                    subscriptionId=None,
+                    eventTypes=None,
+                    all_=True,
+                    immediate=True,
+                ))
+                print("ROOT CAUSE ANALYZER: Successfully unsubscribed from all events")
+                self._subscribed = False
+        except Exception as e:
+            print(f"ROOT CAUSE ANALYZER: Error during shutdown unsubscribe: {e}")
+            logger.warning(f"Error during RootCauseAnalyzer shutdown: {e}")
+
+        self._event_bus = None
+
+    def _subscribe_to_events(self) -> None:
+        """Subscribe to failure events."""
+        print("ROOT CAUSE: Attempting to subscribe to events")
+        if self._event_bus is not None and not self._subscribed:
+            print(f"ROOT CAUSE: EventBus is available: {self._event_bus}")
             self._event_bus.subscribe(
                 SubscribeOptions(
                     subscriber=self._identity,
                     event_types=[EventType.RETRY_BUDGET_EXHAUSTED],
                     handler=self._on_retry_budget_exhausted,
+                    handler_type="async",
                     priority=HandlerPriority.NORMAL,
                     metadata={"service_name": "root_cause_analyzer"},
                 )
             )
+            print("ROOT CAUSE: Subscribed to RETRY_BUDGET_EXHAUSTED")
             self._event_bus.subscribe(
                 SubscribeOptions(
                     subscriber=self._identity,
                     event_types=[EventType.TASK_FAILED],
                     handler=self._on_task_failed,
+                    handler_type="async",
                     priority=HandlerPriority.NORMAL,
                     metadata={"service_name": "root_cause_analyzer"},
                 )
             )
+            print("ROOT CAUSE: Subscribed to TASK_FAILED")
+            self._subscribed = True
+            print("ROOT CAUSE: Successfully subscribed to failure events")
 
     async def _on_retry_budget_exhausted(self, event: CoreEvent) -> None:
         """Handle RetryBudgetExhausted event."""
-        payload = event.payload
-        context = FailureContext(
-            failure_id=payload.get("task_id", "unknown"),
-            event_type="retry.budget_exhausted",
-            error=payload.get("final_error", "Retry budget exhausted"),
-            error_type="RetryBudgetExhausted",
-            service=payload.get("service", "unknown"),
-            task_id=payload.get("task_id", ""),
-            correlation_id=str(event.correlationId),
-            payload=payload,
-            attempt_history=[],  # Could be populated from retry manager
-        )
-        self.analyze(context, retry_budget_exhausted=True)
+        try:
+            logger.info(f"RootCauseAnalyzer received RETRY_BUDGET_EXHAUSTED event: {event.eventType}")
+            print(f"ROOT CAUSE HANDLER: Processing RETRY_BUDGET_EXHAUSTED event")
+            payload = event.payload
+            context = FailureContext(
+                failure_id=payload.get("task_id", "unknown"),
+                event_type="retry.budget_exhausted",
+                error=payload.get("final_error", "Retry budget exhausted"),
+                error_type="RetryBudgetExhausted",
+                service=payload.get("service", "unknown"),
+                task_id=payload.get("task_id", ""),
+                correlation_id=str(event.correlationId) if event.correlationId else "",
+                payload=payload,
+                attempt_history=[],  # Could be populated from retry manager
+            )
+            print(f"ROOT CAUSE HANDLER: About to analyze context")
+            await self.analyze(context, retry_budget_exhausted=True)
+            print(f"ROOT CAUSE HANDLER: Analysis complete")
+        except Exception as e:
+            print(f"ROOT CAUSE HANDLER ERROR: {e}")
+            import traceback
+            traceback.print_exc()
 
     async def _on_task_failed(self, event: CoreEvent) -> None:
         """Handle TaskFailed event."""
-        payload = event.payload
-        context = FailureContext(
-            failure_id=payload.get("task_id", "unknown"),
-            event_type="task.failed",
-            error=payload.get("error", "Unknown error"),
-            error_type=payload.get("error_type", "UnknownError"),
-            service=payload.get("service", "unknown"),
-            task_id=payload.get("task_id", ""),
-            correlation_id=event.correlation_id,
-            payload=payload,
-        )
-        self.analyze(context, retry_budget_exhausted=payload.get("retryable", False) and payload.get("retry_count", 0) >= 3)
+        try:
+            logger.info(f"RootCauseAnalyzer received TASK_FAILED event: {event.eventType}")
+            print(f"ROOT CAUSE HANDLER: Processing TASK_FAILED event - START")
+            payload = event.payload
+            context = FailureContext(
+                failure_id=payload.get("task_id", "unknown"),
+                event_type="task.failed",
+                error=payload.get("error", "Unknown error"),
+                error_type=payload.get("error_type", "UnknownError"),
+                service=payload.get("service", "unknown"),
+                task_id=payload.get("task_id", ""),
+                correlation_id=str(event.correlation_id) if event.correlation_id else "",
+                payload=payload,
+            )
+            print(f"ROOT CAUSE HANDLER: About to analyze context - {context.failure_id}")
+            await self.analyze(context, retry_budget_exhausted=payload.get("retryable", False) and payload.get("retry_count", 0) >= 3)
+            print(f"ROOT CAUSE HANDLER: Analysis complete - END")
+        except Exception as e:
+            print(f"ROOT CAUSE HANDLER ERROR: {e}")
+            import traceback
+            traceback.print_exc()
 
-    def analyze(
+    async def analyze(
         self,
         context: FailureContext,
         retry_budget_exhausted: bool = False,
@@ -205,6 +271,7 @@ class RootCauseAnalyzer:
         Returns:
             Root cause analysis
         """
+        print(f"ROOT CAUSE ANALYZE METHOD CALLED with context: {context.failure_id}")
         analysis_id = f"analysis_{context.failure_id}"
         logger.info(f"Analyzing failure {context.failure_id}: {context.error_type}")
 
@@ -249,12 +316,15 @@ class RootCauseAnalyzer:
         self._update_failure_patterns(context, analysis)
 
         # Emit events using canonical CoreEvent
-        self._emit_event(
+        # NOTE: 'category' and 'service' are reserved base-contract fields (INV-EVT-011)
+        # Use 'failure_category' and 'responsible_service' instead
+        print(f"ROOT CAUSE: About to emit ROOT_CAUSE_ANALYZED event")
+        await self._emit_event(
             EventType.ROOT_CAUSE_ANALYZED,
             {
                 "analysis_id": analysis_id,
                 "failure_id": context.failure_id,
-                "category": category.value,
+                "failure_category": category.value,
                 "severity": severity.value,
                 "root_cause": root_cause,
                 "responsible_service": responsible_service,
@@ -263,17 +333,100 @@ class RootCauseAnalyzer:
             },
             context.correlation_id or context.failure_id,
         )
+        print(f"ROOT CAUSE: ROOT_CAUSE_ANALYZED event emitted successfully")
 
-        self._emit_event(
+        print(f"ROOT CAUSE: About to emit FAILURE_CLASSIFIED event")
+        await self._emit_event(
             EventType.FAILURE_CLASSIFIED,
             {
                 "failure_id": context.failure_id,
-                "category": category.value,
+                "failure_category": category.value,
                 "severity": severity.value,
-                "service": responsible_service,
+                "responsible_service": responsible_service,
             },
             context.correlation_id or context.failure_id,
         )
+        print(f"ROOT CAUSE: FAILURE_CLASSIFIED event emitted successfully")
+
+        # Emit learning captured event for immediate learning from analysis
+        # Commented out to test direct service call approach
+        # print(f"ROOT CAUSE EMITTING LEARNING EVENT: learn_{analysis_id}")
+        # self._emit_event(
+        #     EventType.AI_AGENT_AUDIT_EMITTED,  # LearningCaptured uses this event type
+        #     {
+        #         "learning_id": f"learn_{analysis_id}",
+        #         "type": "failure_resolution",
+        #         "analysis_id": analysis_id,
+        #         "resolution": recommended_action.value,
+        #         "preventive_measures": preventive,
+        #         "captured_at": time.time(),
+        #     },
+        #     context.correlation_id or context.failure_id,
+        # )
+
+        # Alternative: Call LearningService directly to capture learning
+        print(f"ROOT CAUSE: Attempting to capture learning via LearningService")
+        try:
+            learning_service = get_learning_service()
+            print(f"ROOT CAUSE: Got LearningService instance: {learning_service}")
+            # Note: This is a synchronous call to an async method.
+            # In a real implementation, we might want to make this async
+            # or ensure the LearningService is properly initialized.
+            import asyncio
+            try:
+                loop = asyncio.get_event_loop()
+                print(f"ROOT CAUSE: Event loop running: {loop.is_running()}")
+                if loop.is_running():
+                    # We're in an async context, create a task
+                    print(f"ROOT CAUSE: Creating async task for capture_learning_from_analysis")
+                    loop.create_task(learning_service.capture_learning_from_analysis(
+                        analysis_id=analysis_id,
+                        failure_category=category.value,
+                        recommended_action=recommended_action.value,
+                        root_cause=root_cause,
+                        preventive_measures=preventive
+                    ))
+                    print(f"ROOT CAUSE: Task created")
+                else:
+                    # No running loop, run synchronously
+                    print(f"ROOT CAUSE: Running capture_learning_from_analysis synchronously")
+                    asyncio.run(learning_service.capture_learning_from_analysis(
+                        analysis_id=analysis_id,
+                        failure_category=category.value,
+                        recommended_action=recommended_action.value,
+                        root_cause=root_cause,
+                        preventive_measures=preventive
+                    ))
+                    print(f"ROOT CAUSE: Synchronous call complete")
+            except RuntimeError as e:
+                # Fallback: create a new event loop
+                print(f"ROOT CAUSE: RuntimeError, creating new event loop: {e}")
+                asyncio.run(learning_service.capture_learning_from_analysis(
+                    analysis_id=analysis_id,
+                    failure_category=category.value,
+                    recommended_action=recommended_action.value,
+                    root_cause=root_cause,
+                    preventive_measures=preventive
+                ))
+                print(f"ROOT CAUSE: New event loop call complete")
+        except Exception as e:
+            print(f"ROOT CAUSE: Exception caught: {type(e).__name__}: {e}")
+            import traceback
+            traceback.print_exc()
+            logger.warning(f"Failed to capture learning via LearningService: {e}")
+            # Fall back to emitting event directly if service call fails
+            self._emit_event(
+                EventType.AI_AGENT_AUDIT_EMITTED,  # LearningCaptured uses this event type
+                {
+                    "learning_id": f"learn_{analysis_id}",
+                    "type": "failure_resolution",
+                    "analysis_id": analysis_id,
+                    "resolution": recommended_action.value,
+                    "preventive_measures": preventive,
+                    "captured_at": time.time(),
+                },
+                context.correlation_id or context.failure_id,
+            )
 
         logger.info(
             f"Root cause analysis complete: {category.value} -> {responsible_service} -> {recommended_action.value}"
@@ -313,11 +466,10 @@ class RootCauseAnalyzer:
         # Configuration keywords
         config_keywords = [
             "config", "configuration", "setting", "env", "environment",
-            "missing", "not found", "invalid", "malformed",
+            "missing", "not found", "malformed",
         ]
         if any(kw in error_lower for kw in config_keywords):
-            if context.service in ["planning", "config"]:
-                return FailureCategory.CONFIGURATION
+            return FailureCategory.CONFIGURATION
 
         # Dependency keywords
         dep_keywords = [
@@ -372,11 +524,8 @@ class RootCauseAnalyzer:
         self, context: FailureContext, category: FailureCategory
     ) -> str:
         """Identify the service responsible for the failure."""
-        # Direct service attribution
-        if context.service:
-            return context.service
-
-        # Category-based attribution
+        # Category-based attribution takes precedence over context.service
+        # context.service is where the failure MANIFESTED, not where it originated
         category_services = {
             FailureCategory.CONFIGURATION: "planning",
             FailureCategory.CODE_DEFECT: "coding",
@@ -395,7 +544,8 @@ class RootCauseAnalyzer:
             if any(kw in context.error.lower() for kw in keywords):
                 return service
 
-        return "unknown"
+        # Fallback to context.service only if no category mapping
+        return context.service or "unknown"
 
     def _determine_root_cause(
         self, context: FailureContext, category: FailureCategory
@@ -531,13 +681,23 @@ class RootCauseAnalyzer:
 
         self._failure_patterns[error_signature].append(analysis.analysis_id)
 
-    def _emit_event(
+    async def _emit_event(
         self, event_type: EventType, payload: dict[str, Any], correlation_id: str
     ) -> None:
         """Emit a canonical event via the canonical EventBus."""
+        # Ensure EventBus is available (lazy initialization)
+        if self._event_bus is None:
+            from aios.events.core.bus import get_core_event_bus
+            self._event_bus = get_core_event_bus()
+
         if self._event_bus is None:
             logger.debug("EventBus not available, skipping event emission")
             return
+
+        # Subscribe to events if not already subscribed
+        if not getattr(self, '_subscribed', False):
+            self._subscribe_to_events()
+
         import uuid as uuid_mod
 
         # Handle invalid UUID strings by generating a new one
@@ -553,17 +713,14 @@ class RootCauseAnalyzer:
             correlationId=correlation_uuid,
             payload=payload,
         )
+        print(f"ROOT CAUSE: Publishing {event_type} event with correlation_id {correlation_uuid}")
         result = self._event_bus.publish(event)
-        # Fire and forget - result handling is async
+        # Properly await the publish coroutine
         if hasattr(result, "__await__"):
-            # Schedule on the event loop if available
-            try:
-                loop = asyncio.get_running_loop()
-                loop.create_task(result)
-            except RuntimeError:
-                pass
+            publish_result = await result
+            print(f"ROOT CAUSE: Publish result for {event_type}: {publish_result}")
 
-    def resolve_analysis(
+    async def resolve_analysis(
         self, analysis_id: str, resolution: str, preventive: list[str] | None = None
     ) -> RootCauseAnalysis | None:
         """Mark an analysis as resolved."""
@@ -575,12 +732,16 @@ class RootCauseAnalyzer:
         if preventive:
             analysis.preventive_measures.extend(preventive)
 
-        self._emit_event(
-            EventType.ROOT_CAUSE_RESOLVED,
+        # ROOT_CAUSE_RESOLVED was removed from Enum (not in Part 2 §2.3.1 canonical enumeration)
+        # Emit as FAILURE_CLASSIFIED instead
+        await self._emit_event(
+            EventType.FAILURE_CLASSIFIED,
             {
                 "analysis_id": analysis_id,
+                "failure_id": analysis.failure_id,
                 "resolution": resolution,
                 "preventive_measures": preventive or [],
+                "status": "resolved",
             },
             analysis.failure_id,
         )
@@ -615,9 +776,23 @@ def get_root_cause_analyzer() -> RootCauseAnalyzer:
     return _global_root_cause_analyzer
 
 
-def set_root_cause_analyzer(analyzer: RootCauseAnalyzer) -> None:
-    """Set the global root cause analyzer."""
+def set_root_cause_analyzer(analyzer: RootCauseAnalyzer | None) -> None:
+    """Set the global root cause analyzer, shutting down the previous instance if any."""
     global _global_root_cause_analyzer
+    if _global_root_cause_analyzer is not None and _global_root_cause_analyzer is not analyzer:
+        # Shutdown the old analyzer to unsubscribe from EventBus
+        import asyncio
+        try:
+            loop = asyncio.get_event_loop()
+            if loop.is_running():
+                loop.create_task(_global_root_cause_analyzer.shutdown())
+            else:
+                loop.run_until_complete(_global_root_cause_analyzer.shutdown())
+        except RuntimeError:
+            # No event loop, run in new loop
+            asyncio.run(_global_root_cause_analyzer.shutdown())
+        except Exception as e:
+            logger.warning(f"Error shutting down previous RootCauseAnalyzer: {e}")
     _global_root_cause_analyzer = analyzer
 
 

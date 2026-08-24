@@ -1,0 +1,19 @@
+{
+  "server_id": "hermes_agent_ext",
+  "name": "Hermes Agent External",
+  "transport": "stdio",
+  "command": [
+    "python",
+    "-m",
+    "aios.adapters.mock_hermes_server"
+  ],
+  "url": null,
+  "env": {},
+  "headers": {},
+  "timeout_seconds": 30,
+  "auto_reconnect": true,
+  "max_retries": 3,
+  "metadata": {
+    "description": "Hermes Agent External browser/worker MCP server (mock for testing)"
+  }
+}

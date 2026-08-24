@@ -1,0 +1,16 @@
+{
+  "server_id": "test_mcp",
+  "name": "TestMCP",
+  "transport": "stdio",
+  "command": [
+    "echo",
+    "mock"
+  ],
+  "url": null,
+  "env": {},
+  "headers": {},
+  "timeout_seconds": 30,
+  "auto_reconnect": true,
+  "max_retries": 3,
+  "metadata": {}
+}
