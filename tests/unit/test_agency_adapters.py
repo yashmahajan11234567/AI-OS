@@ -4,6 +4,8 @@ M7-C — Real agency execution adapter unit tests.
 Proves each adapter performs REAL, content-driven detection (no target-name
 heuristics) and returns a properly-shaped ExecutionResult. Also proves the
 SecurityAgencyAdapter defers to SecurityManager authorization.
+
+M8-T3: ArchitectureAgencyAdapter enhanced with optional GraphifyAdapter path.
 """
 
 from __future__ import annotations
@@ -105,6 +107,26 @@ def test_accessibility_flags_missing_alt_on_img():
     assert any("image-alt" in f["type"] for f in r.findings)
 
 
+def test_accessibility_skips_playwright_when_none():
+    # No playwright adapter injected → falls back to simulated scan
+    adapter = AccessibilityAgencyAdapter()
+    assert adapter._playwright_adapter is None
+    html = "<html><body><img src='a.png'></body></html>"
+    r = adapter.execute("t", _CTX(html))
+    assert r.status == ExecutionStatus.FAILURE
+    assert r.tool == "axe_core"  # Uses simulated, not playwright
+
+
+def test_accessibility_with_playwright_fallback():
+    # Playwright adapter provided but target has no markup → uses simulated
+    class FakePA:
+        pass
+    adapter = AccessibilityAgencyAdapter(playwright_adapter=FakePA())
+    r = adapter.execute("t", _CTX("def handler(req):\n    return req.json()\n"))
+    assert r.status == ExecutionStatus.SUCCESS
+    assert r.tool == "axe_core"  # Falls back to simulated for non-UI
+
+
 # ---------------------------------------------------------------------------
 # Documentation adapter
 # ---------------------------------------------------------------------------
@@ -171,6 +193,44 @@ def test_architecture_flags_broad_coupling():
 def test_architecture_clean_passes():
     r = ArchitectureAgencyAdapter().execute("t", _CTX("import math\n\ndef f():\n    return math.pi\n"))
     assert r.status == ExecutionStatus.SUCCESS
+
+
+# ---------------------------------------------------------------------------
+# M8-T3: ArchitectureAgencyAdapter with Graphify integration
+# ---------------------------------------------------------------------------
+
+def test_architecture_adapter_accepts_graphify_adapter():
+    """ArchitectureAgencyAdapter accepts optional GraphifyAdapter parameter."""
+    class FakeGraphifyAdapter:
+        def is_connected(self):
+            return True
+
+    adapter = ArchitectureAgencyAdapter(graphify_adapter=FakeGraphifyAdapter())
+    assert adapter._graphify_adapter is not None
+    assert adapter._graphify_adapter.is_connected() is True
+
+
+def test_architecture_adapter_graceful_degradation_when_graphify_unavailable():
+    """When GraphifyAdapter is provided but not connected, falls back to text scanner."""
+    class FakeGraphifyAdapter:
+        def is_connected(self):
+            return False
+
+    adapter = ArchitectureAgencyAdapter(graphify_adapter=FakeGraphifyAdapter())
+    # Should fall back to text scanner (broad_coupling detection)
+    r = adapter.execute("t", _CTX("import os\nimport sys\nimport subprocess\n"))
+    assert r.status == ExecutionStatus.FAILURE
+    assert any("broad_coupling" in f["type"] for f in r.findings)
+    # Tool name should indicate fallback
+    assert "text_fallback" in r.tool or r.tool == "graphify_mcp_text_fallback"
+
+
+def test_architecture_adapter_without_graphify_still_works():
+    """ArchitectureAgencyAdapter works without GraphifyAdapter (backward compatibility)."""
+    adapter = ArchitectureAgencyAdapter()
+    r = adapter.execute("t", _CTX("import math\n\ndef f():\n    return math.pi\n"))
+    assert r.status == ExecutionStatus.SUCCESS
+    assert adapter._graphify_adapter is None
 
 
 # ---------------------------------------------------------------------------

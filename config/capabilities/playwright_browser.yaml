@@ -1,0 +1,33 @@
+capability_id: "playwright_browser"
+facade: "browser"
+provider_id: "playwright_mcp"
+adapter:
+  class_path: "aios.adapters.playwright_mcp_adapter.PlaywrightMCPAdapter"
+  kwargs:
+    server_id: "playwright_mcp"
+transport: "mcp"
+version: "1.0.0"
+trust_level: "trusted_contextual"
+authority_classification: "contextual"
+allowed_operations:
+  - "navigate"
+  - "click"
+  - "type"
+  - "snapshot"
+  - "screenshot"
+  - "press_key"
+  - "new_context"
+  - "close_context"
+sensitive_keys:
+  - "password"
+  - "token"
+  - "secret"
+  - "api_key"
+  - "authorization"
+max_content_size: 10240
+tags:
+  - "browser"
+  - "playwright"
+  - "accessibility"
+  - "deterministic"
+dependencies: []

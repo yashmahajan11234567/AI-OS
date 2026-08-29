@@ -23,15 +23,11 @@ class FakeHermesBridge:
     def __init__(self):
         self.calls = []
         self.session_closed = False
-        self.created_session = None
-
-    def _create_session_id(self) -> str:
         self.created_session = "hermes_deadbeefcafe"
-        return self.created_session
 
     async def create_worker_session(self, environment=None) -> str:
         self.calls.append(("create_worker_session", environment))
-        return self.created_session or "hermes_deadbeefcafe"
+        return self.created_session
 
     async def navigate(self, session_id, url) -> HermesObservation:
         self.calls.append(("navigate", session_id, url))

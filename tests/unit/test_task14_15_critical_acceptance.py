@@ -384,9 +384,12 @@ async def test_critical_acceptance_business_apis(tmp_path):
         assert len(sm.list_violations()) >= 1
 
         # Capability business API.
+        # playwright_browser is pre-registered by kernel._init_playwright() (M8-T2).
+        pre_count = len(cm_.list_capabilities())
+        assert pre_count >= 1
         entry = cm_.register("cap.crit", "facade", "provider")
         assert cm_.get_capability("cap.crit") is entry
-        assert len(cm_.list_capabilities()) == 1
+        assert len(cm_.list_capabilities()) == pre_count + 1
         found = cm_.discover_by_facade("facade")
         assert len(found) == 1
         assert cm_.deregister("cap.crit") is True

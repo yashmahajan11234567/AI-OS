@@ -1,0 +1,52 @@
+[
+  {
+    "check": "D-01a kernel.mcp_manager assigned after live boot",
+    "outcome": "PASS",
+    "evidence": "type=MCPManager"
+  },
+  {
+    "check": "D-01b kernel.mcp_manager is canonical singleton",
+    "outcome": "PASS",
+    "evidence": "id=0x1bfd71c5190"
+  },
+  {
+    "check": "D-01c all 5 adapters hold SAME canonical MCPManager",
+    "outcome": "PASS",
+    "evidence": "graphify=wired; notion=wired; obsidian=wired; claude_mem=wired; playwright=wired"
+  },
+  {
+    "check": "D-02a UserSimulationAgent -> real bridge -> kernel MCPManager",
+    "outcome": "PASS",
+    "evidence": "wired=True stale_markers=[]"
+  },
+  {
+    "check": "FORENSIC JSON-loaded config transport type",
+    "outcome": "EVIDENCE",
+    "evidence": "graphify.transport is str; .value CRASHES (AttributeError); isinstance-enum=False"
+  },
+  {
+    "check": "PROBE-HERMES create_worker_session (production MCP path)",
+    "outcome": "CRASH",
+    "evidence": "AttributeError: 'str' object has no attribute 'value' | frames: File \"C:\\Development\\AI-OS\\src\\aios\\core\\mcp_manager.py\", line 214, in connect <- File \"C:\\Development\\AI-OS\\src\\aios\\core\\security_manager.py\", line 1478, in validate_mcp_server_before_connect <- File \"C:\\Development\\AI-OS\\src\\aios\\core\\security_manager.py\", line 665, in validate_mcp_server_config"
+  },
+  {
+    "check": "PROBE-GRAPHIFY connect+store_node (production MCP path)",
+    "outcome": "CRASH",
+    "evidence": "GraphifyUnavailableError: Failed to connect: 'str' object has no attribute 'value' | frames: File \"C:\\Program Files\\Python312\\Lib\\asyncio\\tasks.py\", line 520, in wait_for <- File \"C:\\Development\\AI-OS\\architecture\\Part15\\M8\\evidence\\m8_t7_live_boot_check.py\", line 112, in graphify_flow <- File \"C:\\Development\\AI-OS\\src\\aios\\adapters\\graphify_adapter.py\", line 248, in connect"
+  },
+  {
+    "check": "PROBE-NOTION connect+search_pages (production MCP path)",
+    "outcome": "CRASH",
+    "evidence": "NotionUnavailableError: Failed to connect: 'str' object has no attribute 'value' | frames: File \"C:\\Program Files\\Python312\\Lib\\asyncio\\tasks.py\", line 520, in wait_for <- File \"C:\\Development\\AI-OS\\architecture\\Part15\\M8\\evidence\\m8_t7_live_boot_check.py\", line 124, in notion_flow <- File \"C:\\Development\\AI-OS\\src\\aios\\adapters\\notion_adapter.py\", line 226, in connect"
+  },
+  {
+    "check": "PROBE-OBSIDIAN connect (production MCP path)",
+    "outcome": "CRASH",
+    "evidence": "ObsidianUnavailableError: Failed to connect: 'str' object has no attribute 'value' | frames: File \"C:\\Program Files\\Python312\\Lib\\asyncio\\tasks.py\", line 520, in wait_for <- File \"C:\\Development\\AI-OS\\architecture\\Part15\\M8\\evidence\\m8_t7_live_boot_check.py\", line 135, in obsidian_flow <- File \"C:\\Development\\AI-OS\\src\\aios\\adapters\\obsidian_adapter.py\", line 238, in connect"
+  },
+  {
+    "check": "PROBE-CLAUDE_MEM connect (production MCP path)",
+    "outcome": "CRASH",
+    "evidence": "ClaudeMemUnavailableError: Failed to connect: 'str' object has no attribute 'value' | frames: File \"C:\\Program Files\\Python312\\Lib\\asyncio\\tasks.py\", line 520, in wait_for <- File \"C:\\Development\\AI-OS\\architecture\\Part15\\M8\\evidence\\m8_t7_live_boot_check.py\", line 145, in claude_mem_flow <- File \"C:\\Development\\AI-OS\\src\\aios\\adapters\\claude_mem_adapter.py\", line 226, in connect"
+  }
+]

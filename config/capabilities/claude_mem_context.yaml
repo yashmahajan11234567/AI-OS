@@ -1,0 +1,30 @@
+capability_id: "claude_mem_context"
+facade: "memory"
+provider_id: "claude_mem"
+adapter:
+  class_path: "aios.adapters.claude_mem_adapter.ClaudeMemAdapter"
+  kwargs:
+    server_id: "claude_mem"
+transport: "mcp"
+version: "1.0.0"
+trust_level: "trusted_contextual"
+authority_classification: "contextual"
+allowed_operations:
+  - "retrieve_context"
+  - "retrieve_recent"
+  - "retrieve_by_tag"
+sensitive_keys:
+  - "password"
+  - "token"
+  - "secret"
+  - "api_key"
+  - "authorization"
+  - "credential"
+  - "private_key"
+max_content_size: 10240
+tags:
+  - "memory"
+  - "claude-mem"
+  - "contextual"
+  - "retrieval"
+dependencies: []

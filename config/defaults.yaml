@@ -1,0 +1,249 @@
+# AI-OS Default Configuration
+# This file is loaded by ConfigurationManager and frozen at runtime
+
+# Kernel settings
+kernel:
+  name: "Hermes"
+  version: "1.0.0"
+  data_dir: "./data"
+  log_level: "INFO"
+  capabilities:
+    adapter_allowlist: [
+      "aios.adapters.graphify_adapter.GraphifyAdapter",
+      "aios.adapters.playwright_mcp_adapter.PlaywrightMCPAdapter",
+      "aios.adapters.notion_adapter.NotionAdapter",
+      "aios.adapters.obsidian_adapter.ObsidianAdapter",
+      "aios.adapters.claude_mem_adapter.ClaudeMemAdapter",
+      "aios.adapters.acp_adapter.ACPAdapter",
+      "aios.adapters.supabase_adapter.SupabaseAdapter",
+      "aios.adapters.n8n_adapter.N8nAdapter",
+      "aios.adapters.obsidian_git_adapter.ObsidianGitAdapter",
+    ]
+
+# Event Bus (C1) settings
+event_bus:
+  max_history: 10000
+  max_dispatch_depth: 64
+  auto_start_dispatch_worker: false
+
+# Service Registry (C2) settings
+service_registry:
+  # No specific config needed
+
+# Configuration Manager (C3) settings
+configuration:
+  config_path: "./config/defaults.yaml"
+  freeze_on_initialize: true
+
+# Structured Logger (C4) settings
+structured_logger:
+  # Auto-configured by kernel
+
+# LifecycleManager (Core Manager Phase 1) settings
+lifecycle:
+  max_phase_initialization_time_ms: 30000
+  shutdown_timeout_ms: 5000
+
+# StateManager (Core Manager Phase 2) settings
+state:
+  persistence_path: "./data/state"
+  snapshot_interval_seconds: 300
+  max_snapshots: 10
+  consistency_class: "EVENTUAL"
+  checkpoint_on_transition: true
+  shutdown_timeout_ms: 5000
+
+# StorageManager (Core Manager Phase 2) settings
+storage:
+  persistence_path: "./data/storage"
+  # ... additional storage config
+
+# HealthManager (Core Manager Phase 3) settings
+health:
+  check_interval_seconds: 60
+  warning_threshold: 0.8
+  critical_threshold: 0.95
+
+# ResourceManager (Core Manager Phase 3) settings
+resource:
+  cleanup_interval_seconds: 60
+  warning_threshold: 0.8
+  critical_threshold: 0.95
+
+# SecurityManager (Core Manager Phase 3) settings
+security:
+  strict_mode: true
+  allowed_services: []
+
+# CapabilityManager (Core Manager Phase 4) settings
+capability:
+  manifest_dir: "./config/capabilities"
+  adapter_allowlist: []
+  trust_default: "untrusted"
+  hot_reload: false
+
+capabilities:
+  enabled: true
+  manifest_dir: "./config/capabilities"
+  adapter_allowlist: [
+    "aios.adapters.graphify_adapter.GraphifyAdapter",
+    "aios.adapters.playwright_mcp_adapter.PlaywrightMCPAdapter",
+    "aios.adapters.notion_adapter.NotionAdapter",
+    "aios.adapters.obsidian_adapter.ObsidianAdapter",
+    "aios.adapters.claude_mem_adapter.ClaudeMemAdapter",
+    "aios.adapters.acp_adapter.ACPAdapter",
+    "aios.adapters.supabase_adapter.SupabaseAdapter",
+    "aios.adapters.n8n_adapter.N8nAdapter",
+    "aios.adapters.obsidian_git_adapter.ObsidianGitAdapter",
+  ]
+  trust_default: "untrusted"
+  hot_reload: false
+
+# ObservabilityManager (Core Manager Phase 5) settings
+observability:
+  metrics_interval_seconds: 60
+
+# MemoryManager settings
+memory:
+  base_path: "./data/memory"
+
+# MCPManager settings
+mcp:
+  config_dir: "./config/mcp"
+
+# ACP settings
+acp:
+  session_ttl_seconds: 0
+  # cwd: path to hermes-agent repository (contains acp_adapter/entry.py).
+  # User must set this to enable ACP preferred worker path.
+  # Example: "/path/to/hermes-agent"
+  cwd: ""
+
+# Obsidian filesystem vault path (for hybrid MCP/filesystem adapter).
+# User must set this to enable real Obsidian knowledge access.
+# Example: "/path/to/vault"
+obsidian:
+  vault_path: ""
+
+# Services configuration
+services:
+  enabled: [
+    "memory",
+    "planning",
+    "learning",
+    "self_prompting",
+    "model_router",
+    "root_cause",
+    "testing",
+    "accessibility",
+    "architecture",
+    "security_review",
+    "performance",
+    "code_quality",
+    "user_experience",
+    "documentation",
+    "compliance",
+  ]
+
+  # M10 Autonomy Services (GAP-M10-01 through GAP-M10-11)
+  autonomy:
+    enabled: false  # Disabled by default per spec
+
+  objective_generator:
+    enabled: false  # Guarded: disabled by default
+    min_interval_seconds: 3600
+    max_concurrent: 3
+
+  replan_detector:
+    enabled: true
+    sensitivity: 0.7
+    min_workflows: 3
+    max_depth: 3
+    window: 5
+
+  autonomous_judge:
+    mode: "advisory_only"  # advisory_only | autonomous_enabled | fallback
+    confidence_threshold: 0.75
+    require_learning_evidence: true
+    defer_to_council: true
+
+  self_prompting_autonomous:
+    enabled: true
+    convergence_action: "escalate"  # escalate | replan
+    max_cycles: 3
+    max_depth: 5  # ADR #10 bound
+
+  learning_apply:
+    enabled: false  # Disabled by default
+    auto_apply: true
+    confidence_threshold: 0.6
+
+  capability_provenance_ext:
+    enabled: true
+    require_signature: true
+
+  state_verification:
+    enabled: true
+    verify_on_action: true
+
+  security_abac_ext:
+    enabled: true
+    require_signature: true
+
+  resource_manager_quota:
+    enabled: true
+    og_pct: 0.05  # 5% reserved for objective generator
+    rd_pct: 0.03  # 3% reserved for replan detector
+    aj_pct: 0.02  # 2% reserved for autonomous judge
+
+  autonomy_override:
+    allow_manual: true
+
+  audit_trail:
+    enabled: true
+    chain_hashes: true
+
+  autonomy_fallback:
+    enabled: true
+    on_security: true
+    on_bounds: true
+    on_instability: true
+    manual_recovery: true
+
+  # M13 Self-Loop Engine settings
+  self_loop:
+    enabled: true
+    max_cycles: 3
+    max_depth: 5
+    cycle_timeout_seconds: 3600
+    real_mode_enabled: false  # ADR-007: gated by AIOS_REAL_INTEGRATION_ENABLED=1
+
+  # M13 Self-Prompt Generator settings
+  self_prompting:
+    convergence_action: "escalate"  # escalate | pause | degrade
+    max_convergence_cycles: 3
+    max_depth: 5
+
+  # M13 External System Integration settings (Phase 2)
+  supabase:
+    url: ""
+    anon_key: ""
+    service_role_key: ""
+
+  n8n:
+    base_url: ""
+    api_key: ""
+
+  obsidian_git:
+    vault_path: ""
+    git_remote_url: ""
+
+  # M13 Dashboard settings
+  dashboard:
+    enabled: false
+    host: "localhost"
+    port: 3000
+    auth_enabled: false
+
+  # M13 Feature flag for real integrations
+  real_integration_enabled: false

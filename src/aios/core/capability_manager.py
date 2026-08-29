@@ -139,22 +139,85 @@ _CAPABILITY_INVOKED = EventType.SKILL_EXECUTED
 _CAPABILITY_INVOCATION_FAILED = EventType.SKILL_FAILED
 
 
+def _parse_version(version: str) -> tuple[int, ...]:
+    """Parse a dotted version string to a comparable int tuple (M8-T5).
+
+    Returns ``(0,)`` for unparseable versions so they sort below any valid
+    semver — per spec §16 rule 2, an unparseable-version challenger never
+    displaces the first registrant.
+    """
+    if not version:
+        return (0,)
+    try:
+        return tuple(int(part) for part in str(version).split("."))
+    except ValueError:
+        return (0,)
+
+
 # ---------------------------------------------------------------------------
 # Enumerations / value objects
 # ---------------------------------------------------------------------------
 
 
 class CapabilityState(str, Enum):  # noqa: UP042 -- matches sibling manager enums
-    """Lifecycle state of a registered capability (Part 4 §4.8.2)."""
+    """Lifecycle state of a registered capability (Part 4 §4.8.2, extended for M8-T5)."""
 
     REGISTERED = "REGISTERED"
+    DISABLED = "DISABLED"
     DEPRECATED = "DEPRECATED"
     REMOVED = "REMOVED"
 
 
+class TrustLevel(str, Enum):
+    """Trust level for capability precedence (M8-T5)."""
+
+    BUILTIN = "builtin"
+    TRUSTED = "trusted"
+    TRUSTED_CONTEXTUAL = "trusted_contextual"
+    UNTRUSTED = "untrusted"
+
+    @classmethod
+    def precedence(cls, level: str) -> int:
+        """Return precedence value (higher = more trusted)."""
+        mapping = {
+            cls.BUILTIN: 4,
+            cls.TRUSTED: 3,
+            cls.TRUSTED_CONTEXTUAL: 2,
+            cls.UNTRUSTED: 1,
+        }
+        return mapping.get(level, 0)
+
+
+class AuthorityClassification(str, Enum):
+    """Authority classification for capability (M8-T5, non-overridable defaults)."""
+
+    AUTHORITATIVE = "authoritative"
+    CONTEXTUAL = "contextual"
+    ADVISORY = "advisory"
+    ADVISORY_ONLY = "advisory_only"
+
+    @classmethod
+    def default_for_trust(cls, trust_level: str) -> str:
+        """Default authority classification for a trust level."""
+        if trust_level in (TrustLevel.BUILTIN, TrustLevel.TRUSTED):
+            return cls.CONTEXTUAL
+        return cls.ADVISORY
+
+
+class CapabilityAvailability(str, Enum):
+    """Availability status of a capability (M8-T5)."""
+
+    AVAILABLE = "available"
+    DEGRADED = "degraded"
+    ERROR = "error"
+    UNAVAILABLE = "unavailable"
+    DISABLED = "disabled"
+    UNKNOWN = "unknown"
+
+
 @dataclass
 class CapabilityRegistryEntry:
-    """A registered capability (Part 4 §4.8.2 registry entry)."""
+    """A registered capability (Part 4 §4.8.2 registry entry, extended for M8-T5)."""
 
     capability_id: str
     facade: str
@@ -165,6 +228,18 @@ class CapabilityRegistryEntry:
     security_context: dict[str, Any] = field(default_factory=dict)
     resource_profile: dict[str, Any] = field(default_factory=dict)
     tags: tuple[str, ...] = ()
+
+    # M8-T5 extensions
+    trust_level: str = TrustLevel.UNTRUSTED
+    authority_classification: str = AuthorityClassification.ADVISORY
+    adapter_binding: dict[str, Any] = field(default_factory=dict)
+    operations: tuple[str, ...] = ()
+    health_status: str = "unknown"  # unknown, healthy, degraded, unhealthy
+    availability: str = CapabilityAvailability.UNAVAILABLE
+    enabled: bool = True
+    discovered_from: str = ""
+    dependencies: tuple[str, ...] = ()
+    last_error: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         """Serialize the entry to a JSON-safe dict (Part 2 §2.2.8)."""
@@ -178,6 +253,16 @@ class CapabilityRegistryEntry:
             "security_context": self.security_context,
             "resource_profile": self.resource_profile,
             "tags": list(self.tags),
+            "trust_level": self.trust_level,
+            "authority_classification": self.authority_classification,
+            "adapter_binding": self.adapter_binding,
+            "operations": list(self.operations),
+            "health_status": self.health_status,
+            "availability": self.availability,
+            "enabled": self.enabled,
+            "discovered_from": self.discovered_from,
+            "dependencies": list(self.dependencies),
+            "last_error": self.last_error,
         }
 
 
@@ -249,6 +334,8 @@ class CapabilityManager:
         service_registry: ServiceRegistry | None = None,
         configuration_manager: ConfigurationManager | None = None,
         logger: StructuredLogger | None = None,
+        adapter_factory: Any | None = None,
+        security_manager: Any | None = None,
     ) -> None:
         """
         Initialize the Capability Manager.
@@ -257,6 +344,10 @@ class CapabilityManager:
         C1 (EventBus) is resolved eagerly from the canonical singleton so both the
         constructor contract (raise if the bus is not up) and the sync
         ``_emit_event`` bridge keep working unchanged.
+
+        M8-T5 extensions:
+        - adapter_factory: AdapterFactory for instantiating capability adapters
+        - security_manager: SecurityManager for capability spec validation gate
         """
         # C2/C3/C4 — injected via DI (Task 15).
         self._service_registry = service_registry
@@ -291,6 +382,14 @@ class CapabilityManager:
         # Configuration consumed from the FROZEN ConfigurationManager (C3).
         self._enforce_authorization = True
         self._reject_duplicate_provider = True
+
+        # M8-T5: Adapter factory and security manager for capability hardening
+        self._adapter_factory: Any | None = adapter_factory
+        self._security_manager: Any | None = security_manager
+
+        # M8-T5: Manifest configuration (populated in initialize)
+        self._manifest_dir: str = "./config/capabilities"
+        self._adapter_allowlist: tuple[str, ...] = ()
 
     # ------------------------------------------------------------------
     # ICoreManager surface (Task 15 / Part 4 §4.2)
@@ -378,6 +477,8 @@ class CapabilityManager:
         canonical ServiceRegistry (C2) as ``core.capability``, and marks the
         manager initialized/ready.
 
+        M8-T5 extensions: reads capability manifest config, adapter allowlist.
+
         Idempotent and lifecycle-safe: a second initialize while already
         initialized is a no-op.
         """
@@ -391,6 +492,15 @@ class CapabilityManager:
         )
         self._reject_duplicate_provider = self._read_config_bool(
             "kernel.capability.rejectDuplicateProvider", self._reject_duplicate_provider
+        )
+
+        # M8-T5: Read capability manifest configuration
+        self._manifest_dir = self._read_config_str(
+            "kernel.capability.manifestDir", "./config/capabilities"
+        )
+        adapter_allowlist_str = self._read_config_str("kernel.capability.adapterAllowlist", "")
+        self._adapter_allowlist = tuple(
+            adapter_allowlist_str.split(",") if adapter_allowlist_str else ()
         )
 
         # 2. Register with the canonical ServiceRegistry (C2) as ``core.capability``.
@@ -425,6 +535,20 @@ class CapabilityManager:
         # 3. Clear initialized/ready flag.
         self._initialized = False
         self._log_info("CapabilityManager shut down.")
+
+    # ------------------------------------------------------------------
+    # M8-T5: Dependency injection setters (kernel wires these post-construct)
+    # ------------------------------------------------------------------
+
+    def set_adapter_factory(self, adapter_factory: Any) -> None:
+        """Set the AdapterFactory instance (M8-T5)."""
+        self._adapter_factory = adapter_factory
+        self._log_debug("AdapterFactory injected into CapabilityManager")
+
+    def set_security_manager(self, security_manager: Any) -> None:
+        """Set the SecurityManager instance (M8-T5)."""
+        self._security_manager = security_manager
+        self._log_debug("SecurityManager injected into CapabilityManager")
 
     # ------------------------------------------------------------------
     # ServiceRegistry integration (mirror sibling Core Manager pattern)
@@ -494,17 +618,34 @@ class CapabilityManager:
 
         Returns the created registry entry and emits the canonical
         ``SERVICE_STARTED`` event (mapping CapabilityRegisteredEvent, CONFLICT E.1).
-        Rejects duplicate provider ids when ``reject_duplicate_provider`` is set
-        (SI-CM-01 single-registry invariant) and the id is already present.
+
+        S5 (Terminal 2) — single-registry invariant. Capabilities may be
+        registered by two paths (kernel ``_init_*`` helpers and the manifest
+        loader). To prevent conflicting/asymmetric double-registration:
+        - A re-registration with the SAME ``provider_id`` is treated as
+          idempotent (returns the existing entry, no error) — legitimate
+          registration from either path is preserved.
+        - A registration whose ``capability_id`` is already claimed by a
+          DIFFERENT ``provider_id`` is rejected (CM-DUP-001) — prevents one
+          provider silently displacing another and preserves trust precedence.
+        This mirrors the precedence semantics ``register_capability`` already
+        enforces, so the two paths can no longer disagree.
         """
-        if (
-            self._reject_duplicate_provider
-            and capability_id in self._registry
-        ):
-            raise CapabilityManagerError(
-                f"Capability '{capability_id}' is already registered.",
-                rule_id="CM-DUP-001",
-            )
+        existing = self._registry.get(capability_id)
+        if existing is not None:
+            if existing.provider_id == provider_id:
+                # Idempotent re-registration from the other code path.
+                self._log_debug(
+                    f"Capability '{capability_id}' already registered by "
+                    f"provider '{provider_id}'; treating as idempotent"
+                )
+                return existing
+            if self._reject_duplicate_provider:
+                raise CapabilityManagerError(
+                    f"Capability '{capability_id}' already registered by provider "
+                    f"'{existing.provider_id}'; conflicting provider '{provider_id}' rejected.",
+                    rule_id="CM-DUP-001",
+                )
 
         entry = CapabilityRegistryEntry(
             capability_id=capability_id,
@@ -516,6 +657,9 @@ class CapabilityManager:
             security_context=dict(security_context or {}),
             resource_profile=dict(resource_profile or {}),
             tags=tuple(tags),
+            # Legacy (pre-M8-T5) capabilities are always resolvable once registered;
+            # they carry no manifest-driven availability gating.
+            availability=CapabilityAvailability.AVAILABLE,
         )
         with self._registry_lock:
             self._registry[capability_id] = entry
@@ -531,6 +675,544 @@ class CapabilityManager:
         )
         self._log_debug(f"Registered capability: {capability_id} (facade={facade})")
         return entry
+
+    # ------------------------------------------------------------------
+    # M8-T5 — Capability Registry Hardening (extended business API)
+    # ------------------------------------------------------------------
+
+    def register_capability(self, spec: CapabilitySpec) -> CapabilityRegistryEntry:
+        """
+        Register a capability from a validated CapabilitySpec (M8-T5).
+
+        This is the primary registration path for manifest-discovered capabilities.
+        Enforces deterministic collision resolution per §16 precedence rules:
+        trust_level > version > first-registered.
+
+        Args:
+            spec: Validated CapabilitySpec from CapabilityManifestLoader
+
+        Returns:
+            The created/updated CapabilityRegistryEntry
+
+        Raises:
+            CapabilityManagerError: If validation fails or collision resolution rejects
+        """
+        # Validate security context via SecurityManager gate
+        if self._security_manager and hasattr(self._security_manager, "validate_capability_spec"):
+            validation_result = self._security_manager.validate_capability_spec(spec)
+            # CapabilitySpecValidationResult exposes .passed/.violations; accept a
+            # legacy boolean or a .valid attribute too for robustness.
+            gate_passed = getattr(validation_result, "passed", None)
+            if gate_passed is None:
+                gate_passed = getattr(validation_result, "valid", validation_result)
+            if not gate_passed:
+                violations = getattr(validation_result, "violations", None) or []
+                detail = "; ".join(
+                    str(getattr(v, "description", v)) for v in violations
+                )
+                raise CapabilityManagerError(
+                    f"Capability '{spec.capability_id}' failed security validation: "
+                    f"{detail or 'gate rejected the spec'}",
+                    rule_id="CM-SEC-001",
+                )
+
+        # Deterministic collision resolution
+        with self._registry_lock:
+            existing = self._registry.get(spec.capability_id)
+            if existing is not None:
+                # Compare precedence: trust_level > version > first-registered
+                existing_precedence = self._compute_precedence(existing)
+                new_precedence = self._compute_precedence_from_spec(spec)
+                if TrustLevel.precedence(spec.trust_level) < TrustLevel.precedence(
+                    existing.trust_level
+                ):
+                    # Lower-trust attempt to displace a higher-trust registration —
+                    # shadowing (spec §16 rule 3).
+                    raise CapabilityManagerError(
+                        f"Capability '{spec.capability_id}' cannot be shadowed: existing "
+                        f"trust={existing.trust_level} > new trust={spec.trust_level}.",
+                        rule_id="CM-SHADOW-001",
+                    )
+                if new_precedence <= existing_precedence:
+                    # Equal or lower precedence (same trust, not-higher version) —
+                    # first registrant wins (spec §16 rule 2).
+                    raise CapabilityManagerError(
+                        f"Capability '{spec.capability_id}' already registered with "
+                        f"higher or equal precedence (existing trust={existing.trust_level}, "
+                        f"version={existing.version}; new trust={spec.trust_level}, "
+                        f"version={spec.version}).",
+                        rule_id="CM-PREC-001",
+                    )
+                # New capability wins — log and replace
+                self._log_info(
+                    f"Capability '{spec.capability_id}' replaced by higher-precedence manifest "
+                    f"(old trust={existing.trust_level}, new trust={spec.trust_level})"
+                )
+
+        # Build security_context from spec
+        security_context = spec.to_security_context()
+
+        # Build provider_metadata from spec
+        provider_metadata = spec.to_provider_metadata()
+
+        entry = CapabilityRegistryEntry(
+            capability_id=spec.capability_id,
+            facade=spec.facade,
+            provider_id=spec.provider_id,
+            provider_metadata=provider_metadata,
+            version=spec.version,
+            state=CapabilityState.REGISTERED,
+            security_context=security_context,
+            resource_profile={},
+            tags=spec.tags,
+            trust_level=spec.trust_level,
+            authority_classification=spec.authority_classification,
+            adapter_binding={"class_path": spec.adapter_class_path, "kwargs": dict(spec.adapter_kwargs)},
+            operations=spec.allowed_operations,
+            health_status="unknown",
+            availability=(
+                CapabilityAvailability.AVAILABLE if spec.enabled else CapabilityAvailability.DISABLED
+            ),
+            enabled=spec.enabled,
+            discovered_from=spec.discovered_from,
+            dependencies=spec.dependencies,
+            last_error=None,
+        )
+
+        with self._registry_lock:
+            self._registry[spec.capability_id] = entry
+
+        self._emit_event(
+            _CAPABILITY_REGISTERED,
+            {
+                "capability_id": spec.capability_id,
+                "facade": spec.facade,
+                "provider_id": spec.provider_id,
+                "version": spec.version,
+                "trust_level": spec.trust_level,
+                "authority_classification": spec.authority_classification,
+                "discovered_from": spec.discovered_from,
+            },
+        )
+        self._log_info(
+            f"Registered capability (M8-T5): {spec.capability_id} "
+            f"(facade={spec.facade}, trust={spec.trust_level}, "
+            f"authority={spec.authority_classification}, discovered_from={spec.discovered_from})"
+        )
+        return entry
+
+    def _compute_precedence(self, entry: CapabilityRegistryEntry) -> tuple:
+        """Compute precedence tuple for collision resolution (trust > version > first-registered).
+
+        Unparseable versions sort below any parseable semver (spec §16 rule 2:
+        "unparseable version → first registrant wins" — the existing entry keeps
+        precedence over an unparseable challenger).
+        """
+        trust_precedence = TrustLevel.precedence(entry.trust_level)
+        return (trust_precedence, _parse_version(entry.version))
+
+    def _compute_precedence_from_spec(self, spec: CapabilitySpec) -> tuple:
+        """Compute precedence tuple from CapabilitySpec."""
+        trust_precedence = TrustLevel.precedence(spec.trust_level)
+        return (trust_precedence, _parse_version(spec.version))
+
+    # ------------------------------------------------------------------
+    # M9-N6 — Capability manifest hot-reload (fail-closed)
+    # ------------------------------------------------------------------
+
+    async def reload_capabilities(
+        self,
+        loader: Any,
+        *,
+        initialize: bool = True,
+    ) -> dict[str, Any]:
+        """Hot-reload manifest-discovered capabilities (M9-N6, spec §11.6/§20).
+
+        Re-runs the full M8-T5 pipeline via ``loader.reload()`` (validation +
+        allowlist + non-auto-trust gates), then reconciles the registry with
+        the validated spec set — every insertion goes through
+        :meth:`register_capability`, so the SecurityManager gate, CM-SHADOW-001
+        and CM-PREC-001 collision guards apply unchanged. M9 must not bypass
+        ``register_capability``'s precedence/collision logic (spec §20).
+
+        Reconciliation semantics:
+        * Entries previously registered FROM THE LOADER'S OWN MANIFEST DIR
+          (matched by their ``discovered_from`` provenance) are replaced or
+          withdrawn as directed by the reloaded manifest set — including
+          downgrades, since CM-MANIFEST-001 already caps manifest trust at
+          ``trusted_contextual`` (no privilege gain is possible).
+        * Foreign entries (kernel/builtin registrations, ``discovered_from``
+          outside the loader dir) are NEVER touched; a reloaded manifest that
+          collides with one raises CM-SHADOW-001 / CM-PREC-001.
+
+        Fail-closed semantics (spec §18):
+        * Any invalid manifest → the loader raises before any registry mutation.
+        * Any registration failure → the pre-reload registry state is restored
+          atomically and the error is re-raised. The previous valid registry is
+          always preserved.
+
+        Args:
+            loader: A ``CapabilityManifestLoader`` (or duck-typed equivalent
+                exposing ``reload() -> list[spec]`` and optionally
+                ``manifest_dir``).
+            initialize: When True (default), re-initialize enabled capabilities
+                via ``initialize_capability`` (adapter instantiation + health).
+
+        Returns:
+            Summary dict: ``{"registered": [...], "initialized": [...],
+            "removed": [...]}`` describing the applied delta.
+
+        Raises:
+            Exception: Whatever the loader or registration raises; the caller's
+                prior registration state is guaranteed intact on raise.
+        """
+        # 1. Validate everything BEFORE touching the registry (fail-closed).
+        specs = loader.reload()
+
+        loader_dir = str(getattr(loader, "manifest_dir", "") or "")
+
+        def _owned_by_loader(discovered_from: str) -> bool:
+            if not discovered_from or not loader_dir:
+                return False
+            return str(discovered_from).startswith(loader_dir)
+
+        with self._registry_lock:
+            snapshot = {
+                cid: entry for cid, entry in self._registry.items()
+            }
+
+        registered: list[str] = []
+        initialized: list[str] = []
+        removed: list[str] = []
+
+        try:
+            # 2. Compute the delta against manifest-owned entries only.
+            new_ids = {spec.capability_id for spec in specs}
+            owned_ids = {
+                cid
+                for cid, entry in snapshot.items()
+                if _owned_by_loader(getattr(entry, "discovered_from", ""))
+            }
+            # Vanished / disabled (loader skips enabled:false) → withdraw.
+            to_withdraw = sorted(owned_ids - new_ids)
+            # Unchanged/changed owned ids → explicit replace (deregister then
+            # register): an equal-precedence in-place re-registration would be
+            # rejected by CM-PREC-001, and this path can never grant privilege
+            # because CM-MANIFEST-001 caps manifest trust at trusted_contextual
+            # and every registration re-runs the full security gate.
+            to_replace = sorted(owned_ids & new_ids)
+
+            # 3. Apply: withdraw stale / replaced entries, then register fresh.
+            for cid in to_withdraw:
+                self.deregister(cid)
+                removed.append(cid)
+            for cid in to_replace:
+                self.deregister(cid)
+
+            for spec in specs:
+                entry = self.register_capability(spec)  # full security gate
+                registered.append(entry.capability_id)
+
+            if initialize:
+                for spec in specs:
+                    entry = self.get_capability(spec.capability_id)
+                    if entry is not None and entry.enabled:
+                        ok = await self.initialize_capability(spec.capability_id)
+                        if not ok:
+                            # Initialization failure is recorded on the entry
+                            # (availability=error) but does NOT roll back the
+                            # registration — mirrors boot-time behavior where
+                            # one unhealthy capability must not block others.
+                            self._log_warning(
+                                f"Hot-reload: initialization failed for "
+                                f"{spec.capability_id}; entry marked unavailable"
+                            )
+                        else:
+                            initialized.append(spec.capability_id)
+
+        except Exception as exc:  # noqa: BLE001 — restore prior state, fail-closed
+            with self._registry_lock:
+                self._registry.clear()
+                self._registry.update(snapshot)
+            self._log_error(f"Hot-reload rejected (fail-closed): {exc}")
+            raise
+
+        return {
+            "registered": registered,
+            "initialized": initialized,
+            "removed": removed,
+        }
+
+    def disable(self, capability_id: str) -> bool:
+        """Disable a capability (M8-T5 lifecycle: AVAILABLE -> DISABLED)."""
+        with self._registry_lock:
+            entry = self._registry.get(capability_id)
+            if entry is None:
+                return False
+            if entry.enabled is False:
+                return True  # Idempotent
+            entry.enabled = False
+            entry.availability = CapabilityAvailability.DISABLED
+            entry.state = CapabilityState.DISABLED
+            self._log_info(f"Disabled capability: {capability_id}")
+        return True
+
+    def enable(self, capability_id: str) -> bool:
+        """Enable a capability (M8-T5 lifecycle: DISABLED -> AVAILABLE)."""
+        with self._registry_lock:
+            entry = self._registry.get(capability_id)
+            if entry is None:
+                return False
+            if entry.enabled is True:
+                return True  # Idempotent
+            entry.enabled = True
+            entry.availability = CapabilityAvailability.AVAILABLE
+            entry.state = CapabilityState.REGISTERED
+            self._log_info(f"Enabled capability: {capability_id}")
+        return True
+
+    def deprecate(self, capability_id: str) -> bool:
+        """Deprecate a capability (M8-T5 lifecycle: still resolvable but flagged)."""
+        with self._registry_lock:
+            entry = self._registry.get(capability_id)
+            if entry is None:
+                return False
+            entry.state = CapabilityState.DEPRECATED
+            self._log_info(f"Deprecated capability: {capability_id} (still resolvable)")
+        return True
+
+    def set_health(self, capability_id: str, health_status: CapabilityAvailability) -> bool:
+        """Set capability health status (M8-T5 health checks)."""
+        with self._registry_lock:
+            entry = self._registry.get(capability_id)
+            if entry is None:
+                return False
+            entry.health_status = health_status
+            if health_status == CapabilityAvailability.UNAVAILABLE:
+                entry.availability = CapabilityAvailability.UNAVAILABLE
+            elif health_status == CapabilityAvailability.AVAILABLE and entry.enabled:
+                entry.availability = CapabilityAvailability.AVAILABLE
+            self._log_debug(f"Set health for {capability_id}: {health_status}")
+        return True
+
+    def enforce_security_context(
+        self,
+        capability_id: str,
+        caller_context: dict[str, Any] | None = None,
+    ) -> CapabilityRegistryEntry:
+        """
+        Enforce security context at resolution/invocation time (M8-T5).
+
+        Validates caller context against capability's security_context:
+        - allowed_operations check
+        - sensitive_keys protection
+        - max_content_size limits
+
+        Args:
+            capability_id: Capability to validate
+            caller_context: Optional caller context with operation, content_size, etc.
+
+        Returns:
+            The capability entry if validation passes
+
+        Raises:
+            CapabilityManagerError: If security validation fails
+        """
+        with self._registry_lock:
+            entry = self._registry.get(capability_id)
+        if entry is None:
+            raise CapabilityManagerError(
+                f"Capability '{capability_id}' not registered",
+                rule_id="CM-RES-001",
+            )
+
+        security_ctx = entry.security_context
+        caller_context = caller_context or {}
+
+        # 1. Allowed-operations check (spec §21: CM-SEC-001)
+        allowed_ops = security_ctx.get("allowed_operations", [])
+        requested_op = caller_context.get("operation")
+        if allowed_ops and requested_op is not None and requested_op not in allowed_ops:
+            raise CapabilityManagerError(
+                f"Operation '{requested_op}' not allowed for capability '{capability_id}'. "
+                f"Allowed: {allowed_ops}",
+                rule_id="CM-SEC-001",
+            )
+
+        # 2. Sensitive-keys check (spec §21: CM-SEC-002) — denied at the
+        # capability layer, not merely logged (fail-closed).
+        sensitive_keys = {
+            k.lower() for k in security_ctx.get("sensitive_keys", []) if isinstance(k, str)
+        }
+        if sensitive_keys:
+            # Scan both explicit payload keys and nested dict keys of any
+            # provided input payload.
+            payload = caller_context.get("payload")
+            payload_keys: set[str] = set()
+            if isinstance(payload, dict):
+                def _collect(obj: Any) -> None:
+                    if isinstance(obj, dict):
+                        for k, v in obj.items():
+                            payload_keys.add(str(k).lower())
+                            _collect(v)
+                    elif isinstance(obj, (list, tuple)):
+                        for item in obj:
+                            _collect(item)
+
+                _collect(payload)
+            payload_keys |= {
+                str(k).lower() for k in caller_context.get("payload_keys", ())
+            }
+            hits = sensitive_keys & payload_keys
+            if hits:
+                raise CapabilityManagerError(
+                    f"Payload contains sensitive keys {sorted(hits)} "
+                    f"for capability '{capability_id}'",
+                    rule_id="CM-SEC-002",
+                )
+
+        # 3. Max-content-size check (spec §21: CM-SEC-003)
+        max_size = security_ctx.get("max_content_size", 10240)
+        content_size = caller_context.get("content_size")
+        if content_size is None:
+            payload = caller_context.get("payload")
+            if isinstance(payload, str):
+                content_size = len(payload.encode("utf-8"))
+            elif isinstance(payload, (bytes, bytearray)):
+                content_size = len(payload)
+            elif payload is not None:
+                try:
+                    import json as _json
+
+                    content_size = len(_json.dumps(payload, default=str))
+                except Exception:  # noqa: BLE001
+                    content_size = 0
+            else:
+                content_size = 0
+        if content_size > int(max_size):
+            raise CapabilityManagerError(
+                f"Content size {content_size} exceeds max {max_size} "
+                f"for capability '{capability_id}'",
+                rule_id="CM-SEC-003",
+            )
+
+        return entry
+
+    def resolve(
+        self,
+        capability_id: str,
+        *,
+        caller_context: dict[str, Any] | None = None,
+    ) -> CapabilityRegistryEntry:
+        """Resolve a capability to its bound provider endpoint (Part 4 §4.8.5).
+
+        M8-T5 extension: Enforces security context and availability checks.
+
+        Raises CapabilityManagerError if the capability is not registered,
+        disabled, or fails security validation.
+        """
+        with self._registry_lock:
+            entry = self._registry.get(capability_id)
+        if entry is None:
+            raise CapabilityManagerError(
+                f"Capability '{capability_id}' is not registered; cannot resolve.",
+                rule_id="CM-RES-001",
+            )
+
+        # M8-T5: Check availability/lifecycle before resolving.
+        # DEPRECATED stays resolvable but flagged (spec §14).
+        if entry.state == CapabilityState.DISABLED or not entry.enabled:
+            raise CapabilityManagerError(
+                f"Capability '{capability_id}' is disabled",
+                rule_id="CM-DIS-001",
+            )
+        if entry.availability == CapabilityAvailability.UNAVAILABLE:
+            raise CapabilityManagerError(
+                f"Capability '{capability_id}' is unavailable (health check failed)",
+                rule_id="CM-RES-002",
+            )
+        if entry.state == CapabilityState.DEPRECATED:
+            self._log_warning(
+                f"Resolved DEPRECATED capability: {capability_id} "
+                f"(still resolvable but flagged)"
+            )
+
+        # M8-T5: Enforce security context
+        self.enforce_security_context(capability_id, caller_context)
+
+        return entry
+
+    async def initialize_capability(self, capability_id: str) -> bool:
+        """Initialize a capability (M8-T5: REGISTERED -> INITIALIZE -> HEALTH CHECK -> AVAILABLE).
+
+        Instantiates the bound adapter via the AdapterFactory and runs its
+        optional ``initialize()``/``health_check()``. Failures are recorded on
+        the entry (``availability=error``, ``last_error``) — the registry dict
+        itself is never corrupted (spec §15).
+
+        Returns True on success; False when the capability is unknown or failed
+        to initialize.
+        """
+        with self._registry_lock:
+            entry = self._registry.get(capability_id)
+        if entry is None:
+            return False
+
+        try:
+            # Check declared dependencies are registered and available
+            for dep_id in entry.dependencies:
+                dep_entry = self.get_capability(dep_id)
+                if dep_entry is None or dep_entry.availability != CapabilityAvailability.AVAILABLE:
+                    raise CapabilityManagerError(
+                        f"Dependency '{dep_id}' not available for capability '{capability_id}'",
+                        rule_id="CM-INIT-001",
+                    )
+
+            # Instantiate adapter via factory if a binding exists
+            binding = entry.adapter_binding
+            class_path = (
+                binding.get("class_path", "") if isinstance(binding, dict) else str(binding or "")
+            )
+            adapter = None
+            if class_path and self._adapter_factory is not None:
+                kwargs = binding.get("kwargs", {}) if isinstance(binding, dict) else {}
+                adapter = self._adapter_factory.get_adapter(class_path, kwargs=kwargs)
+                if hasattr(adapter, "initialize"):
+                    result = adapter.initialize()
+                    if asyncio.iscoroutine(result):
+                        await result
+
+            # Optional health check on the adapter
+            health_status = "healthy"
+            if adapter is not None and hasattr(adapter, "health_check"):
+                hc = adapter.health_check()
+                if asyncio.iscoroutine(hc):
+                    hc = await hc
+                if isinstance(hc, dict):
+                    health_status = str(hc.get("status", "healthy"))
+                elif isinstance(hc, str):
+                    health_status = hc
+
+            with self._registry_lock:
+                entry.health_status = health_status
+                if entry.enabled:
+                    entry.availability = CapabilityAvailability.AVAILABLE
+                    entry.state = CapabilityState.REGISTERED
+                else:
+                    entry.availability = CapabilityAvailability.DISABLED
+                entry.last_error = None
+            self._log_info(
+                f"Initialized capability: {capability_id} (health={health_status})"
+            )
+            return True
+
+        except Exception as e:  # noqa: BLE001 — record typed failure on the entry
+            with self._registry_lock:
+                entry.health_status = "unhealthy"
+                entry.availability = CapabilityAvailability.ERROR
+                entry.last_error = str(e)
+            self._log_error(f"Failed to initialize capability {capability_id}: {e}")
+            return False
 
     def deregister(self, capability_id: str) -> bool:
         """Deregister a capability (Part 4 §4.8.3). Returns True if removed."""
@@ -576,30 +1258,6 @@ class CapabilityManager:
                 for e in self._registry.values()
                 if all(t in e.tags for t in required_tags)
             ]
-
-    def resolve(
-        self,
-        capability_id: str,
-        *,
-        caller_context: dict[str, Any] | None = None,
-    ) -> CapabilityRegistryEntry:
-        """Resolve a capability to its bound provider endpoint (Part 4 §4.8.5).
-
-        Raises CapabilityManagerError if the capability is not registered. The
-        Authorization gate (SI-CM-04) is owned by the kernel's SecurityManager;
-        this manager exposes the resolution metadata. The mapping to a
-        registered provider is gated by the registry (SI-CM-01), and an
-        unregistered capability therefore cannot be resolved, which surfaces as a
-        CapabilityManagerError rather than a bypass (SI-CM-05).
-        """
-        with self._registry_lock:
-            entry = self._registry.get(capability_id)
-        if entry is None:
-            raise CapabilityManagerError(
-                f"Capability '{capability_id}' is not registered; cannot resolve.",
-                rule_id="CM-RES-001",
-            )
-        return entry
 
     def invoke(
         self,

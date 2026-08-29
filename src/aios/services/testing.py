@@ -67,6 +67,11 @@ from aios.adapters.architecture_agency_adapter import ArchitectureAgencyAdapter
 # Reuse the canonical event bus singleton accessor; no second bus is created.
 from aios.events.core.bus import get_core_event_bus
 from aios.events.core.types import EventType
+from aios.services.convergence import (
+    ConvergenceDetector,
+    DEFAULT_NO_IMPROVEMENT_LIMIT,
+    IterationObservation,
+)
 
 
 __all__ = ["TestOrchestratorService", "TestingResult", "TestingStatus"]
@@ -170,6 +175,14 @@ class TestOrchestratorService(WorkflowManager):
         self._token_budget = 1_000_000
         self._results: dict[str, TestingResult] = {}
 
+        # M9-N9 — bounded convergence detection (advisory-only). The detector
+        # observes failed iterations and SIGNALS HUMAN_ESCALATION_REQUIRED via
+        # this manager's own canonical _emit_event bridge; it never decides.
+        self.convergence_detector = ConvergenceDetector(
+            emit_event=self._emit_event,
+            no_improvement_limit=DEFAULT_NO_IMPROVEMENT_LIMIT,
+        )
+
     # ------------------------------------------------------------------
     # Helpers
     # ------------------------------------------------------------------
@@ -190,6 +203,43 @@ class TestOrchestratorService(WorkflowManager):
             environment=environment,
             correlation_id=correlation_id,
             test_id=test_id,
+        )
+
+    # ------------------------------------------------------------------
+    # Convergence observation (M9-N9, advisory-only)
+    # ------------------------------------------------------------------
+
+    def _observe_iteration(
+        self,
+        objective_id: str,
+        iteration: int,
+        verdict: str,
+        evidence: list[TestingEvidence],
+        correlation_id: str,
+    ) -> bool:
+        """Feed one failed-iteration outcome to the convergence detector.
+
+        The signature is CONTENT-derived (verdict + sorted failing evidence
+        digests), so identical failure modes converge while any real change in
+        evidence resets the window. Deterministic and bounded. Returns True iff
+        the detector signaled no-improvement convergence.
+        """
+        failing = [
+            f"{e.perspective}:{(e.observed or '')[:120]}"
+            for e in evidence
+            if e.verdict != "pass"
+        ]
+        # Verdict leads the digest (same format as the detector's derived
+        # fallback): a verdict shift alone counts as improvement signal.
+        signature = f"{verdict}::" + "|".join(sorted(failing))
+        return self.convergence_detector.observe(
+            IterationObservation(
+                objective_id=objective_id,
+                iteration=iteration,
+                verdict=verdict,
+                failure_signature=signature,
+                correlation_id=correlation_id,
+            )
         )
 
     # ------------------------------------------------------------------
@@ -269,6 +319,9 @@ class TestOrchestratorService(WorkflowManager):
             if final_verdict == AgencyVerdict.APPROVE.value:
                 gate = self._gate.evaluate(implementation or target, evidence)
                 if gate.verdict == GateVerdict.PASS:
+                    # M9-N9: success is real improvement — clear convergence
+                    # history so future runs of this objective start fresh.
+                    self.convergence_detector.reset(objective_id)
                     result = TestingResult(
                         objective_id=objective_id,
                         status=TestingStatus.PASSED,
@@ -298,6 +351,12 @@ class TestOrchestratorService(WorkflowManager):
                 # in a real loop; here we record the gate failure and either
                 # retry with a simplified implementation or terminate.)
                 if iterations >= self._max_iterations:
+                    # M9-N11: gate-loop bound exhaustion → escalate.
+                    await self._escalate_bounds_exhausted(
+                        objective_id,
+                        "Simplification gate failed; iteration bounds exhausted.",
+                        correlation_id,
+                    )
                     return self._build_failed(
                         objective_id, evidence, council_id, critique, "approve",
                         "Simplification gate failed; iteration cap reached.", correlation_id, iterations,
@@ -314,6 +373,18 @@ class TestOrchestratorService(WorkflowManager):
                     {"objective_id": objective_id, "loop": "simplification_restart", "iteration": iterations},
                     correlation_id,
                 )
+                # M9-N9: observe for no-improvement convergence (advisory).
+                # The detector emits HUMAN_ESCALATION_REQUIRED internally when converged.
+                if self._observe_iteration(
+                    objective_id, iterations, final_verdict, evidence, correlation_id
+                ):
+                    # Convergence already signaled by detector; just return failed.
+                    return self._build_failed(
+                        objective_id, evidence, council_id, critique, final_verdict,
+                        "Convergence detected: no improvement across iterations; "
+                        "escalating to human.",
+                        correlation_id, iterations,
+                    )
                 continue
 
             # REJECT / CONDITIONAL -> closed loop via RCA/Learning/Planning.
@@ -326,6 +397,12 @@ class TestOrchestratorService(WorkflowManager):
                 iteration=iterations,
             )
             if not closed and iterations >= self._max_iterations:
+                # M9-N11: bound exhaustion (loop budget + cap) → escalate.
+                await self._escalate_bounds_exhausted(
+                    objective_id,
+                    "Final judge rejected; iteration/budget bounds exhausted.",
+                    correlation_id,
+                )
                 return self._build_failed(
                     objective_id, evidence, council_id, critique, final_verdict,
                     "Final judge rejected; iteration cap reached.", correlation_id, iterations,
@@ -337,9 +414,27 @@ class TestOrchestratorService(WorkflowManager):
                 )
                 if corrected and corrected != implementation:
                     implementation = corrected
+            # M9-N9: observe for no-improvement convergence (advisory).
+            # The detector emits HUMAN_ESCALATION_REQUIRED internally when converged.
+            if self._observe_iteration(
+                objective_id, iterations, final_verdict, evidence, correlation_id
+            ):
+                # Convergence already signaled by detector; just return failed.
+                return self._build_failed(
+                    objective_id, evidence, council_id, critique, final_verdict,
+                    "Convergence detected: no improvement across iterations; "
+                    "escalating to human.",
+                    correlation_id, iterations,
+                )
             # Continue loop (planner/provider supplies corrected implementation).
             continue
 
+        # M9-N11: loop exhausted its iteration bound without PASS → escalate.
+        await self._escalate_bounds_exhausted(
+            objective_id,
+            "Iteration cap reached without PASS.",
+            correlation_id,
+        )
         return self._build_failed(
             objective_id, last_evidence, last_council_id, last_critique, last_verdict,
             "Iteration cap reached without PASS.", correlation_id, iterations,
@@ -714,12 +809,18 @@ class TestOrchestratorService(WorkflowManager):
         # LearningService (existing) — capture the failure pattern.
         if self._learning is not None:
             try:
-                capturer = getattr(self._learning, "capture_failure_pattern", None)
+                # Prefer the real RCA-aligning API; fall back only if missing
+                # (maintains IND-6: stock boot constructs the real method).
+                capturer = getattr(
+                    self._learning, "capture_learning_from_analysis", None
+                )
                 if capturer is not None:
-                    capturer(
-                        objective_id=objective_id,
-                        verdict=final_verdict,
-                        evidence=[e.to_dict() for e in evidence],
+                    await capturer(
+                        analysis_id=f"analyze_{objective_id}_{iteration}",
+                        failure_category=final_verdict,
+                        recommended_action="investigate_failure",
+                        root_cause=f"Final judge verdict: {final_verdict}",
+                        preventive_measures=[],
                     )
                 # Emit LearningCaptured-equivalent canonical event (no new type).
                 learn_type = getattr(EventType, "LEARNING_CAPTURED", None)
@@ -744,6 +845,40 @@ class TestOrchestratorService(WorkflowManager):
         # Regression guard: without a genuinely corrected implementation the
         # loop will not silently converge. Caller supplies the corrected input.
         return True
+
+    async def _escalate_bounds_exhausted(
+        self, objective_id: str, detail: str, correlation_id: str
+    ) -> None:
+        """M9-N11 — route bound exhaustion to the human-escalation path.
+
+        Emits the canonical HUMAN_ESCALATION_REQUIRED signal (advisory), then
+        delegates to the EXISTING canonical executor
+        ``WorkflowManager._escalate_to_human`` (workflow.py:858-876) so the
+        recovery contract (CHECKPOINT_CREATED with
+        recovery_action=escalate_to_human + WORKFLOW_FAILED) is unchanged.
+        No new authority is assumed; failures here never mask the caller's own
+        terminal handling.
+        """
+        try:
+            self._emit_event(
+                EventType.HUMAN_ESCALATION_REQUIRED,
+                {
+                    "objective_id": objective_id,
+                    "service": "test_orchestrator",
+                    "reason": "bound_exhaustion",
+                    "detail": detail,
+                    "recovery_action": "escalate_to_human",
+                    "advisory": True,
+                    "authority": "advisory_only",
+                },
+                correlation_id,
+            )
+            await self._escalate_to_human(
+                execution_id=objective_id,
+                payload={"root_cause": detail, "confidence": 1.0},
+            )
+        except Exception:  # noqa: BLE001 — escalation must not mask the failure
+            pass
 
     def _build_failed(
         self, objective_id, evidence, council_id, critique, verdict, detail, correlation_id, iterations

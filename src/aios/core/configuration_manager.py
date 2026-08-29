@@ -223,6 +223,37 @@ class KernelConfigSchema:
                             "env-specific YAML); null = no env file required"
                         ),
                     ),
+                    # M8-T5 capability-manifest discovery controls. Values mirror
+                    # config/defaults.yaml; the schema registration makes the
+                    # section overridable through Layer-2 app.yaml.
+                    "capabilities": PropertySchema(
+                        type="object",
+                        additional_properties=True,
+                        description=(
+                            "Capability manifest discovery (M8-T5): enabled "
+                            "master switch, relative manifest_dir, trust_default, "
+                            "explicit adapter_allowlist"
+                        ),
+                    ),
+                },
+            ),
+            # M9-N7 ACP session hardening controls (spec §19). Registration
+            # follows the same pattern as kernel.capabilities: values mirror
+            # config/defaults.yaml; the schema registration makes the section
+            # overridable through Layer-2 app.yaml / AIOS_* env vars.
+            "acp": PropertySchema(
+                type="object",
+                additional_properties=True,
+                description=(
+                    "ACP protocol settings (M9-N7): absolute session TTL "
+                    "(session_ttl_seconds; 0 = disabled, idle timeout only)"
+                ),
+                properties={
+                    "sessionTtlSeconds": PropertySchema(
+                        type="integer",
+                        minimum=0,
+                        description="Absolute ACP session lifetime cap (s)",
+                    ),
                 },
             ),
             "security": PropertySchema(

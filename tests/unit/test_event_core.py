@@ -350,7 +350,10 @@ def test_event_type_catalog_complete():
     # Part 2 §2.3.1's enumeration defines 121 canonical event types (the prose
     # says "97"; we conform to the authoritative enumeration, not the prose).
     # M5-GATE-REALIZE adds 11 new M5 event types: total 132.
-    assert len(list(EventType)) == 132
+    # USER RESOURCE ONBOARDING adds INTEGRATION_STATUS_CHANGED: total 133.
+    # M13 SELF-LOOP & SELF-PROMPTING adds 25 event types: total 158.
+    # Additional types beyond spec: 13 (FAILURE_CLASSIFIED_M13, etc.): total 171.
+    assert len(list(EventType)) == 171
     # base-contract-style names are normalized (str enum)
     assert EventType.TASK_COMPLETED.value == "TASK_COMPLETED"
 

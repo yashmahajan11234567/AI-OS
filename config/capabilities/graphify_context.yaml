@@ -1,0 +1,33 @@
+capability_id: "graphify_context"
+facade: "graph"
+provider_id: "graphify"
+adapter:
+  class_path: "aios.adapters.graphify_adapter.GraphifyAdapter"
+  kwargs:
+    server_id: "graphify"
+transport: "mcp"
+version: "1.0.0"
+trust_level: "trusted_contextual"
+authority_classification: "contextual"
+allowed_operations:
+  - "add_node"
+  - "get_node"
+  - "update_node"
+  - "delete_node"
+  - "query_graph"
+  - "shortest_path"
+  - "add_edge"
+sensitive_keys:
+  - "password"
+  - "token"
+  - "secret"
+  - "api_key"
+  - "authorization"
+max_content_size: 10240
+tags:
+  - "graph"
+  - "knowledge"
+  - "context"
+  - "relationships"
+  - "dependency"
+dependencies: []

@@ -148,7 +148,11 @@ class UserSimulationAgent:
             "correlation_id": correlation_id,
         })
 
-        session_id = self._bridge._create_session_id()  # hermes_<uuid> (isolated)
+        # Create session and USE the returned session ID (D-02 remediation:
+        # the prior code called a non-existent ``_create_session_id()`` which
+        # raised AttributeError and crashed the user-simulation perspective).
+        # The bridge generates and returns the canonical session id.
+        session_id = await self._bridge.create_worker_session(environment={"app_url": app_url})
         self._active_session = session_id
 
         provenance = Provenance(
@@ -163,7 +167,6 @@ class UserSimulationAgent:
 
         # Drive a discovery-first interaction sequence through the worker.
         observations: list[HermesObservation] = []
-        await self._bridge.create_worker_session(environment={"app_url": app_url})
 
         try:
             observations.append(await self._bridge.navigate(session_id, app_url))
@@ -303,4 +306,5 @@ class UserSimulationAgent:
             "error": o.error,
             "trust_level": o.trust_level,
             "session_id": o.session_id,
+            "provenance": o.provenance,
         }

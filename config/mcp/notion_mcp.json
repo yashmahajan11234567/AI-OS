@@ -1,0 +1,20 @@
+{
+  "server_id": "notion",
+  "name": "Notion",
+  "transport": "stdio",
+  "command": [
+    "python",
+    "-m",
+    "aios.adapters.mock_notion_server"
+  ],
+  "url": null,
+  "env": {},
+  "headers": {},
+  "timeout_seconds": 30,
+  "auto_reconnect": true,
+  "max_retries": 3,
+  "metadata": {
+    "description": "Notion planning MCP server (mock for testing)",
+    "integration_mode": "mock"
+  }
+}

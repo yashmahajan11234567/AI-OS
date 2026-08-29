@@ -23,6 +23,7 @@ from aios.events.core.bus import get_core_event_bus
 from aios.events.core.event import Event as CoreEvent
 from aios.events.core.identity import ComponentIdentity, ComponentType
 from aios.events.core.types import EventType, SemanticVersion
+from aios.core.capability_provenance import build_capability_provenance, mark_capability_advisory
 
 logger = logging.getLogger(__name__)
 
@@ -374,7 +375,7 @@ class SkillManager:
             config: Optional configuration
 
         Returns:
-            Skill output data
+            Skill output data with provenance attached
         """
         skill = self._skills.get(skill_id)
         if not skill:
@@ -402,6 +403,34 @@ class SkillManager:
                     result = skill_func(input_data, config or {})
             else:
                 raise ValueError(f"Skill {skill_id} entry point is not callable")
+
+            # M8-T5: Attach provenance to skill execution result
+            if isinstance(result, dict):
+                # Build capability provenance for skill execution
+                provenance = build_capability_provenance(
+                    capability_id=skill_id,
+                    facade="skill",
+                    provider_id="skill_manager",
+                    adapter="SkillManager",
+                    operation="execute_skill",
+                    source="skill",
+                    correlation_id=execution_id,
+                    execution_id=execution_id,
+                    authority="advisory",
+                    trust_level="untrusted",
+                )
+                # Mark as advisory (spoof-proof C14 re-assertion)
+                result = mark_capability_advisory(
+                    result,
+                    source="skill",
+                    operation="execute_skill",
+                    capability_id=skill_id,
+                    facade="skill",
+                    provider_id="skill_manager",
+                    adapter="SkillManager",
+                    authority="advisory",
+                    trust_level="untrusted",
+                )
 
             execution.output_data = result
             execution.completed_at = datetime.utcnow()

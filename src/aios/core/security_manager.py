@@ -95,6 +95,7 @@ __all__ = [
     "SkillSpecTorResult",
     "MCPServerSecurityGate",
     "MCPServerValidationResult",
+    "CapabilitySpecValidationResult",
     "get_security_manager",
     "set_security_manager",
     "reset_security_manager_singleton",
@@ -551,6 +552,22 @@ class MCPServerValidationResult:
     scan_id: str
 
 
+@dataclass
+class CapabilitySpecValidationResult:
+    """Result of capability specification security validation.
+
+    Attributes:
+        passed: Whether the capability spec passed security validation
+        violations: List of security violations found
+        scan_duration_ms: Time taken for validation
+        scan_id: Unique identifier for this scan
+    """
+    passed: bool
+    violations: list[SecurityViolation]
+    scan_duration_ms: int
+    scan_id: str
+
+
 class MCPServerSecurityGate:
     """MCP Server Security Gate for AI-OS M5-GATE-REALIZE.
 
@@ -823,8 +840,20 @@ class MCPServerSecurityGate:
         return violations
 
     def _validate_env(self, config: "MCPServerConfig") -> list[SecurityViolation]:
-        """Validate environment variables for credential exposure."""
+        """Validate environment variables for credential exposure.
+
+        M8-T6 D-12 remediation: ``config.env`` may be ``None`` (or an empty
+        ``dict``). A ``None`` env previously raised ``AttributeError`` on
+        ``.items()`` and crashed the entire security gate-before-connect (C18),
+        blocking every MCP connection. We guard the iteration while preserving
+        the credential checks *verbatim* for any env that actually carries
+        variables — no weakening of the credential-rejection logic.
+        """
         violations = []
+
+        # D-12 fix: tolerate None / empty env without weakening credential checks.
+        if config.env is None or not config.env:
+            return violations
 
         for key, value in config.env.items():
             key_upper = key.upper()
@@ -1493,6 +1522,179 @@ class SecurityManager:
         )
 
         return result
+
+    # ------------------------------------------------------------------
+    # M8-T5: Capability Spec Validation Gate
+    # ------------------------------------------------------------------
+
+    def validate_capability_spec(
+        self,
+        spec: Any,  # CapabilitySpec from aios.core.capability_manifest
+    ) -> "CapabilitySpecValidationResult":
+        """Validate a capability specification through the capability gate before registration.
+
+        This is the M8-T5 capability security gate entry point. Per architecture:
+        - Runs BEFORE capability registration
+        - Performs static/local checks ONLY
+        - Validates: trust/authority non-escalation, adapter allowlist, manifest integrity,
+          operation/security context constraints, no authority claims
+        - Capability gate is an INTEGRATION FILTER, not final authority
+        - AI-OS SecurityManager remains the final authority on registration
+        - Fail closed where security is concerned
+
+        Args:
+            spec: CapabilitySpec to validate
+
+        Returns:
+            CapabilitySpecValidationResult with pass/fail, violations, and metadata
+
+        Emits:
+            SECURITY_ISSUE_FOUND events for any high/critical violations found
+        """
+        import time
+        import uuid
+
+        scan_id = str(uuid.uuid4())[:16]
+        start_time = time.time()
+        violations: list[SecurityViolation] = []
+
+        self._log_debug(f"CapabilitySpec validation started: {scan_id}")
+
+        # 1. Validate trust_level cannot claim builtin/trusted (external manifest)
+        trust_level = getattr(spec, "trust_level", "untrusted")
+        if trust_level in ("builtin", "trusted"):
+            violations.append(SecurityViolation(
+                violation_id=str(uuid.uuid4()),
+                severity="critical",
+                description=f"External capability cannot claim trust_level={trust_level}",
+                category="capability_validation",
+                context={"field": "trust_level", "value": trust_level, "spec_id": getattr(spec, "capability_id", "unknown")},
+            ))
+
+        # 2. Validate authority_classification cannot claim authoritative
+        authority_classification = getattr(spec, "authority_classification", "advisory")
+        if authority_classification == "authoritative":
+            violations.append(SecurityViolation(
+                violation_id=str(uuid.uuid4()),
+                severity="critical",
+                description="External capability cannot claim authority_classification=authoritative",
+                category="capability_validation",
+                context={"field": "authority_classification", "value": authority_classification, "spec_id": getattr(spec, "capability_id", "unknown")},
+            ))
+
+        # 3. Validate adapter class_path against allowlist (delegated to AdapterFactory)
+        adapter_class_path = getattr(spec, "adapter_class_path", "")
+        if not adapter_class_path:
+            violations.append(SecurityViolation(
+                violation_id=str(uuid.uuid4()),
+                severity="high",
+                description="Capability missing adapter_class_path",
+                category="capability_validation",
+                context={"field": "adapter_class_path", "issue": "missing", "spec_id": getattr(spec, "capability_id", "unknown")},
+            ))
+
+        # 4. Validate allowed_operations are reasonable
+        allowed_operations = getattr(spec, "allowed_operations", ())
+        if not isinstance(allowed_operations, (list, tuple)):
+            violations.append(SecurityViolation(
+                violation_id=str(uuid.uuid4()),
+                severity="medium",
+                description="allowed_operations must be a list or tuple",
+                category="capability_validation",
+                context={"field": "allowed_operations", "issue": "invalid_type", "spec_id": getattr(spec, "capability_id", "unknown")},
+            ))
+
+        # 5. Validate sensitive_keys are reasonable
+        sensitive_keys = getattr(spec, "sensitive_keys", ())
+        if not isinstance(sensitive_keys, (list, tuple)):
+            violations.append(SecurityViolation(
+                violation_id=str(uuid.uuid4()),
+                severity="medium",
+                description="sensitive_keys must be a list or tuple",
+                category="capability_validation",
+                context={"field": "sensitive_keys", "issue": "invalid_type", "spec_id": getattr(spec, "capability_id", "unknown")},
+            ))
+
+        # 6. Validate max_content_size is reasonable
+        max_content_size = getattr(spec, "max_content_size", 10240)
+        if not isinstance(max_content_size, int) or max_content_size <= 0 or max_content_size > 10485760:  # 10MB max
+            violations.append(SecurityViolation(
+                violation_id=str(uuid.uuid4()),
+                severity="medium",
+                description=f"max_content_size must be a positive integer <= 10MB: {max_content_size}",
+                category="capability_validation",
+                context={"field": "max_content_size", "value": max_content_size, "spec_id": getattr(spec, "capability_id", "unknown")},
+            ))
+
+        # 7. Validate capability_id format (no path traversal, no special chars)
+        capability_id = getattr(spec, "capability_id", "")
+        if not capability_id:
+            violations.append(SecurityViolation(
+                violation_id=str(uuid.uuid4()),
+                severity="high",
+                description="Capability missing capability_id",
+                category="capability_validation",
+                context={"field": "capability_id", "issue": "missing"},
+            ))
+        elif ".." in capability_id or capability_id.startswith("/") or capability_id.startswith("\\"):
+            violations.append(SecurityViolation(
+                violation_id=str(uuid.uuid4()),
+                severity="critical",
+                description=f"Path traversal in capability_id: {capability_id}",
+                category="capability_validation",
+                context={"field": "capability_id", "value": capability_id},
+            ))
+
+        # 8. Validate facade and provider_id
+        facade = getattr(spec, "facade", "")
+        provider_id = getattr(spec, "provider_id", "")
+        if not facade:
+            violations.append(SecurityViolation(
+                violation_id=str(uuid.uuid4()),
+                severity="high",
+                description="Capability missing facade",
+                category="capability_validation",
+                context={"field": "facade", "issue": "missing", "spec_id": capability_id},
+            ))
+        if not provider_id:
+            violations.append(SecurityViolation(
+                violation_id=str(uuid.uuid4()),
+                severity="high",
+                description="Capability missing provider_id",
+                category="capability_validation",
+                context={"field": "provider_id", "issue": "missing", "spec_id": capability_id},
+            ))
+
+        scan_duration_ms = int((time.time() - start_time) * 1000)
+        passed = len([v for v in violations if v.severity in ("high", "critical")]) == 0
+
+        # Emit SECURITY_ISSUE_FOUND for any high/critical violations (audit trail)
+        for violation in violations:
+            if violation.severity in ("high", "critical"):
+                self.record_violation(
+                    severity=violation.severity,
+                    description=f"CapabilitySpec gate: {violation.description}",
+                    category="capability_registration_gate",
+                    context={
+                        "scan_id": scan_id,
+                        "duration_ms": scan_duration_ms,
+                        "capability_id": capability_id,
+                        **violation.context,
+                    },
+                )
+
+        self._log_info(
+            f"CapabilitySpec validation: capability={capability_id}, "
+            f"passed={passed}, violations={len(violations)}, "
+            f"duration_ms={scan_duration_ms}"
+        )
+
+        return CapabilitySpecValidationResult(
+            passed=passed,
+            violations=violations,
+            scan_duration_ms=scan_duration_ms,
+            scan_id=scan_id,
+        )
 
     # ------------------------------------------------------------------
     # Event emission (canonical EventTypes only; CONFLICT E.1)

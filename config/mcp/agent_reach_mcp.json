@@ -14,6 +14,7 @@
   "auto_reconnect": true,
   "max_retries": 3,
   "metadata": {
-    "description": "Agent-Reach web/social content ingestion MCP server (mock for testing)"
+    "description": "Agent-Reach web/social content ingestion MCP server (mock for testing)",
+    "integration_mode": "mock"
   }
 }

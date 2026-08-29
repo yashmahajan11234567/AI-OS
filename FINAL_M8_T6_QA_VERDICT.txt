@@ -1,0 +1,7 @@
+VERDICT: NO-GO — M8-T6 NOT VERIFIED
+TEST RESULTS: 128 M8-T6 tests collected, 0 failures (5 intentional xfail encoding D-03..D-06 write-path gap)
+P0/P1 COUNT: 2 (D-01 and D-02 are both P0/Critical)
+CONFIRMED BLOCKERS:
+- D-01: Kernel never assigns _mcp_manager; adapters' _connected flag never set on boot → production call path unusable without manual injection
+- D-02: UserSimulationAgent.simulate() calls self._bridge._create_session_id() which does not exist on production HermesBridge → AttributeError
+M8-T7 READINESS: NO - Blocked until D-01 and D-02 are resolved

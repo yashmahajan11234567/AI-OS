@@ -1,0 +1,35 @@
+capability_id: "obsidian_git_knowledge"
+facade: "knowledge"
+provider_id: "obsidian_git"
+adapter:
+  class_path: "aios.adapters.obsidian_git_adapter.ObsidianGitAdapter"
+  kwargs:
+    server_id: "obsidian_git"
+transport: "mcp"
+version: "1.0.0"
+trust_level: "trusted_contextual"
+authority_classification: "contextual"
+allowed_operations:
+  - "create_knowledge"
+  - "update_knowledge"
+  - "get_knowledge"
+  - "delete_knowledge"
+  - "verify_integrity"
+sensitive_keys:
+  - "password"
+  - "token"
+  - "secret"
+  - "api_key"
+  - "authorization"
+  - "credential"
+  - "private_key"
+max_content_size: 102400
+tags:
+  - "knowledge"
+  - "obsidian"
+  - "git"
+  - "durability"
+dependencies: []
+real_mode_env:
+  - "OBSIDIAN_VAULT_PATH"
+  - "OBSIDIAN_GIT_REMOTE_URL"

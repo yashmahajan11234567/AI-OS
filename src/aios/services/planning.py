@@ -77,6 +77,8 @@ class PlanningService(BaseService):
                 "plan_id": plan["plan_id"],
                 "steps": plan["steps"],
                 "resources": plan["resources"],
+                # M9-N3: advisory learning refs only — never directives.
+                "advisory_context": plan.get("advisory_context", {}),
             },
             correlation_id=correlation_id,
             causation_id=correlation_id,
@@ -138,6 +140,11 @@ class PlanningService(BaseService):
         This is a deterministic planner suitable for tests and demos; it
         emits the canonical SDLC sequence so the Workflow Manager can drive
         the pipeline through events.
+
+        M9-N3 (spec §11.3): relevant learnings are attached as
+        ``advisory_context`` — advisory input only. They NEVER override
+        Council/Judge authority or alter plan semantics; when no learning
+        service is bound (minimal kernels) planning proceeds unchanged.
         """
         task_id = request.get("task_id", f"task_{uuid4().hex[:8]}")
         goal = request.get("goal") or request.get("description") or "undefined"
@@ -148,6 +155,32 @@ class PlanningService(BaseService):
             "goal": goal,
             "steps": list(steps),
             "resources": request.get("resources", {}),
+            "advisory_context": self._collect_advisory_context(goal),
+        }
+
+    def _collect_advisory_context(self, objective: str) -> dict[str, Any]:
+        """Gather advisory learnings for an objective (M9-N3).
+
+        Guarded: the global LearningService may be absent in minimal kernels,
+        and any retrieval failure must never block planning. The result is a
+        plain payload field — consumers treat it as advisory context, not as
+        instructions or verdicts (M9 §16 authority boundaries).
+        """
+        try:
+            from aios.services.learning import get_learning_service
+
+            service = get_learning_service()
+        except RuntimeError:
+            return {}
+        try:
+            learnings = service.query_relevant(objective, limit=5)
+        except Exception as exc:  # noqa: BLE001 — advisory must not block planning
+            logger.warning("Advisory learning retrieval failed (ignored): %s", exc)
+            return {}
+        return {
+            "learnings": learnings,
+            "source": "learning_service",
+            "advisory": True,
         }
 
 

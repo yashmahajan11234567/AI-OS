@@ -1,0 +1,192 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>AI-OS Dashboard — Read-Only UI (Non-Authoritative)</title>
+<style>
+  :root {
+    --bg: #0d1117; --panel: #161b22; --border: #30363d; --text: #c9d1d9;
+    --muted: #8b949e; --accent: #2f81f7; --ok: #3fb950; --warn: #d29922; --bad: #f85149;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; font-family: -apple-system, Segoe UI, Roboto, sans-serif; background: var(--bg); color: var(--text); }
+  header { padding: 12px 18px; border-bottom: 1px solid var(--border); display: flex; align-items: center; gap: 16px; }
+  header .badge { font-size: 12px; padding: 3px 8px; border: 1px solid var(--warn); color: var(--warn); border-radius: 6px; }
+  nav { display: flex; gap: 4px; padding: 8px 18px; border-bottom: 1px solid var(--border); flex-wrap: wrap; }
+  nav button { background: var(--panel); color: var(--text); border: 1px solid var(--border); padding: 7px 12px; border-radius: 6px; cursor: pointer; }
+  nav button.active { border-color: var(--accent); color: var(--accent); }
+  main { padding: 18px; }
+  .page { display: none; }
+  .page.active { display: block; }
+  .card { background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 14px; margin-bottom: 14px; }
+  .card h3 { margin: 0 0 10px; font-size: 14px; color: var(--accent); }
+  .row { display: flex; justify-content: space-between; padding: 4px 0; border-bottom: 1px dashed var(--border); font-size: 13px; }
+  .row:last-child { border-bottom: none; }
+  .k { color: var(--muted); } .v { color: var(--text); text-align: right; max-width: 60%; word-break: break-word; }
+  .ok { color: var(--ok); } .warn { color: var(--warn); } .bad { color: var(--bad); }
+  .pill { display: inline-block; font-size: 11px; padding: 2px 7px; border-radius: 10px; border: 1px solid var(--border); }
+  .json { white-space: pre-wrap; font-family: monospace; font-size: 12px; color: var(--muted); max-height: 280px; overflow: auto; }
+  button.action { background: var(--accent); color: #fff; border: none; padding: 6px 12px; border-radius: 6px; cursor: pointer; margin-right: 6px; }
+  button.action:disabled { opacity: .5; cursor: not-allowed; }
+  .note { font-size: 12px; color: var(--muted); margin-bottom: 12px; }
+  .phase-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 6px; }
+  .phase { font-size: 12px; padding: 6px 8px; border-radius: 6px; border: 1px solid var(--border); background: var(--bg); }
+  .phase.done { border-color: var(--ok); color: var(--ok); }
+  .phase.pending { color: var(--muted); }
+  #toast { position: fixed; bottom: 16px; right: 16px; background: var(--panel); border: 1px solid var(--border); padding: 10px 14px; border-radius: 8px; display: none; max-width: 360px; font-size: 13px; }
+</style>
+</head>
+<body>
+<header>
+  <strong>AI-OS Dashboard</strong>
+  <span class="badge">READ-ONLY · NON-AUTHORITATIVE</span>
+  <span class="note" style="margin:0">AI-OS (Terminal 1) is the sole governance, verification &amp; decision authority. This UI only visualizes state and forwards authorized actions.</span>
+</header>
+<nav>
+  <button data-page="planning_chat" class="active">1 · Planning Chat</button>
+  <button data-page="resource_onboarding">2 · Resource Onboarding</button>
+  <button data-page="project_execution">3 · Project / Execution</button>
+  <button data-page="knowledge_history">4 · Knowledge / History</button>
+  <button data-page="system_health">5 · System / Health</button>
+</nav>
+<main>
+  <div class="note" id="meta"></div>
+
+  <section class="page active" id="page-planning_chat"></section>
+  <section class="page" id="page-resource_onboarding"></section>
+  <section class="page" id="page-project_execution"></section>
+  <section class="page" id="page-knowledge_history"></section>
+  <section class="page" id="page-system_health"></section>
+</main>
+<div id="toast"></div>
+
+<script>
+const API_PAGES = "/api/pages";
+const API_ACTION = "/api/action";
+let DATA = null;
+
+function kv(k, v, cls) {
+  return `<div class="row"><span class="k">${k}</span><span class="v ${cls||''}">${escapeHtml(String(v))}</span></div>`;
+}
+function card(title, html) { return `<div class="card"><h3>${title}</h3>${html}</div>`; }
+function escapeHtml(s){return s.replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
+function toast(msg, ok){ const t=document.getElementById('toast'); t.textContent=msg; t.style.borderColor=ok?'var(--ok)':'var(--bad)'; t.style.display='block'; setTimeout(()=>t.style.display='none',4000); }
+
+async function load() {
+  const res = await fetch(API_PAGES);
+  DATA = await res.json();
+  render();
+}
+function render() {
+  const gen = DATA.generated_at;
+  document.getElementById('meta').textContent =
+    `Snapshot @ ${gen} · authority model: ${DATA.authority_model}`;
+  renderPlanning();
+  renderOnboarding();
+  renderExecution();
+  renderKnowledge();
+  renderHealth();
+}
+
+function renderPlanning() {
+  const p = DATA.pages.planning_chat;
+  const sl = p.self_loop || {};
+  let html = card("Self-Loop Engine (authoritative autonomous loop)",
+    kv("running", sl.running) + kv("paused", sl.paused) + kv("mock_mode", sl.mock_mode)
+    + kv("cycle_count", sl.cycle_count) + kv("current_cycle", sl.current_cycle||'-')
+    + kv("current_phase", sl.current_phase||'-'));
+  const gen = p.generator_config || {};
+  html += card("Self-Prompt Generator config",
+    kv("max_cycles", gen.max_cycles) + kv("max_depth", gen.max_depth) + kv("convergence_action", gen.convergence_action));
+  const ph = (p.phase_map||[]).map(x =>
+    `<div class="phase ${x.completed?'done':'pending'}">${x.phase}${x.completed?' ✓':''}</div>`).join('');
+  html += card("19-Phase Lifecycle", `<div class="phase-grid">${ph}</div>`);
+  const sp = p.last_self_prompt || {};
+  html += card("Last Self-Prompt (read-only)",
+    kv("action_type", sp.action_type||'-') + kv("target_systems", JSON.stringify(sp.target_systems||[]))
+    + kv("validation_status", sp.validation_status||'-'));
+  document.getElementById('page-planning_chat').innerHTML = html
+    + `<div class="card"><h3>Authorized actions</h3>
+       <button class="action" onclick="act('self_loop.control',{op:'pause'})">Pause loop</button>
+       <button class="action" onclick="act('self_loop.control',{op:'resume'})">Resume loop</button>
+       <button class="action" onclick="act('self_loop.control',{op:'stop'})">Stop loop</button>
+       <div class="note" style="margin-top:8px">These are forwarded to AI-OS and gated by SecurityManager (fail-closed).</div></div>`;
+}
+
+function renderOnboarding() {
+  const p = DATA.pages.resource_onboarding;
+  let html = card("Terminal-Contract Authority", p.all_bounded_resources
+      ? `<span class="pill ok">ALL RESOURCES BOUNDED</span>`
+      : `<span class="pill bad">VIOLATIONS DETECTED</span>`);
+  const integrations = (p.integrations||[]).map(i =>
+    card(i.name||'?', kv("state", i.state) + kv("mode", i.mode) + kv("authority_level", i.authority_level)
+      + kv("terminal", i.terminal) + kv("real_allowed", i.real_allowed)
+      + `<button class="action" onclick="act('integration.validate',{name:'${i.name}'})">Validate</button>`)
+  ).join('');
+  html += card("Integrations (onboarding status)", integrations || "<div class='note'>none</div>");
+  document.getElementById('page-resource_onboarding').innerHTML = html;
+}
+
+function renderExecution() {
+  const p = DATA.pages.project_execution;
+  const c = p.cycle || {};
+  let html = card("Active Cycle", kv("running", c.running) + kv("cycle_count", c.cycle_count) + kv("current_phase", c.current_phase||'-'));
+  const be = p.bounded_execution || {};
+  html += card("Bounded Execution", kv("success", be.success) + kv("error", be.error||'-') + kv("duration_ms", be.duration_ms));
+  const fr = p.failure_recovery || {};
+  html += card("Failure Recovery (AI-OS-authoritative)",
+    kv("records", fr.count) + kv("outcomes", JSON.stringify(fr.outcomes||{})));
+  const recs = (fr.records||[]).map(r =>
+    `<div class="row"><span class="k">${r.component}</span><span class="v">${r.outcome} · ${r.provenance_authority||'-'}</span></div>`).join('');
+  html += card("Recovery Records", recs || "<div class='note'>none</div>");
+  document.getElementById('page-project_execution').innerHTML = html;
+}
+
+function renderKnowledge() {
+  const p = DATA.pages.knowledge_history;
+  const adapters = Object.entries(p.adapters||{}).map(([n,a]) =>
+    card(n, kv("mode", a.mode) + kv("connected", a.connected) + kv("authority_level", a.authority_level) + kv("terminal", a.terminal))
+  ).join('');
+  let html = card("Durability / Persistence Adapters", adapters || "<div class='note'>none</div>");
+  html += card("Obsidian Git History (local only)",
+    `<div class="json">${escapeHtml(JSON.stringify(p.obsidian_git_history||[], null, 2))}</div>`);
+  document.getElementById('page-knowledge_history').innerHTML = html;
+}
+
+function renderHealth() {
+  const p = DATA.pages.system_health;
+  const ks = p.kernel_stats || {};
+  let html = card("Authority Preservation", p.authority_preserved
+      ? `<span class="pill ok">AI-OS SOLE AUTHORITY PRESERVED</span>`
+      : `<span class="pill bad">AUTHORITY ISSUE</span>`);
+  html += card("Kernel Stats", kv("running", ks.running) + kv("uptime_seconds", Math.round(ks.uptime_seconds||0))
+    + kv("services", ks.service_count) + kv("healthy_services", ks.healthy_services));
+  const viol = (p.terminal_contract_violations||[]).map(v => `<div class="row"><span class="k">violation</span><span class="v bad">${escapeHtml(v||'')}</span></div>`).join('');
+  html += card("Terminal-Contract Violations", viol || "<div class='note'>none</div>");
+  document.getElementById('page-system_health').innerHTML = html;
+}
+
+async function act(action, params) {
+  try {
+    const res = await fetch(API_ACTION, { method:"POST",
+      headers:{"Content-Type":"application/json"},
+      body: JSON.stringify({ action, params, principal:"dashboard_user" }) });
+    const out = await res.json();
+    toast(`[${action}] ${out.status} — ${out.detail||''}`, out.authorized || out.status==='completed');
+  } catch (e) { toast("action error: "+e, false); }
+  setTimeout(load, 600);
+}
+
+document.querySelectorAll('nav button').forEach(b => b.addEventListener('click', () => {
+  document.querySelectorAll('nav button').forEach(x=>x.classList.remove('active'));
+  document.querySelectorAll('.page').forEach(x=>x.classList.remove('active'));
+  b.classList.add('active');
+  document.getElementById('page-'+b.dataset.page).classList.add('active');
+}));
+
+load();
+setInterval(load, 5000);
+</script>
+</body>
+</html>

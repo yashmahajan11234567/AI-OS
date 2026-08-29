@@ -1,0 +1,32 @@
+capability_id: "n8n_execution"
+facade: "automation"
+provider_id: "n8n"
+adapter:
+  class_path: "aios.adapters.n8n_adapter.N8nAdapter"
+  kwargs:
+    server_id: "n8n"
+transport: "mcp"
+version: "1.0.0"
+trust_level: "trusted_contextual"
+authority_classification: "contextual"
+allowed_operations:
+  - "execute_workflow"
+sensitive_keys:
+  - "password"
+  - "token"
+  - "secret"
+  - "api_key"
+  - "authorization"
+  - "credential"
+  - "private_key"
+  - "n8n_api_key"
+max_content_size: 51200
+tags:
+  - "automation"
+  - "n8n"
+  - "workflow"
+  - "bounded-execution"
+dependencies: []
+real_mode_env:
+  - "N8N_BASE_URL"
+  - "N8N_API_KEY"

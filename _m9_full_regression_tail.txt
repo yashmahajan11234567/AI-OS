@@ -1,0 +1,40 @@
+﻿tests/unit/test_notion_adapter.py::test_rejects_secret_value_patterns
+tests/unit/test_notion_adapter.py::test_rejects_oversized_content
+  C:\Development\AI-OS\src\aios\adapters\notion_adapter.py:221: RuntimeWarning: coroutine 'AsyncMockMixin._execute_mock_call' was never awaited
+    await self._discover_tools()
+  Enable tracemalloc to get traceback where the object was allocated.
+  See https://docs.pytest.org/en/stable/how-to/capture-warnings.html#resource-warnings for more info.
+
+tests/unit/test_playwright_mcp_adapter.py::test_capability_registered
+  C:\Development\AI-OS\tests\unit\test_playwright_mcp_adapter.py:511: RuntimeWarning: coroutine 'CapabilityManager.shutdown' was never awaited
+    cap_mgr.shutdown()
+  Enable tracemalloc to get traceback where the object was allocated.
+  See https://docs.pytest.org/en/stable/how-to/capture-warnings.html#resource-warnings for more info.
+
+tests/unit/test_playwright_session.py::test_stale_session_cleanup
+  C:\Development\AI-OS\tests\unit\test_playwright_session.py:91: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    registry._sessions[session_id]["last_used"] = datetime.utcnow() - timedelta(hours=1)
+
+tests/unit/test_playwright_session.py::test_stale_session_cleanup
+  C:\Development\AI-OS\src\aios\adapters\playwright_session.py:107: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    now = datetime.utcnow()
+
+tests/unit/test_task12_critical_acceptance.py: 4 warnings
+tests/unit/test_task12_health_manager.py: 20 warnings
+tests/unit/test_task14_15_critical_acceptance.py: 1 warning
+  <string>:5: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+
+tests/unit/test_task13_resource_manager.py::test_business_api_cleanup_expired
+  C:\Development\AI-OS\src\aios\core\resource_manager.py:772: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    expires_at = datetime.utcnow() + timedelta(seconds=ttl_seconds)
+
+tests/unit/test_task15_workflow_manager.py::test_pause_workflow_emits_paused
+  C:\Development\AI-OS\src\aios\core\workflow.py:1148: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    state["paused_at"] = datetime.utcnow().isoformat()
+
+tests/unit/test_task15_workflow_manager.py::test_resume_workflow_emits_resumed
+  C:\Development\AI-OS\src\aios\core\workflow.py:1177: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    state["resumed_at"] = datetime.utcnow().isoformat()
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+1707 passed, 2 skipped, 5611 warnings in 861.84s (0:14:21)

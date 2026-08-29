@@ -1,0 +1,20 @@
+{
+  "server_id": "obsidian",
+  "name": "Obsidian",
+  "transport": "stdio",
+  "command": [
+    "python",
+    "-m",
+    "aios.adapters.mock_obsidian_server"
+  ],
+  "url": null,
+  "env": {},
+  "headers": {},
+  "timeout_seconds": 30,
+  "auto_reconnect": true,
+  "max_retries": 3,
+  "metadata": {
+    "description": "Obsidian knowledge MCP server (mock for testing)",
+    "integration_mode": "mock"
+  }
+}

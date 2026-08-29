@@ -117,7 +117,6 @@ class LearningService(BaseService):
         the analysis phase, before the actual resolution is implemented.
         """
         logger.info(f"LearningService.capture_learning_from_analysis called with analysis_id={analysis_id}")
-        print(f"LEARNING SERVICE: capture_learning_from_analysis called with analysis_id={analysis_id}")
         learning = {
             "learning_id": f"learn_{uuid4().hex[:8]}",
             "type": "failure_resolution",
@@ -130,7 +129,6 @@ class LearningService(BaseService):
         }
         self._learnings.append(learning)
         logger.info(f"LearningService added learning, total learnings: {len(self._learnings)}")
-        print(f"LEARNING SERVICE: Added learning, total learnings: {len(self._learnings)}")
         await self._emit_legacy_event(
             LearningCaptured(
                 source_service=self.name,
@@ -140,10 +138,92 @@ class LearningService(BaseService):
             )
         )
         logger.info(f"LearningService emitted LearningCaptured event")
-        print(f"LEARNING SERVICE: Emitted LearningCaptured event")
 
     def stats(self) -> dict[str, Any]:
         return {"learnings_captured": len(self._learnings)}
+
+    # ------------------------------------------------------------------
+    # M9-N2 (spec §11.2) — retrieval API (GAP-B closure)
+    # ------------------------------------------------------------------
+
+    def get_learnings(
+        self,
+        *,
+        failure_category: str | None = None,
+        analysis_id: str | None = None,
+        limit: int = 50,
+        since: float | None = None,
+    ) -> list[dict[str, Any]]:
+        """Retrieve stored learnings, filtered and newest-first.
+
+        Returns **shallow copies** so callers cannot mutate the store. All
+        filters are optional and composable:
+
+        * ``failure_category`` — exact match on the captured category
+          (records captured via ``handle_root_cause_resolved`` carry no
+          category and are returned only by unfiltered queries).
+        * ``analysis_id`` — exact match on the originating RCA analysis.
+        * ``since`` — epoch seconds lower bound on ``captured_at``.
+        * ``limit`` — max records returned (newest first).
+        """
+        if limit <= 0:
+            return []
+        results: list[dict[str, Any]] = []
+        for learning in reversed(self._learnings):  # newest first
+            if failure_category is not None and (
+                learning.get("failure_category") != failure_category
+            ):
+                continue
+            if analysis_id is not None and (
+                learning.get("analysis_id") != analysis_id
+            ):
+                continue
+            if since is not None and learning.get("captured_at", 0) < since:
+                continue
+            results.append(dict(learning))
+            if len(results) >= limit:
+                break
+        return results
+
+    def query_relevant(self, objective: str, limit: int = 5) -> list[dict[str, Any]]:
+        """Keyword/recency relevance match for an objective (spec §11.2).
+
+        Deliberately simple — token overlap scored with a recency tiebreak.
+        No ML/embeddings (M10+ scope per spec §3). Returns shallow copies,
+        best-match first, at most ``limit`` records.
+        """
+        if limit <= 0:
+            return []
+        tokens = _tokenize(objective)
+        if not tokens:
+            return []
+
+        def _score(learning: dict[str, Any]) -> tuple[float, float]:
+            haystack = " ".join(
+                str(learning.get(field, ""))
+                for field in (
+                    "root_cause",
+                    "resolution",
+                    "failure_category",
+                    "type",
+                )
+            )
+            words = set(_tokenize(haystack))
+            overlap = len(tokens & words)
+            # Recency tiebreak: newer captures win equal-overlap comparisons.
+            return (float(overlap), float(learning.get("captured_at", 0)))
+
+        scored = [(_score(l), l) for l in self._learnings]
+        scored = [(s, l) for s, l in scored if s[0] > 0]
+        scored.sort(key=lambda pair: pair[0], reverse=True)
+        return [dict(learning) for _, learning in scored[:limit]]
+
+
+def _tokenize(text: str) -> set[str]:
+    """Lowercase word tokens of length >= 3 (drops stopwords-ish noise)."""
+    import re
+
+    return {t for t in re.findall(r"[a-z0-9_]+", text.lower()) if len(t) >= 3}
 
 
 _learning_service_instance: LearningService | None = None
@@ -162,4 +242,10 @@ def get_learning_service() -> LearningService:
     return _learning_service_instance
 
 
-__all__ = ["LearningService", "set_learning_service_instance", "get_learning_service"]
+__all__ = [
+    "LearningService",
+    "set_learning_service_instance",
+    "get_learning_service",
+    "get_learnings",
+    "query_relevant",
+]

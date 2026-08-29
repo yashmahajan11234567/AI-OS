@@ -1,0 +1,32 @@
+capability_id: "notion_planning"
+facade: "planning"
+provider_id: "notion"
+adapter:
+  class_path: "aios.adapters.notion_adapter.NotionAdapter"
+  kwargs:
+    server_id: "notion"
+transport: "mcp"
+version: "1.0.0"
+trust_level: "trusted_contextual"
+authority_classification: "contextual"
+allowed_operations:
+  - "search_pages"
+  - "get_page"
+  - "create_page"
+  - "update_page"
+  - "query_database"
+sensitive_keys:
+  - "password"
+  - "token"
+  - "secret"
+  - "api_key"
+  - "authorization"
+  - "credential"
+  - "private_key"
+max_content_size: 10240
+tags:
+  - "planning"
+  - "notion"
+  - "project-tracking"
+  - "tasks"
+dependencies: []

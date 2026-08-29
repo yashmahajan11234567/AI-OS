@@ -14,6 +14,7 @@
   "auto_reconnect": true,
   "max_retries": 3,
   "metadata": {
-    "description": "Graphify knowledge graph MCP server (mock for testing)"
+    "description": "Graphify knowledge graph MCP server (mock for testing)",
+    "integration_mode": "mock"
   }
 }

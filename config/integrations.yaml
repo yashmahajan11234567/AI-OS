@@ -1,0 +1,113 @@
+# =============================================================================
+# AI-OS — External Ecosystem Integration Modes (PHASE 2 configuration framework)
+# =============================================================================
+#
+# This file is the SINGLE SOURCE OF TRUTH for whether each external integration
+# is permitted to perform REAL external operations vs MOCK (simulated) execution.
+#
+# FAIL-CLOSED DEFAULTS:
+#   - Every integration defaults to `mode: mock` (no live external call).
+#   - Even when `mode: real`, a connection is still blocked unless:
+#       (a) requires_user_resource is satisfied (the user has supplied the
+#           external resource — vault path, API credentials, subprocess repo,
+#           browser install, etc.), and
+#       (b) for gated integrations (real_gated: true, the default), the
+#           environment variable AIOS_REAL_INTEGRATION_ENABLED=1 is set
+#           (used by gated real-operational tests in PHASE 6).
+#
+# IMPORTANT — USER RESPONSIBILITY:
+#   Terminal 2 NEVER fabricates connectivity. To move an integration from
+#   CONFIGURED(mock) to CONNECTED/OPERATIONALLY VERIFIED you must:
+#     1. Set `mode: real` for that integration below.
+#     2. Provide the required external resource (see FINAL_EXTERNAL_INTEGRATION_
+#        USER_CHECKLIST.md) and set `user_resource_present: true` ONLY after you
+#        have verified it is actually present in this environment.
+#     3. Run the corresponding gated operational test with the env gate enabled.
+#
+# Do NOT set `user_resource_present: true` for integrations you have not
+# personally verified. Absent user resources are reported as ABSENT, never
+# silently upgraded to present.
+# =============================================================================
+
+integrations:
+  # --- EXECUTION -------------------------------------------------------------
+  hermes_agent_acp:
+    mode: mock
+    real_gated: true
+    requires_user_resource: true
+    user_resource_present: false   # hermes-agent repo + acp_adapter.entry.py not located/verified
+    notes: "ACP preferred worker path; needs hermes-agent subprocess (user resource)."
+
+  hermes_agent_ext:
+    mode: mock
+    real_gated: true
+    requires_user_resource: true
+    user_resource_present: false   # hermes-agent MCP server not located/verified
+    notes: "MCP fallback worker path; mock server used until user provides real one."
+
+  playwright_mcp:
+    mode: mock
+    real_gated: true
+    requires_user_resource: true
+    user_resource_present: false   # @playwright/mcp + browser not installed/verified
+    notes: "@playwright/mcp + browser required for real browser automation."
+
+  # --- KNOWLEDGE -------------------------------------------------------------
+  obsidian:
+    mode: mock
+    real_gated: true
+    requires_user_resource: true
+    user_resource_present: false   # real vault path not provided/verified
+    notes: "Hybrid MCP/filesystem; real vault path required."
+
+  graphify:
+    mode: mock
+    real_gated: true
+    requires_user_resource: true
+    user_resource_present: false   # real GraphifyBackend not provided/verified
+    notes: "Derived knowledge graph; never authoritative."
+
+  claude_mem:
+    mode: mock
+    real_gated: true
+    requires_user_resource: true
+    user_resource_present: false   # real Claude-Mem service not provided/verified
+    notes: "Contextual retrieval; advisory only."
+
+  # --- PLANNING --------------------------------------------------------------
+  notion:
+    mode: mock
+    real_gated: true
+    requires_user_resource: true
+    user_resource_present: false   # Notion API token not provided/verified
+    notes: "Planning advisory only; Notion API token required."
+
+  # --- COMMUNICATION ---------------------------------------------------------
+  agent_reach:
+    mode: mock
+    real_gated: true
+    requires_user_resource: false
+    user_resource_present: false
+    notes: "Agent communication protocol; registered-capability only."
+
+  # --- MODEL INFRASTRUCTURE --------------------------------------------------
+  freellmapi:
+    mode: mock
+    real_gated: true
+    requires_user_resource: true
+    user_resource_present: false   # FREELLM_* env vars not provided/verified
+    notes: "Local LLM provider; dev/test only; requires FREELLM_* env vars."
+
+  anthropic:
+    mode: real
+    real_gated: false
+    requires_user_resource: true
+    user_resource_present: false   # API key presence is checked at runtime by ModelRouter
+    notes: "Standard provider; API key required at runtime (checked by ModelRouter)."
+
+  openai:
+    mode: real
+    real_gated: false
+    requires_user_resource: true
+    user_resource_present: false   # API key presence is checked at runtime by ModelRouter
+    notes: "Standard provider; API key required at runtime (checked by ModelRouter)."

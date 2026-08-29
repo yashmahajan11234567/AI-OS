@@ -1,0 +1,1 @@
+{"key": "checkpoint/exec_7b13cb6d42c7", "value": {"checkpoint_id": "checkpoint_exec_7b13cb6d42c7_step_1_9059f4cb", "step": null, "tags": []}, "memory_type": "working", "tags": ["checkpoint"], "metadata": {"kind": "checkpoint"}, "created_at": "2026-08-26T19:00:33.093949", "updated_at": "2026-08-26T19:00:33.093949", "access_count": 0, "expires_at": null}

@@ -1,0 +1,31 @@
+capability_id: "obsidian_knowledge"
+facade: "knowledge"
+provider_id: "obsidian"
+adapter:
+  class_path: "aios.adapters.obsidian_adapter.ObsidianAdapter"
+  kwargs:
+    server_id: "obsidian"
+transport: "mcp"
+version: "1.0.0"
+trust_level: "trusted_contextual"
+authority_classification: "contextual"
+allowed_operations:
+  - "search_notes"
+  - "get_note"
+  - "list_notes"
+  - "read_note"
+sensitive_keys:
+  - "password"
+  - "token"
+  - "secret"
+  - "api_key"
+  - "authorization"
+  - "credential"
+  - "private_key"
+max_content_size: 10240
+tags:
+  - "knowledge"
+  - "obsidian"
+  - "documentation"
+  - "persistent"
+dependencies: []

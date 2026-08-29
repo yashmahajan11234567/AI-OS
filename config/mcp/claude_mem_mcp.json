@@ -1,0 +1,20 @@
+{
+  "server_id": "claude_mem",
+  "name": "Claude-Mem",
+  "transport": "stdio",
+  "command": [
+    "python",
+    "-m",
+    "aios.adapters.mock_claude_mem_server"
+  ],
+  "url": null,
+  "env": {},
+  "headers": {},
+  "timeout_seconds": 30,
+  "auto_reconnect": true,
+  "max_retries": 3,
+  "metadata": {
+    "description": "Claude-Mem context MCP server (mock for testing)",
+    "integration_mode": "mock"
+  }
+}

@@ -118,7 +118,7 @@ async def test_emit_throughput():
 async def test_memory_bounded_under_load():
     import os
 
-    import psutil  # type: ignore
+    psutil = pytest.importorskip("psutil")
 
     sl = _started_logger()
     await sl.initialize()

@@ -14,6 +14,7 @@
   "auto_reconnect": true,
   "max_retries": 3,
   "metadata": {
-    "description": "Hermes Agent External browser/worker MCP server (mock for testing)"
+    "description": "Hermes Agent External browser/worker MCP server (mock for testing)",
+    "integration_mode": "mock"
   }
 }

@@ -185,24 +185,35 @@ class TestingEvidence:
 
     # ---- serialization ----------------------------------------------------
     def to_dict(self) -> dict[str, Any]:
-        """Serialize to a JSON-compatible dict (deep-copied)."""
-        return {
-            "perspective": self.perspective,
-            "target": self.target,
-            "test_id": self.test_id,
-            "actions": copy.deepcopy(self.actions),
-            "observations": copy.deepcopy(self.observations),
-            "expected": self.expected,
-            "observed": self.observed,
-            "severity": self.severity,
-            "confidence": self.confidence,
-            "proof": list(self.proof),
-            "provenance": self.provenance.to_dict(),
-            "environment": copy.deepcopy(self.environment),
-            "timestamp": self.timestamp.isoformat(),
-            "reproducibility": self.reproducibility,
-            "verdict": self.verdict,
-        }
+        """Serialize to a JSON-compatible dict (deep-copied).
+
+        S4 (Terminal 2): evidence is the canonical artifact persisted to logs/
+        provenance stores, so secrets are redacted centrally here via
+        ``aios.security.secrets.redact_secrets``. The in-memory object is left
+        untouched; only the serialized form is scrubbed. Imports lazily to keep
+        this module importable without a running kernel.
+        """
+        from aios.security.secrets import redact_secrets
+
+        return redact_secrets(
+            {
+                "perspective": self.perspective,
+                "target": self.target,
+                "test_id": self.test_id,
+                "actions": copy.deepcopy(self.actions),
+                "observations": copy.deepcopy(self.observations),
+                "expected": self.expected,
+                "observed": self.observed,
+                "severity": self.severity,
+                "confidence": self.confidence,
+                "proof": list(self.proof),
+                "provenance": self.provenance.to_dict(),
+                "environment": copy.deepcopy(self.environment),
+                "timestamp": self.timestamp.isoformat(),
+                "reproducibility": self.reproducibility,
+                "verdict": self.verdict,
+            }
+        )
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "TestingEvidence":

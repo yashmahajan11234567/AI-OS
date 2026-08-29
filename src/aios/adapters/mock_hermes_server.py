@@ -144,6 +144,43 @@ class MockHermesServer:
                             "required": ["task"],
                         },
                     },
+                    {
+                        "name": "create_session",
+                        "description": "Create a new isolated worker session",
+                        "inputSchema": {
+                            "type": "object",
+                            "properties": {
+                                "session_id": {"type": "string"},
+                                "environment": {"type": "object", "default": {}},
+                            },
+                            "required": ["session_id"],
+                        },
+                    },
+                    {
+                        "name": "close_session",
+                        "description": "Close an existing worker session",
+                        "inputSchema": {
+                            "type": "object",
+                            "properties": {
+                                "session_id": {"type": "string"},
+                            },
+                            "required": ["session_id"],
+                        },
+                    },
+                    {
+                        "name": "execute_task",
+                        "description": "Execute a structured task on a worker session",
+                        "inputSchema": {
+                            "type": "object",
+                            "properties": {
+                                "session_id": {"type": "string"},
+                                "task_type": {"type": "string"},
+                                "description": {"type": "string"},
+                                "parameters": {"type": "object"},
+                            },
+                            "required": ["session_id", "task_type", "description", "parameters"],
+                        },
+                    },
                 ],
             },
         }
@@ -168,6 +205,12 @@ class MockHermesServer:
                 result = await self._browser_screenshot(arguments)
             elif tool_name == "worker_execute":
                 result = await self._worker_execute(arguments)
+            elif tool_name == "create_session":
+                result = await self._create_session(arguments)
+            elif tool_name == "close_session":
+                result = await self._close_session(arguments)
+            elif tool_name == "execute_task":
+                result = await self._execute_task(arguments)
             else:
                 return {
                     "jsonrpc": "2.0",
@@ -296,6 +339,60 @@ class MockHermesServer:
             "result": f"Worker completed task: {task}",
             "status": "completed",
             "output": {"summary": f"Mock worker output for: {task}"},
+        }
+
+    async def _create_session(self, args: dict[str, Any]) -> dict[str, Any]:
+        """Mock create session."""
+        session_id = args.get("session_id", "")
+        environment = args.get("environment", {})
+
+        if session_id not in self._sessions:
+            self._sessions[session_id] = {"url": "", "history": [], "environment": environment}
+
+        self._sessions[session_id]["history"].append(
+            {"action": "create_session", "environment": environment, "timestamp": datetime.utcnow().isoformat()}
+        )
+
+        return {
+            "success": True,
+            "session_id": session_id,
+            "environment": environment,
+        }
+
+    async def _close_session(self, args: dict[str, Any]) -> dict[str, Any]:
+        """Mock close session."""
+        session_id = args.get("session_id", "")
+
+        if session_id in self._sessions:
+            self._sessions[session_id]["history"].append(
+                {"action": "close_session", "timestamp": datetime.utcnow().isoformat()}
+            )
+            return {"success": True, "session_id": session_id}
+        else:
+            return {"success": False, "error": f"Session {session_id} not found"}
+
+    async def _execute_task(self, args: dict[str, Any]) -> dict[str, Any]:
+        """Mock execute structured task."""
+        session_id = args.get("session_id", "")
+        task_type = args.get("task_type", "")
+        description = args.get("description", "")
+        parameters = args.get("parameters", {})
+
+        if session_id not in self._sessions:
+            self._sessions[session_id] = {"url": "", "history": []}
+
+        self._sessions[session_id]["history"].append(
+            {"action": "execute_task", "task_type": task_type, "description": description,
+             "parameters": parameters, "timestamp": datetime.utcnow().isoformat()}
+        )
+
+        return {
+            "success": True,
+            "session_id": session_id,
+            "task_type": task_type,
+            "description": description,
+            "result": f"Executed {task_type}: {description}",
+            "output": {"summary": f"Mock execution result for {task_type}"},
         }
 
 

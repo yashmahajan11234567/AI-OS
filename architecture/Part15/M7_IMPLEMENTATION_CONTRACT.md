@@ -30,7 +30,7 @@ M7 delivers the complete V2 multi-perspective testing and user simulation realiz
 | **M7-G** | `FinalJudgeAgency` verdict | MUST IMPLEMENT | Independent APPROVE/REJECT/CONDITIONAL verdict |
 | **M7-H** | Adversarial/Security | MUST IMPLEMENT | SkillSpecTor gate + Trail of Bits + agency-agents pentester |
 | **M7-I** | Closed-loop integration | MUST IMPLEMENT | FAIL→RCA→Learning→Replan→Re-execute→Retest (reuses M3/M6) |
-| **M7-J** | `SimplificationGate` + seeded defects | MUST IMPLEMENT | Pre-acceptance complexity gate; 9 seeded defects detected; 12/12 gates |
+| **M7-J** | `SimplificationGate` + seeded defects | MUST IMPLEMENT | Pre-acceptance complexity gate; 9 seeded defects detected; all 17 acceptance criteria pass |
 
 ### 2.2 Dependencies on Prior Milestones
 
@@ -683,7 +683,7 @@ M7 is accepted when ALL of the following are true:
 | 5 | Failed test enters closed loop | `test_m7_closed_loop.py` — FAIL→RCA→PASS cycle |
 | 6 | Corrected implementation is retested | Retest coordination in `TestOrchestratorService` |
 | 7 | System eventually reaches verified PASS | Closed-loop bounded convergence |
-| 8 | 12/12 gates pass | `SimplificationGate` + all security/verification gates |
+| 8 | All 17 acceptance criteria verified | SimplificationGate approval; all security/verification gates; closed-loop bounded |
 | 9 | All existing tests pass | 836 unit + 101 integration + 57 M6 dedicated |
 | 10 | `TestingEvidence` schema is machine-checkable | Serialization/deserialization tests |
 | 11 | `UserSimulationAgent` has no source code access | Constructor test; no source_code parameter |
@@ -857,9 +857,9 @@ members = [
 | ID | Conflict | Resolution |
 |----|----------|------------|
 | **C1** | "Hermes" naming collision (`HermesKernel` vs `hermes-agent`(EXT)) | BLOCKING — rename external to `hermes-agent`(EXT); rewrite INV-009 |
-| **C2** | Verification gate count (12/12 vs 11-layer) | Documentation-only — no `VerificationService` in src/ |
-| **C3** | Lifecycle state count (narrative 5 vs code 8) | Code truth = 8; correct narrative |
-| **C4** | Notion absent from repo | Adopt-or-drop decision required before M7 code |
+| **C2** | Verification gate count (12/12 vs 11-layer) | RESOLVED — replaced ambiguous "12/12 gates" with "all 17 acceptance criteria verified"; no `VerificationService` in src/ (gates exist in existing components) |
+| **C3** | Lifecycle state count (narrative 5 vs code 8) | RESOLVED — M12 updated 15.3 narrative to 8-state FSM (OPERATIONAL, DEGRADED, ROLLBACK_IN_PROGRESS, RECOVERY_IN_PROGRESS); code truth = 8 LifecycleState members |
+| **C4** | Notion absent from repo | RESOLVED — Notion adapter implemented in M8-T4; adopted as external integration via MCP bridge |
 | **R1** | Test execution unverified this session | Fresh `pytest` run required before M7 sign-off |
 
 ---

@@ -1,0 +1,36 @@
+capability_id: "supabase_persistence"
+facade: "persistence"
+provider_id: "supabase"
+adapter:
+  class_path: "aios.adapters.supabase_adapter.SupabaseAdapter"
+  kwargs:
+    server_id: "supabase"
+transport: "mcp"
+version: "1.0.0"
+trust_level: "trusted_contextual"
+authority_classification: "contextual"
+allowed_operations:
+  - "insert"
+  - "get"
+  - "update"
+  - "delete"
+  - "query"
+sensitive_keys:
+  - "password"
+  - "token"
+  - "secret"
+  - "api_key"
+  - "authorization"
+  - "credential"
+  - "private_key"
+  - "service_role_key"
+max_content_size: 102400
+tags:
+  - "persistence"
+  - "supabase"
+  - "storage"
+  - "durability"
+dependencies: []
+real_mode_env:
+  - "SUPABASE_URL"
+  - "SUPABASE_ANON_KEY"

@@ -38,6 +38,40 @@ class MCPTransport(str, Enum):
     WEBSOCKET = "websocket"
 
 
+def coerce_transport(value: Any) -> MCPTransport:
+    """Normalize a raw transport value into :class:`MCPTransport`.
+
+    M8-T7 DEF-01 root-cause fix: configuration files store ``transport`` as a
+    plain JSON string (``"stdio"``), but downstream consumers (the
+    SecurityManager ``MCPServerSecurityGate`` scan-id construction and
+    transport validators) access ``transport.value``, which crashes with
+    ``AttributeError`` when the value was never coerced to the enum.
+
+    This is the single production boundary where string transport values are
+    normalized:
+
+    - An existing :class:`MCPTransport` member is returned unchanged.
+    - A string matching an enum value exactly (e.g. ``"stdio"``) is coerced.
+    - Anything else raises ``ValueError`` — matching this module's existing
+      transport-error semantics — listing the valid values; no transport is
+      silently invented.
+    """
+    if isinstance(value, MCPTransport):
+        return value
+    if isinstance(value, str):
+        try:
+            return MCPTransport(value)
+        except ValueError:
+            valid = ", ".join(t.value for t in MCPTransport)
+            raise ValueError(
+                f"Invalid MCP transport {value!r}; expected one of: {valid}"
+            ) from None
+    raise ValueError(
+        f"Invalid MCP transport {value!r}: expected MCPTransport or str, "
+        f"got {type(value).__name__}"
+    )
+
+
 @dataclass
 class MCPServerConfig:
     """MCP server configuration."""
@@ -53,6 +87,13 @@ class MCPServerConfig:
     auto_reconnect: bool = True
     max_retries: int = 3
     metadata: dict[str, Any] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        # DEF-01 (M8-T7): every construction path — the JSON config loader,
+        # add_server(), and direct programmatic construction — flows through
+        # here, so string transports from config files become enum members
+        # before any downstream consumer expects enum semantics.
+        self.transport = coerce_transport(self.transport)
 
 
 @dataclass
@@ -208,6 +249,42 @@ class MCPManager:
             logger.info(f"Server {server_id} already connected")
             return True
 
+        # PHASE 2 (Terminal 2): fail-closed integration-mode enforcement.
+        # An MCP server configured `mode: real` must also satisfy the integration
+        # framework (user resource present + env gate) before any live connection.
+        # Mock servers are always allowed to connect (to their simulated endpoint).
+        # This prevents a misconfigured/ungated REAL connection from reaching a live
+        # external endpoint. The mode is read from the server config metadata; when
+        # absent the server is treated as mock (fail-closed).
+        try:
+            from aios.integrations import (
+                IntegrationMode,
+                assert_real_allowed,
+                load_integrations_config,
+            )
+
+            declared_mode = config.metadata.get("integration_mode", "mock")
+            if IntegrationMode.coerce(declared_mode) == IntegrationMode.REAL:
+                registry = load_integrations_config()
+                entry = registry.get(server_id)
+                if entry is None or entry.mode != IntegrationMode.REAL:
+                    # The framework default is mock unless explicitly promoted.
+                    logger.debug(
+                        f"MCP server {server_id} declares mode=real in metadata but "
+                        f"framework mode is mock; treating as mock (fail-closed)."
+                    )
+                else:
+                    assert_real_allowed(registry, server_id)
+        except RuntimeError as re_err:
+            status.last_error = str(re_err)
+            status.retry_count += 1
+            logger.error(f"MCP server {server_id} blocked by integration framework: {re_err}")
+            return False
+        except Exception:
+            # Integration framework unavailable — fall through to the security gate
+            # (which itself fails closed); never auto-promote to a real connection.
+            pass
+
         # M5: Gate-before-connect - validate server configuration through SecurityManager
         # before attempting any connection (C18: gate-before-connect)
         security_manager = get_security_manager()
@@ -313,12 +390,20 @@ class MCPManager:
         if not config.command:
             raise ValueError("STDIO transport requires command")
 
+        # Launch env: if the config declares no env, inherit the parent process
+        # environment instead of passing an empty dict. A subprocess started with
+        # ``env={}`` on Windows cannot find ``python`` / system DLLs and dies
+        # immediately; inheriting (default) keeps behaviour correct while the
+        # SecurityManager gate-before-connect (C18) still validates any env that
+        # IS supplied. This is the D-12 cross-platform hardening.
+        launch_env = config.env if config.env else None
+
         process = await asyncio.create_subprocess_exec(
             *config.command,
             stdin=asyncio.subprocess.PIPE,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
-            env=config.env,
+            env=launch_env,
         )
         self._processes[config.server_id] = process
 
@@ -937,6 +1022,7 @@ __all__ = [
     "MCPTool",
     "MCPServerStatus",
     "MCPTransport",
+    "coerce_transport",
     "get_mcp_manager",
     "set_mcp_manager",
 ]

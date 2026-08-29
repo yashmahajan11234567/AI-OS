@@ -39,6 +39,151 @@ from aios.core.llm_council import LLMCouncil, LLMRole, LLMCouncilConfig
 from aios.services.base import BaseService, ServiceStatus
 
 
+class SelfPromptBoundExceededError(ValueError):
+    """Raised when an ADR #10 bound is exceeded (fail-closed).
+
+    Subclass of ValueError so all existing fail-closed handling keeps working;
+    the narrower type lets the escalation wiring (M9-N11) distinguish bound
+    exhaustion from other ValueErrors.
+    """
+
+
+# ---------------------------------------------------------------------------
+# M9-N10 — Proposal scoring (replaces hash()-based mock scores)
+# ---------------------------------------------------------------------------
+
+
+async def _score_via_model_router(
+    proposals: list[Any],
+    *,
+    question: str,
+    objective: str,
+    tokens_available: int | None = None,
+) -> tuple[dict[str, float], dict[str, float], dict[str, Any], int]:
+    """Derive accuracy/insight scores from members' ACTUAL proposals via the
+    ModelRouter (M9-N10).
+
+    Each proposal is evaluated by the model the router selects (capability:
+    analysis) in ONE combined call requesting both axes. Scores are parsed
+    from the model response — they reflect the proposal ARTIFACT, never the
+    member identity (the M8-era ``hash(member_id)`` mock is retired here).
+
+    Token accounting (ADR #10): every router call's estimated prompt+response
+    tokens are returned so the caller can enforce the operation token budget;
+    ``tokens_available=None`` disables that early-exit (caller tracks alone).
+
+    Returns:
+        (accuracy_scores, insight_scores, scoring_metadata, tokens_used)
+        keyed by proposer member_id.
+    """
+    from aios.core.model_router import ModelCapability, ModelRequest, get_model_router
+
+    accuracy: dict[str, float] = {}
+    insight: dict[str, float] = {}
+    tokens_used = 0
+    model_ids: set[str] = set()
+    fallback_members: list[str] = []
+
+    router = get_model_router()
+
+    for proposal in proposals:
+        remaining = (
+            None if tokens_available is None else tokens_available - tokens_used
+        )
+        if remaining is not None and remaining <= 0:
+            # Budget exhausted mid-scoring: remaining members fall back to the
+            # deterministic content scorer (fail-SAFE, never unbounded calls).
+            fallback_members.append(proposal.proposer)
+            continue
+
+        prompt = (
+            "You are an independent evaluator reviewing a council member's "
+            "proposal. Judge ONLY the text below.\n\n"
+            f"Question under deliberation:\n{question}\n\n"
+            f"Objective:\n{objective}\n\n"
+            f"Proposal:\n{proposal.description}\n\n"
+            "Respond with EXACTLY two lines and nothing else:\n"
+            "ACCURACY=<0-100>\nINSIGHT=<0-100>"
+        )
+        prompt_tokens = max(1, len(prompt) // 4)
+
+        try:
+            response = await router.generate(
+                ModelRequest(
+                    prompt=prompt,
+                    system_prompt="You are a precise, skeptical council evaluator.",
+                    required_capabilities=[ModelCapability.ANALYSIS],
+                )
+            )
+            acc = _extract_score(response.content, "ACCURACY")
+            ins = _extract_score(response.content, "INSIGHT")
+            if acc is None or ins is None:
+                raise ValueError("unparseable scoring response")
+            accuracy[proposal.proposer] = acc
+            insight[proposal.proposer] = ins
+            model_ids.add(response.model_id)
+            tokens_used += prompt_tokens + max(1, len(response.content) // 4)
+        except Exception:  # noqa: BLE001 — per-proposal degradation, not failure
+            fallback_members.append(proposal.proposer)
+
+    metadata = {
+        "scoring_method": "model_router",
+        "router_models": sorted(model_ids),
+        "router_scored": len(accuracy),
+        "fallback_scored": len(fallback_members),
+    }
+    return accuracy, insight, metadata, tokens_used
+
+
+def _score_by_content(proposals: list[Any]) -> tuple[dict[str, float], dict[str, float]]:
+    """Deterministic CONTENT-derived scoring fallback (M9-N10).
+
+    Scores what the proposal actually says — grounding in the deliberation
+    terms, specificity, and structural completeness — fully deterministic for
+    identical inputs. Never uses member identity.
+    """
+    import re as _re
+
+    accuracy: dict[str, float] = {}
+    insight: dict[str, float] = {}
+
+    for proposal in proposals:
+        text = proposal.description or ""
+        words = _re.findall(r"[a-zA-Z]{4,}", text.lower())
+        unique_ratio = (len(set(words)) / len(words)) if words else 0.0
+        # Grounding: substantive-word coverage (specificity proxy).
+        grounding = min(1.0, len(words) / 60.0)
+        # Structure: enumerated/reasoned formatting markers.
+        structure = min(
+            1.0,
+            sum(
+                marker in text.lower()
+                for marker in ("because", "therefore", "risk", "evidence", "step")
+            )
+            / 3.0,
+        )
+
+        accuracy[proposal.proposer] = round(0.25 + 0.45 * grounding + 0.30 * structure, 4)
+        insight[proposal.proposer] = round(0.25 + 0.40 * unique_ratio + 0.35 * structure, 4)
+
+    return accuracy, insight
+
+
+def _extract_score(text: str, axis: str) -> float | None:
+    """Parse 'AXIS=<n>' (0-100) or a bare 0..1 decimal from model output."""
+    import re as _re
+
+    match = _re.search(rf"{axis}\s*[:=]\s*([0-9]+(?:\.[0-9]+)?)", text, _re.IGNORECASE)
+    if match:
+        value = float(match.group(1))
+        return round(min(1.0, value / 100.0 if value > 1.0 else value), 4)
+
+    # Fallback: first bare decimal in [0,1].
+    for token in _re.findall(r"(?<![\d.])([01]?\.[0-9]+)(?![\d])", text):
+        return round(float(token), 4)
+    return None
+
+
 @dataclass
 class SelfPromptConfig:
     """Configuration for SelfPromptingService bounds (ADR #10)."""
@@ -65,6 +210,9 @@ class PromptTrace:
     decision_id: str | None = None
     outcome: dict[str, Any] | None = None
     tokens_used: int = 0
+    # M9-N10: scoring provenance is recorded here (observable bounds/scoring,
+    # spec §32.10). Additive field; existing constructors unaffected.
+    metadata: dict[str, Any] = field(default_factory=dict)
     started_at: datetime = field(default_factory=datetime.utcnow)
     completed_at: datetime | None = None
     error: str | None = None
@@ -129,28 +277,96 @@ class SelfPromptingService(BaseService):
         """Rough token estimation (4 chars ~ 1 token)."""
         return max(1, len(text) // 4)
 
+    def _signal_bounds_escalation(
+        self, objective_id: str, where: str, depth: int, tokens_so_far: int
+    ) -> None:
+        """Emit the canonical HUMAN_ESCALATION_REQUIRED event (M9-N11).
+
+        Best-effort and advisory-only: emission failure never masks the
+        original bound error, and the signal carries no decision authority —
+        it routes bound exhaustion to the existing human-escalation path
+        (workflow.py:858 semantics: recovery_action=escalate_to_human).
+        """
+        try:
+            from aios.events.core.bus import get_core_event_bus
+            from aios.events.core.event import Event as CoreEvent
+            from aios.events.core.identity import ComponentIdentity, ComponentType
+            from aios.events.core.types import EventType as CanonicalEventType
+            from aios.events.core.priority import EventPriority
+
+            bus = get_core_event_bus()
+            if bus is None:
+                return
+            event = CoreEvent(
+                eventType=CanonicalEventType.HUMAN_ESCALATION_REQUIRED,
+                source=ComponentIdentity(
+                    component_type=ComponentType.ENGINEERING_SERVICE,
+                    component_name=self.name,
+                ),
+                correlationId=__import__("uuid").uuid4(),
+                payload={
+                    "service": "self_prompting",
+                    "reason": "bound_exhaustion",
+                    "where": where,
+                    "objective_id": objective_id,
+                    "depth": depth,
+                    "tokens_so_far": tokens_so_far,
+                    "recovery_action": "escalate_to_human",
+                    "advisory": True,
+                    "authority": "advisory_only",
+                },
+                priority=EventPriority.NORMAL,
+            )
+            # Publish without awaiting inside a sync context; the task keeps a
+            # strong reference so it cannot be garbage-collected mid-flight
+            # (same FIX-FIND-01 pattern as WorkflowManager._emit_event).
+            import asyncio as _asyncio
+
+            try:
+                loop = _asyncio.get_running_loop()
+            except RuntimeError:
+                return
+            if loop.is_running():
+                if not hasattr(self, "_pending_signal_tasks"):
+                    self._pending_signal_tasks: set = set()
+                task = _asyncio.ensure_future(bus.publish(event))
+                self._pending_signal_tasks.add(task)
+                task.add_done_callback(self._pending_signal_tasks.discard)
+        except Exception:  # noqa: BLE001 — escalation signal is best-effort
+            pass
+
+    async def wait_for_pending_signals(self, timeout: float = 5.0) -> None:
+        """Await outstanding escalation-signal publishes (test/drain aid)."""
+        import asyncio as _asyncio
+
+        tasks = getattr(self, "_pending_signal_tasks", set())
+        if tasks:
+            await _asyncio.wait(
+                list(tasks), timeout=timeout
+            )
+
     def _check_bounds(self, depth: int, tokens_so_far: int, objective_id: str) -> None:
         """Check bounds and raise if exceeded (fail-closed)."""
         if depth > self._config.max_depth:
-            raise ValueError(
+            raise SelfPromptBoundExceededError(
                 f"Self-prompting depth {depth} exceeds maximum {self._config.max_depth}. "
                 f"ADR #10: bounded self-prompting required."
             )
 
         if tokens_so_far > self._config.token_budget:
-            raise ValueError(
+            raise SelfPromptBoundExceededError(
                 f"Self-prompting token budget exceeded: {tokens_so_far} > {self._config.token_budget}. "
                 f"ADR #10: token budget enforcement required."
             )
 
         if self._config.require_objective_cite and not objective_id:
-            raise ValueError(
+            raise SelfPromptBoundExceededError(
                 "Self-prompting requires objective_id citation. "
                 "ADR #10: objective-cited operation required."
             )
 
         if self._config.allow_open_recursion:
-            raise ValueError(
+            raise SelfPromptBoundExceededError(
                 "allow_open_recursion=True violates ADR #10. "
                 "Self-prompting must not permit uncontrolled recursion."
             )
@@ -176,11 +392,21 @@ class SelfPromptingService(BaseService):
             List of traceable records: {prompt, depth, council_id, outcome}
 
         Raises:
-            ValueError: If bounds are exceeded (fail-closed per ADR #10)
+            SelfPromptBoundExceededError: If bounds are exceeded (fail-closed
+                per ADR #10). M9-N11: bound exhaustion additionally signals
+                the canonical HUMAN_ESCALATION_REQUIRED event (best-effort)
+                before re-raising — routing to the human-escalation path
+                without assuming autonomous authority.
         """
         # Check bounds at entry
         tokens_so_far = self._estimate_tokens(objective)
-        self._check_bounds(depth, tokens_so_far, objective_id)
+        try:
+            self._check_bounds(depth, tokens_so_far, objective_id)
+        except SelfPromptBoundExceededError:
+            self._signal_bounds_escalation(
+                objective_id, "entry", depth, tokens_so_far
+            )
+            raise
 
         # Generate seed questions if not provided
         if seed_questions is None:
@@ -192,7 +418,13 @@ class SelfPromptingService(BaseService):
             # Check bounds for each question
             question_tokens = self._estimate_tokens(question)
             tokens_so_far += question_tokens
-            self._check_bounds(depth, tokens_so_far, objective_id)
+            try:
+                self._check_bounds(depth, tokens_so_far, objective_id)
+            except SelfPromptBoundExceededError:
+                self._signal_bounds_escalation(
+                    objective_id, "seed_question", depth, tokens_so_far
+                )
+                raise
 
             # Create trace record
             trace = PromptTrace(
@@ -224,13 +456,40 @@ class SelfPromptingService(BaseService):
 
                 trace.proposal_ids = [p.proposal_id for p in proposals]
 
-                # For self-prompting, we simulate the critique/synthesis flow
-                # In a full implementation, this would use real model responses
-                # For now, we create mock accuracy/insight scores per role
-
-                member_ids = [m.member_id for m in session.members]
-                accuracy_scores = {mid: 0.7 + (hash(mid) % 30) / 100.0 for mid in member_ids}
-                insight_scores = {mid: 0.6 + (hash(mid + "insight") % 40) / 100.0 for mid in member_ids}
+                # M9-N10: real scoring — evaluate each member's ACTUAL proposal
+                # via the ModelRouter (identity-based hash() mock retired).
+                # Token guard: scoring must respect the ADR #10 budget; the
+                # remaining allowance is passed down so the scorer degrades to
+                # the deterministic content scorer instead of overrunning.
+                (
+                    accuracy_scores,
+                    insight_scores,
+                    scoring_meta,
+                    scoring_tokens,
+                ) = await _score_via_model_router(
+                    proposals,
+                    question=question,
+                    objective=objective,
+                    tokens_available=max(
+                        0, self._config.token_budget - tokens_so_far
+                    ),
+                )
+                if scoring_meta["fallback_scored"]:
+                    fb_acc, fb_ins = _score_by_content(proposals)
+                    for mid in proposals:
+                        if mid.proposer not in accuracy_scores:
+                            accuracy_scores.setdefault(mid.proposer, fb_acc[mid.proposer])
+                            insight_scores.setdefault(mid.proposer, fb_ins[mid.proposer])
+                    scoring_meta["scoring_method"] = "model_router_with_content_fallback"
+                trace.metadata["scoring"] = scoring_meta  # observable (spec §32.10)
+                tokens_so_far += scoring_tokens
+                try:
+                    self._check_bounds(depth, tokens_so_far, objective_id)
+                except SelfPromptBoundExceededError:
+                    self._signal_bounds_escalation(
+                        objective_id, "scoring", depth, tokens_so_far
+                    )
+                    raise
 
                 # Get the underlying council manager
                 council_manager = self._council.manager
@@ -263,9 +522,9 @@ class SelfPromptingService(BaseService):
                     "dissent_preserved": len(critique_result.dissent_preserved),
                 }
 
-                # Update token count
+                # Update token count (M9-N10: includes scoring-call tokens)
                 response_tokens = self._estimate_tokens(str(trace.outcome))
-                trace.tokens_used = question_tokens + response_tokens
+                trace.tokens_used = question_tokens + scoring_tokens + response_tokens
                 tokens_so_far += response_tokens
                 self._total_tokens += trace.tokens_used
 
@@ -409,6 +668,7 @@ def set_self_prompting_service(service: SelfPromptingService) -> None:
 __all__ = [
     "SelfPromptingService",
     "SelfPromptConfig",
+    "SelfPromptBoundExceededError",
     "PromptTrace",
     "SelfPromptResult",
     "get_self_prompting_service",

@@ -30,6 +30,10 @@ dev = [
     "ruff>=0.5",
     "mypy>=1.10",
     "black>=24.0",
+    "psutil>=5.9",
+]
+browser = [
+    "playwright>=1.40",
 ]
 
 [project.scripts]
@@ -56,3 +60,14 @@ disallow_untyped_defs = true
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests/unit", "tests/integration", "tests/performance"]
+markers = [
+    # M8-T6 marker scheme (spec §18/§21.11). Registered additively; does not
+    # alter M7/T1-T5 behavior.
+    "integration: cross-integration tests exercising two or more external capabilities",
+    "e2e: end-to-end production-style workflow tests (kernel boot + orchestrator)",
+    "gated: real-external tests gated behind env vars (HERMES_ACP_TEST / PLAYWRIGHT_E2E_TEST / GRAPHIFY_E2E_TEST) — deselected by default",
+    "security: security-integration tests (secret scrubbing, redaction, boundaries)",
+    "slow: long-running tests (real stdio subprocess startup, timeouts)",
+    "external: tests that would reach a real external service (never run hermetically)",
+    "real: production-path tests using the real MCPManager over stdio subprocesses (in-repo mock-server commands)",
+]

@@ -151,19 +151,33 @@ The single orchestration instance inside AI-OS. Hermes Kernel owns exactly four 
 
 **Not to be confused with:** AI-OS as a whole. Hermes Kernel ⊂ AI-OS.
 
+**Not to be confused with:** `hermes-agent` (external), which is a separate external agent system outside AI-OS. AI-OS's kernel is specifically `HermesKernel` (class name) / `Hermes Kernel` (architectural concept), never abbreviated as "Hermes" alone in architectural contexts.
+
 Source: Part 0 §0.2.3; Part 0 §0.3.2.
 
 **Category:** Architectural Concept
 
 ### HermesKernel
 
-The class name of the orchestration instance.
+The class name of the orchestration instance. The canonical identifier for AI-OS's kernel implementation.
+
+**Not to be confused with:** `hermes-agent` (external) — a separate external agent system. The external system is referred to as `hermes-agent(EXT)` in documentation to avoid ambiguity.
 
 Source: Part 0 §0.3.2.
 
 **Category:** Component
 
-### Core Component
+### hermes-agent(EXT)
+
+The external hermes-agent system — a separate agent system outside AI-OS with its own repository and authority. This is NOT AI-OS's Hermes Kernel.
+
+**Not to be confused with:** AI-OS's `Hermes Kernel` / `HermesKernel` — AI-OS's internal orchestration engine.
+
+**Naming Convention:** Always use `hermes-agent(EXT)` with the `(EXT)` suffix in architectural documentation to distinguish from AI-OS's kernel.
+
+Source: External system (not Part 0–14).
+
+**Category:** External System
 
 One of the kernel-owned infrastructure primitives. **This term has four conflicting authoritative definitions:**
 
@@ -1475,6 +1489,7 @@ Source: Part 9 §9.1.
 | Avoid | Preferred | Rationale |
 |---|---|---|
 | Hermes | AI-OS / Hermes Kernel | Hermes is a component, not the whole platform; see Part 0 §0.2.3 |
+| Hermes (unqualified) | Hermes Kernel / HermesKernel / hermes-agent(EXT) | "Hermes" alone is ambiguous — could mean AI-OS's Hermes Kernel or the external hermes-agent system |
 | Manager | Core Manager / Capability Manager | "Manager" alone is ambiguous |
 | Service | Engineering Service / Capability Facade Service | "Service" alone is ambiguous; see Part 5 §5.2.1 |
 | Task | TaskUnit | "Task" is overloaded; TaskUnit is the workflow primitive |
@@ -1637,6 +1652,17 @@ AI-OS (platform)
         ├── MCPService ↔ MCPManager
         └── MemoryService ↔ MemoryManager
 ```
+
+### External System Distinction
+
+```
+AI-OS (platform)
+└── Hermes Kernel / HermesKernel — internal orchestration core
+External Systems:
+└── hermes-agent(EXT) — external agent system (separate repository, separate authority)
+```
+
+**Critical Distinction:** `HermesKernel` / `Hermes Kernel` refers exclusively to AI-OS's internal orchestration engine. `hermes-agent(EXT)` refers to the external hermes-agent system. Use fully qualified names; never use "Hermes" alone in architectural documentation.
 
 ### Event Taxonomy
 
