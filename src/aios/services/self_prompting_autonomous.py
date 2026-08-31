@@ -120,11 +120,10 @@ class SelfPromptingAutonomousService(BaseService):
         """Execute the configured convergence action."""
         action = self._config.convergence_action
 
-        # Update history with resolution
+        # Update ALL unresolved records with resolution
         for record in reversed(self._convergence_history):
             if record.resolution is None:
                 record.resolution = action.value
-                break
 
         if action == ConvergenceAction.ESCALATE:
             await self._escalate_to_council(cycle_id)

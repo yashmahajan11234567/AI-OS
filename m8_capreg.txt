@@ -1,0 +1,53 @@
+============================= test session starts =============================
+platform win32 -- Python 3.12.2, pytest-9.1.1, pluggy-1.6.0
+rootdir: C:\Development\AI-OS
+configfile: pyproject.toml
+plugins: anyio-4.14.2, asyncio-0.21.2
+asyncio: mode=Mode.AUTO
+collected 9 items
+
+tests\integration\test_m8_t6_capability_registry.py .........            [100%]
+
+============================== warnings summary ===============================
+tests/integration/test_m8_t6_capability_registry.py::test_c1_all_five_manifest_capabilities_load
+tests/integration/test_m8_t6_capability_registry.py::test_c5_builtin_or_authoritative_rejected
+tests/integration/test_m8_t6_capability_registry.py::test_c6_lower_trust_shadow_blocked
+tests/integration/test_m8_t6_capability_registry.py::test_c7_sensitive_key_payload_denied
+tests/integration/test_m8_t6_capability_registry.py::test_c8_dynamic_capability_coexists_with_builtins
+tests/integration/test_m8_t6_capability_registry.py::test_c9_double_registration_collision_resolves
+  C:\Development\AI-OS\src\aios\core\kernel.py:2251: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    started_at=datetime.utcnow(),
+
+tests/integration/test_m8_t6_capability_registry.py: 78 warnings
+  C:\Development\AI-OS\src\aios\services\base.py:168: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    self._started_at = datetime.utcnow()
+
+tests/integration/test_m8_t6_capability_registry.py: 78 warnings
+  C:\Development\AI-OS\src\aios\core\kernel.py:2298: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    started_at=datetime.utcnow(),
+
+tests/integration/test_m8_t6_capability_registry.py::test_c1_all_five_manifest_capabilities_load
+tests/integration/test_m8_t6_capability_registry.py::test_c5_builtin_or_authoritative_rejected
+tests/integration/test_m8_t6_capability_registry.py::test_c6_lower_trust_shadow_blocked
+tests/integration/test_m8_t6_capability_registry.py::test_c7_sensitive_key_payload_denied
+tests/integration/test_m8_t6_capability_registry.py::test_c8_dynamic_capability_coexists_with_builtins
+tests/integration/test_m8_t6_capability_registry.py::test_c9_double_registration_collision_resolves
+  C:\Development\AI-OS\src\aios\core\kernel.py:638: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    self._start_time = datetime.utcnow()
+
+tests/integration/test_m8_t6_capability_registry.py: 24 warnings
+  C:\Development\AI-OS\src\aios\core\mcp_manager.py:349: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    status.last_connected = datetime.utcnow()
+
+tests/integration/test_m8_t6_capability_registry.py::test_c1_all_five_manifest_capabilities_load
+tests/integration/test_m8_t6_capability_registry.py::test_c5_builtin_or_authoritative_rejected
+tests/integration/test_m8_t6_capability_registry.py::test_c6_lower_trust_shadow_blocked
+tests/integration/test_m8_t6_capability_registry.py::test_c7_sensitive_key_payload_denied
+tests/integration/test_m8_t6_capability_registry.py::test_c8_dynamic_capability_coexists_with_builtins
+tests/integration/test_m8_t6_capability_registry.py::test_c9_double_registration_collision_resolves
+  C:\Development\AI-OS\src\aios\core\kernel.py:684: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    datetime.utcnow() - self._start_time
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+================= 9 passed, 198 warnings in 204.55s (0:03:24) =================
+EXIT=0

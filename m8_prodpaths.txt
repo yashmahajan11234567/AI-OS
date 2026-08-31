@@ -1,0 +1,9 @@
+============================= test session starts =============================
+platform win32 -- Python 3.12.2, pytest-9.1.1, pluggy-1.6.0
+rootdir: C:\Development\AI-OS
+configfile: pyproject.toml
+plugins: anyio-4.14.2, asyncio-0.21.2
+asyncio: mode=Mode.AUTO
+collected 10 items
+
+tests\integration\test_m8_t6_production_paths.py ........EXIT=124

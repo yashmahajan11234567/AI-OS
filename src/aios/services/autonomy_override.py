@@ -26,6 +26,7 @@ from aios.events.core.category import category_for_event_type
 from aios.events.core.priority import EventPriority
 from aios.events.core.types import EventType, SemanticVersion
 from aios.services.base import BaseService
+from aios.services.autonomy_fallback import FallbackTrigger
 
 logger = logging.getLogger(__name__)
 
@@ -108,9 +109,10 @@ class AutonomyOverrideService(BaseService):
     async def on_start(self) -> None:
         logger.info(f"AutonomyOverrideService.on_start called, initial_state={self._current_state.value}")
         # Subscribe to security/bound events that may trigger auto-disable
-        from aios.events.types import SecurityViolation, ResourceExhausted
-        self.subscribe(self._on_security_violation, SecurityViolation)
-        self.subscribe(self._on_resource_exhausted, ResourceExhausted)
+        # Use canonical EventType values (not legacy event classes)
+        self.subscribe(self._on_security_violation, EventType.SECURITY_ISSUE_FOUND)
+        self.subscribe(self._on_resource_exhausted, EventType.RESOURCE_EXHAUSTED)
+        self.subscribe(self._on_resource_exhausted, EventType.QUOTA_EXCEEDED)
 
     async def on_stop(self) -> None:
         logger.info("AutonomyOverrideService stopped")
@@ -119,20 +121,24 @@ class AutonomyOverrideService(BaseService):
         """Handle security violation - auto-disable if configured."""
         if self._config.auto_disable_on_security_violation:
             payload = event.payload.to_dict() if hasattr(event.payload, 'to_dict') else dict(event.payload)
+            # EventType.SECURITY_ISSUE_FOUND payload contains: violation, resource, severity, etc.
+            violation = payload.get('description', payload.get('violation', 'unknown'))
             await self.disable_autonomy(
                 reason=OverrideReason.SECURITY_VIOLATION,
                 triggered_by="security_manager",
-                description=f"Security violation: {payload.get('violation', 'unknown')}",
+                description=f"Security violation: {violation}",
             )
 
     async def _on_resource_exhausted(self, event: Event) -> None:
         """Handle resource exhaustion - auto-disable if configured."""
         if self._config.auto_disable_on_bound_exceeded:
             payload = event.payload.to_dict() if hasattr(event.payload, 'to_dict') else dict(event.payload)
+            # EventType.RESOURCE_EXHAUSTED/QUOTA_EXCEEDED payload contains: resource_type, amount, requestor, etc.
+            resource_type = payload.get('resource_type', 'unknown')
             await self.disable_autonomy(
                 reason=OverrideReason.BOUND_EXCEEDED,
                 triggered_by="resource_manager",
-                description=f"Resource exhausted: {payload.get('resource_type', 'unknown')}",
+                description=f"Resource exhausted: {resource_type}",
             )
 
     async def disable_autonomy(
@@ -168,6 +174,10 @@ class AutonomyOverrideService(BaseService):
 
         # Emit autonomy disabled event
         await self._emit_autonomy_event("autonomy_disabled", record)
+
+        # Trigger fallback to advisory-only mode per M10-IMPLEMENTATION-SPEC.md §11.10
+        # "Override triggers immediate fallback to advisory-only mode"
+        await self._trigger_fallback_from_override(triggered_by, description)
 
         # Disable autonomous services
         await self._disable_autonomous_services()
@@ -337,6 +347,36 @@ class AutonomyOverrideService(BaseService):
             "disabled_services_count": len(self._disabled_services),
         })
         return stats
+
+    async def _trigger_fallback_from_override(self, triggered_by: str, description: str) -> None:
+        """
+        Trigger the AutonomyFallbackService from an override action.
+
+        Per M10-IMPLEMENTATION-SPEC.md §11.10: "Override triggers immediate fallback
+        to advisory-only mode" and §11.12 lists "manual override" as a fallback trigger.
+        """
+        try:
+            # Try to get the fallback service via service registry first
+            fallback_svc = None
+            if hasattr(self, '_service_registry') and self._service_registry:
+                fallback_svc = self._service_registry.get_service("engineering.autonomy_fallback")
+
+            # Fall back to global getter
+            if fallback_svc is None:
+                from aios.services.autonomy_fallback import get_autonomy_fallback
+                fallback_svc = get_autonomy_fallback()
+
+            if fallback_svc:
+                await fallback_svc.trigger_fallback(
+                    trigger=FallbackTrigger.MANUAL_OVERRIDE,
+                    description=f"Autonomy override by {triggered_by}: {description}",
+                    metadata={"override_triggered_by": triggered_by, "override_description": description}
+                )
+                logger.info(f"Triggered fallback from override: {triggered_by} - {description}")
+            else:
+                logger.warning("AutonomyFallbackService not available, could not trigger fallback")
+        except Exception as e:
+            logger.error(f"Failed to trigger fallback from override: {e}")
 
 
 # Global instance

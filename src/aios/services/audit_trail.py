@@ -226,7 +226,7 @@ class AuditTrailService(BaseService):
             causationId=correlation_id,
             payload=EventPayload({
                 "entry_id": entry.entry_id,
-                "event_type": entry.event_type.value,
+                "audit_event_type": entry.event_type.value,
                 "service_name": entry.service_name,
                 "action": entry.action,
                 "details": entry.details,

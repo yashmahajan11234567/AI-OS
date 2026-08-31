@@ -111,3 +111,27 @@ integrations:
     requires_user_resource: true
     user_resource_present: false   # API key presence is checked at runtime by ModelRouter
     notes: "Standard provider; API key required at runtime (checked by ModelRouter)."
+  # --- M13/M14 BOUNDED RESOURCES (persistence / automation / durability) -----
+  supabase:
+    mode: mock
+    real_gated: true
+    # Real mode requires: SUPABASE_URL, SUPABASE_ANON_KEY env vars
+    # Uncomment below when credentials are available:
+    # url: ""
+    # anon_key: ""
+
+  n8n:
+    mode: mock
+    real_gated: true
+    # Real mode requires: N8N_BASE_URL, N8N_API_KEY env vars
+    # Uncomment below when credentials are available:
+    # base_url: ""
+    # api_key: ""
+
+  obsidian_git:
+    mode: mock
+    real_gated: true
+    # Real mode requires: OBSIDIAN_VAULT_PATH env var
+    # Uncomment below when vault is available:
+    # vault_path: ""
+    # remote_url: ""

@@ -75,6 +75,11 @@ __all__ = [
     "ReplayOptions",
     "UnsubscribeOptions",
     "EventBusHealth",
+    "get_core_event_bus",
+    "set_event_bus",
+    "set_core_event_bus",
+    "reset_event_bus_singleton",
+    "reset_core_event_bus_singleton",
 ]
 
 
@@ -344,6 +349,20 @@ def reset_event_bus_singleton() -> None:
     global _INSTANCE
     with _INSTANCE_LOCK:
         _INSTANCE = None
+
+
+def set_event_bus(bus: EventBus | None) -> None:
+    """Set the process-wide EventBus singleton (for testing).
+
+    Allows tests to inject a custom EventBus instance.
+    """
+    global _INSTANCE
+    with _INSTANCE_LOCK:
+        _INSTANCE = bus
+
+
+# Alias for backward compatibility with test imports
+set_core_event_bus = set_event_bus
 
 
 def get_core_event_bus() -> EventBus | None:

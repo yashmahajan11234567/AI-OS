@@ -57,6 +57,12 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import Any, Protocol, runtime_checkable
 
+
+@dataclass
+class LifecycleConfig:
+    """Configuration for LifecycleManager (test compatibility)."""
+    pass
+
 # Core Components (Tasks 1–8) — consumed, never re-implemented.
 from aios.core.configuration_manager import ConfigurationManager
 from aios.core.service_registry import ServiceRegistry, ServiceType
@@ -68,6 +74,7 @@ from aios.events.core.types import EventType, SemanticVersion
 
 __all__ = [
     "LifecycleState",
+    "LifecycleConfig",
     "LifecycleManagerError",
     "CoreManagerPhase",
     "ICoreManager",

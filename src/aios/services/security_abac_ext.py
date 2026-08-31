@@ -264,8 +264,8 @@ class SecurityAbacExtensionService(BaseService):
 
     async def authorize_autonomous_action(
         self,
-        role: AutonomyRole,
-        action: AutonomyAction,
+        role: AutonomyRole | str,
+        action: AutonomyAction | str,
         resource: str,
         context: dict[str, Any] | None = None,
     ) -> AutonomyAuthorizationDecision:
@@ -274,6 +274,24 @@ class SecurityAbacExtensionService(BaseService):
 
         Returns permit/deny decision with reasoning.
         """
+        # Handle string inputs for role and action
+        if isinstance(role, str):
+            try:
+                role = AutonomyRole(role)
+            except ValueError:
+                return AutonomyAuthorizationDecision(
+                    decision="deny",
+                    reason=f"Invalid role: {role}",
+                )
+        if isinstance(action, str):
+            try:
+                action = AutonomyAction(action)
+            except ValueError:
+                return AutonomyAuthorizationDecision(
+                    decision="deny",
+                    reason=f"Invalid action: {action}",
+                )
+
         if not self._config.enabled:
             return AutonomyAuthorizationDecision(
                 decision="permit",
@@ -319,6 +337,23 @@ class SecurityAbacExtensionService(BaseService):
                 decision="deny",
                 reason="Policy conditions not met",
                 metadata={"conditions_failed": True, "attributes": attributes},
+            )
+
+        # For human-initiated override actions, the ABAC extension is the authority.
+        # These are not "autonomous actions" - they are deliberate human control actions.
+        # The autonomy override mechanism (M10-N10) is the designated human control interface.
+        is_override_action = action in (AutonomyAction.DISABLE_AUTONOMY, AutonomyAction.ENABLE_AUTONOMY)
+        is_human_source = attributes.get("source") == "human"
+
+        if is_override_action and is_human_source:
+            # Human override actions are permitted by ABAC policy directly
+            # without requiring SecurityManager delegation (they ARE the control plane)
+            if self._config.audit_all_autonomous:
+                await self._audit_autonomous_action(role, action, resource, attributes, "permit")
+            return AutonomyAuthorizationDecision(
+                decision="permit",
+                reason="Human override action authorized by ABAC policy",
+                matched_policies=[f"{role.value}:{action.value}:{resource}"],
             )
 
         # For autonomous actions with matching policies, the ABAC extension

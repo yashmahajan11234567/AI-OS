@@ -8,18 +8,154 @@ with M7/M8/M9 components per M10-IMPLEMENTATION-SPEC.md.
 import pytest
 import asyncio
 from datetime import datetime
+from typing import Any
 
 from aios.core.kernel import HermesKernel, KernelConfig
 from aios.services.objective_generator import get_objective_generator
 from aios.services.replan_detector import get_replan_detector
 from aios.services.autonomous_judge import get_autonomous_judge
-from aios.services.autonomy_override import get_autonomy_override
+from aios.services.autonomy_override import get_autonomy_override, OverrideReason
 from aios.services.audit_trail import get_audit_trail
 from aios.services.autonomy_fallback import get_autonomy_fallback
+from aios.services.capability_provenance_ext import get_capability_provenance_ext
+from aios.services.resource_manager_quota import get_resource_manager_quota
+from aios.services.security_abac_ext import get_security_abac_ext
+from aios.services.state_verification import get_state_verification
+from aios.services.self_prompting_autonomous import get_self_prompting_autonomous
+from aios.events.core.priority import EventPriority
 from aios.core.state import StateManager, StateScope, get_state_manager, reset_state_manager_singleton
 from aios.core.council_manager import CouncilManager, get_council_manager, set_council_manager
 from aios.core.security_manager import SecurityManager, get_security_manager, reset_security_manager_singleton
 from aios.core.resource_manager import ResourceManager, ResourceType, ResourceLimit, get_resource_manager, reset_resource_manager_singleton
+from aios.events.core.bus import EventBus, EventBusConfig, reset_event_bus_singleton
+from aios.core.service_registry import get_service_registry, reset_service_registry_singleton
+from aios.core.configuration_manager import (
+    ConfigurationManager,
+    get_configuration_manager,
+    set_configuration_manager,
+    reset_configuration_manager_singleton,
+)
+from aios.core.structured_logger import get_logger, set_logger
+from aios.core.lifecycle_manager import LifecycleManager, get_lifecycle_manager, set_lifecycle_manager, reset_lifecycle_manager_singleton
+from aios.core.state import set_state_manager
+from aios.core.storage import StorageManager, get_storage_manager, set_storage_manager
+from aios.core.workflow import WorkflowManager, get_workflow_manager, set_workflow_manager, reset_workflow_manager_singleton
+from aios.core.resource_manager import set_resource_manager
+from aios.core.health_manager import HealthManager, get_health_manager, set_health_manager
+from aios.core.security_manager import set_security_manager
+from aios.core.capability_manager import CapabilityManager, get_capability_manager, set_capability_manager, reset_capability_manager_singleton
+from aios.core.observability_manager import ObservabilityManager, get_observability_manager, set_observability_manager, reset_observability_manager_singleton
+
+
+async def init_kernel_with_overrides(test_overrides: dict[str, Any]) -> HermesKernel:
+    """Initialize a kernel with test configuration overrides.
+
+    This manually initializes core components to allow test overrides to be
+    applied between ConfigurationManager.initialize() and freeze().
+    """
+    # Reset all singletons
+    reset_event_bus_singleton()
+    reset_service_registry_singleton()
+    reset_configuration_manager_singleton()
+    reset_lifecycle_manager_singleton()
+    reset_workflow_manager_singleton()
+    reset_capability_manager_singleton()
+    reset_observability_manager_singleton()
+    reset_security_manager_singleton()
+    reset_resource_manager_singleton()
+
+    # Create kernel with default config
+    config = KernelConfig()
+    kernel = HermesKernel(config=config)
+
+    # C1: Canonical EventBus
+    event_bus_config = EventBusConfig(
+        auto_start_dispatch_worker=False,
+        maxDispatchDepth=config.event_bus_max_dispatch_depth,
+        historyCapacity=config.event_bus_max_history,
+    )
+    kernel._event_bus = EventBus(config=event_bus_config)
+    await kernel._event_bus.initialize()
+
+    # C2: Canonical ServiceRegistry
+    kernel._service_registry = get_service_registry(event_bus=kernel._event_bus)
+
+    # C3: ConfigurationManager - create and set overrides before freeze
+    kernel._configuration = ConfigurationManager(
+        event_bus=kernel._event_bus,
+        config_path=config.config_path,
+    )
+    set_configuration_manager(kernel._configuration)
+
+    # Initialize ConfigurationManager (loads and merges config)
+    await kernel._configuration.initialize()
+
+    # Apply test overrides
+    for path, value in test_overrides.items():
+        kernel._configuration.set_test_override(path, value)
+
+    # Freeze configuration
+    kernel._configuration.freeze()
+
+    # C4: StructuredLogger
+    kernel._structured_logger = get_logger()
+    set_logger(kernel._structured_logger)
+    await kernel._structured_logger.initialize(kernel)
+
+    # Managers (constructed after C1–C4, use canonical singletons)
+    kernel._state_manager = StateManager(
+        persistence_path=config.data_dir / "state",
+        service_registry=kernel._service_registry,
+        configuration_manager=kernel._configuration,
+        logger=kernel._structured_logger,
+    )
+    set_state_manager(kernel._state_manager)
+
+    kernel._storage_manager = StorageManager(
+        configuration_manager=kernel._configuration,
+        logger=kernel._structured_logger,
+    )
+    set_storage_manager(kernel._storage_manager)
+
+    from aios.core.workflow import WorkflowManager
+    kernel._workflow_manager = WorkflowManager(
+        configuration_manager=kernel._configuration,
+        logger=kernel._structured_logger,
+    )
+    set_workflow_manager(kernel._workflow_manager)
+
+    kernel._resource_manager = ResourceManager(
+        configuration_manager=kernel._configuration,
+        logger=kernel._structured_logger,
+    )
+    set_resource_manager(kernel._resource_manager)
+
+    kernel._health_manager = HealthManager(
+        configuration_manager=kernel._configuration,
+        logger=kernel._structured_logger,
+    )
+    set_health_manager(kernel._health_manager)
+
+    from aios.core.security_manager import SecurityManager
+    kernel._security_manager = SecurityManager(
+        configuration_manager=kernel._configuration,
+        logger=kernel._structured_logger,
+    )
+    set_security_manager(kernel._security_manager)
+
+    kernel._capability_manager = CapabilityManager(
+        configuration_manager=kernel._configuration,
+        logger=kernel._structured_logger,
+    )
+    set_capability_manager(kernel._capability_manager)
+
+    kernel._observability_manager = ObservabilityManager(
+        configuration_manager=kernel._configuration,
+        logger=kernel._structured_logger,
+    )
+    set_observability_manager(kernel._observability_manager)
+
+    return kernel
 
 
 @pytest.fixture(autouse=True)
@@ -80,31 +216,32 @@ def reset_all_singletons():
 @pytest.mark.asyncio
 async def test_m10_full_kernel_startup():
     """Test full kernel startup with M10 autonomy enabled."""
-    config = KernelConfig()
-    kernel = HermesKernel(config=config)
+    test_overrides = {
+        "services.autonomy.enabled": True,
+        "services.objective_generator.enabled": True,
+        "services.replan_detector.enabled": True,
+        "services.autonomous_judge.enabled": True,
+        "services.self_prompting_autonomous.enabled": True,
+        "services.learning_apply.enabled": True,
+        "services.capability_provenance_ext.enabled": True,
+        "services.state_verification.enabled": True,
+        "services.security_abac_ext.enabled": True,
+        "services.resource_manager_quota.enabled": True,
+        "services.autonomy_override.enabled": True,
+        "services.audit_trail.enabled": True,
+        "services.autonomy_fallback.enabled": True,
+    }
+    kernel = await init_kernel_with_overrides(test_overrides)
 
-    # Enable M10 via config BEFORE initializing core components (before freeze)
-    kernel._configuration.set_test_override("services.autonomy.enabled", True)
-    kernel._configuration.set_test_override("services.objective_generator.enabled", True)
-    kernel._configuration.set_test_override("services.replan_detector.enabled", True)
-    kernel._configuration.set_test_override("services.autonomous_judge.enabled", True)
-    kernel._configuration.set_test_override("services.self_prompting_autonomous.enabled", True)
-    kernel._configuration.set_test_override("services.learning_apply.enabled", True)
-    kernel._configuration.set_test_override("services.capability_provenance_ext.enabled", True)
-    kernel._configuration.set_test_override("services.state_verification.enabled", True)
-    kernel._configuration.set_test_override("services.security_abac_ext.enabled", True)
-    kernel._configuration.set_test_override("services.resource_manager_quota.enabled", True)
-    kernel._configuration.set_test_override("services.autonomy_override.enabled", True)
-    kernel._configuration.set_test_override("services.audit_trail.enabled", True)
-    kernel._configuration.set_test_override("services.autonomy_fallback.enabled", True)
-
-    # Initialize core components
-    await kernel._init_core_components()
+    # Initialize additional managers
     await kernel._init_mcp_manager()
     await kernel._init_lifecycle_manager()
     await kernel._init_m7_testing()
 
     # Initialize M10
+    # M9-N1: bootstrap engineering services BEFORE M10 — LearningApplyService
+    # construction requires the LearningService global (set by bootstrap).
+    kernel._bootstrap_engineering_services()
     await kernel._init_m10_autonomy()
 
     # Verify all 12 M10 services registered
@@ -145,19 +282,20 @@ async def test_m10_full_kernel_startup():
 @pytest.mark.asyncio
 async def test_m10_autonomous_objective_to_replan_loop():
     """Test closed loop: objective generated -> workflow -> stagnation -> replan."""
-    config = KernelConfig()
-    kernel = HermesKernel(config=config)
+    test_overrides = {
+        "services.autonomy.enabled": True,
+        "services.objective_generator.enabled": True,
+        "services.replan_detector.enabled": True,
+    }
+    kernel = await init_kernel_with_overrides(test_overrides)
 
-    # Enable M10 config BEFORE initialization
-    kernel._configuration.set_test_override("services.autonomy.enabled", True)
-    kernel._configuration.set_test_override("services.objective_generator.enabled", True)
-    kernel._configuration.set_test_override("services.replan_detector.enabled", True)
-
-    await kernel._init_core_components()
     await kernel._init_mcp_manager()
     await kernel._init_lifecycle_manager()
     await kernel._init_m7_testing()
 
+    # M9-N1: bootstrap engineering services BEFORE M10 — LearningApplyService
+    # construction requires the LearningService global (set by bootstrap).
+    kernel._bootstrap_engineering_services()
     await kernel._init_m10_autonomy()
     await kernel._start_services()
 
@@ -211,19 +349,21 @@ async def test_m10_autonomous_objective_to_replan_loop():
 @pytest.mark.asyncio
 async def test_m10_autonomous_judge_emits_independent():
     """Test autonomous judge emits independent PASS/FAIL without council."""
-    config = KernelConfig()
-    kernel = HermesKernel(config=config)
+    test_overrides = {
+        "services.autonomy.enabled": True,
+        "services.autonomous_judge.mode": "autonomous_enabled",
+        "services.autonomous_judge.confidence_threshold": 0.5,
+        "services.autonomous_judge.require_learning_evidence": False,
+    }
+    kernel = await init_kernel_with_overrides(test_overrides)
 
-    await kernel._init_core_components()
     await kernel._init_mcp_manager()
     await kernel._init_lifecycle_manager()
     await kernel._init_m7_testing()
 
-    kernel._configuration._config["services.autonomy.enabled"] = True
-    kernel._configuration._config["services.autonomous_judge.mode"] = "autonomous_enabled"
-    kernel._configuration._config["services.autonomous_judge.confidence_threshold"] = 0.5
-    kernel._configuration._config["services.autonomous_judge.require_learning_evidence"] = False
-
+    # M9-N1: bootstrap engineering services BEFORE M10 — LearningApplyService
+    # construction requires the LearningService global (set by bootstrap).
+    kernel._bootstrap_engineering_services()
     await kernel._init_m10_autonomy()
     await kernel._start_services()
 
@@ -277,17 +417,19 @@ async def test_m10_autonomous_judge_emits_independent():
 @pytest.mark.asyncio
 async def test_m10_autonomy_override_fallback_chain():
     """Test human override -> fallback activation -> recovery chain."""
-    config = KernelConfig()
-    kernel = HermesKernel(config=config)
+    test_overrides = {
+        "services.autonomy.enabled": True,
+        "services.autonomy_fallback.manual_recovery": True,
+    }
+    kernel = await init_kernel_with_overrides(test_overrides)
 
-    await kernel._init_core_components()
     await kernel._init_mcp_manager()
     await kernel._init_lifecycle_manager()
     await kernel._init_m7_testing()
 
-    kernel._configuration._config["services.autonomy.enabled"] = True
-    kernel._configuration._config["services.autonomy_fallback.manual_recovery"] = True
-
+    # M9-N1: bootstrap engineering services BEFORE M10 — LearningApplyService
+    # construction requires the LearningService global (set by bootstrap).
+    kernel._bootstrap_engineering_services()
     await kernel._init_m10_autonomy()
     await kernel._start_services()
 
@@ -300,7 +442,7 @@ async def test_m10_autonomy_override_fallback_chain():
 
     # Human disables autonomy
     result = await override.disable_autonomy(
-        reason="manual",
+        reason=OverrideReason.MANUAL,
         triggered_by="human",
         description="Manual override test",
     )
@@ -324,15 +466,18 @@ async def test_m10_autonomy_override_fallback_chain():
 @pytest.mark.asyncio
 async def test_m10_capability_provenance_with_autonomous():
     """Test capability provenance tracks autonomous authority."""
-    config = KernelConfig()
-    kernel = HermesKernel(config=config)
+    test_overrides = {
+        "services.autonomy.enabled": True,
+    }
+    kernel = await init_kernel_with_overrides(test_overrides)
 
-    await kernel._init_core_components()
     await kernel._init_mcp_manager()
     await kernel._init_lifecycle_manager()
     await kernel._init_m7_testing()
 
-    kernel._configuration._config["services.autonomy.enabled"] = True
+    # M9-N1: bootstrap engineering services BEFORE M10 — LearningApplyService
+    # construction requires the LearningService global (set by bootstrap).
+    kernel._bootstrap_engineering_services()
     await kernel._init_m10_autonomy()
 
     prov_ext = get_capability_provenance_ext()
@@ -368,15 +513,18 @@ async def test_m10_capability_provenance_with_autonomous():
 @pytest.mark.asyncio
 async def test_m10_audit_trail_captures_all_autonomous():
     """Test audit trail captures autonomous decisions from all services."""
-    config = KernelConfig()
-    kernel = HermesKernel(config=config)
+    test_overrides = {
+        "services.autonomy.enabled": True,
+    }
+    kernel = await init_kernel_with_overrides(test_overrides)
 
-    await kernel._init_core_components()
     await kernel._init_mcp_manager()
     await kernel._init_lifecycle_manager()
     await kernel._init_m7_testing()
 
-    kernel._configuration._config["services.autonomy.enabled"] = True
+    # M9-N1: bootstrap engineering services BEFORE M10 — LearningApplyService
+    # construction requires the LearningService global (set by bootstrap).
+    kernel._bootstrap_engineering_services()
     await kernel._init_m10_autonomy()
 
     audit = get_audit_trail()
@@ -416,18 +564,20 @@ async def test_m10_audit_trail_captures_all_autonomous():
 @pytest.mark.asyncio
 async def test_m10_resource_quota_enforcement():
     """Test resource quotas enforce limits on autonomous services."""
-    config = KernelConfig()
-    kernel = HermesKernel(config=config)
+    test_overrides = {
+        "services.autonomy.enabled": True,
+        "services.resource_manager_quota.enabled": True,
+        "services.resource_manager_quota.og_pct": 0.05,
+    }
+    kernel = await init_kernel_with_overrides(test_overrides)
 
-    await kernel._init_core_components()
     await kernel._init_mcp_manager()
     await kernel._init_lifecycle_manager()
     await kernel._init_m7_testing()
 
-    kernel._configuration._config["services.autonomy.enabled"] = True
-    kernel._configuration._config["services.resource_manager_quota.enabled"] = True
-    kernel._configuration._config["services.resource_manager_quota.og_pct"] = 0.05
-
+    # M9-N1: bootstrap engineering services BEFORE M10 — LearningApplyService
+    # construction requires the LearningService global (set by bootstrap).
+    kernel._bootstrap_engineering_services()
     await kernel._init_m10_autonomy()
     await kernel._start_services()
 
@@ -455,17 +605,19 @@ async def test_m10_resource_quota_enforcement():
 @pytest.mark.asyncio
 async def test_m10_security_abac_blocks_unauthorized():
     """Test ABAC blocks unauthorized autonomous actions."""
-    config = KernelConfig()
-    kernel = HermesKernel(config=config)
+    test_overrides = {
+        "services.autonomy.enabled": True,
+        "services.security_abac_ext.enabled": True,
+    }
+    kernel = await init_kernel_with_overrides(test_overrides)
 
-    await kernel._init_core_components()
     await kernel._init_mcp_manager()
     await kernel._init_lifecycle_manager()
     await kernel._init_m7_testing()
 
-    kernel._configuration._config["services.autonomy.enabled"] = True
-    kernel._configuration._config["services.security_abac_ext.enabled"] = True
-
+    # M9-N1: bootstrap engineering services BEFORE M10 — LearningApplyService
+    # construction requires the LearningService global (set by bootstrap).
+    kernel._bootstrap_engineering_services()
     await kernel._init_m10_autonomy()
 
     abac = get_security_abac_ext()
@@ -498,17 +650,19 @@ async def test_m10_security_abac_blocks_unauthorized():
 @pytest.mark.asyncio
 async def test_m10_state_verification_checkpoints():
     """Test state verification creates valid checkpoints for autonomous actions."""
-    config = KernelConfig()
-    kernel = HermesKernel(config=config)
+    test_overrides = {
+        "services.autonomy.enabled": True,
+        "services.state_verification.enabled": True,
+    }
+    kernel = await init_kernel_with_overrides(test_overrides)
 
-    await kernel._init_core_components()
     await kernel._init_mcp_manager()
     await kernel._init_lifecycle_manager()
     await kernel._init_m7_testing()
 
-    kernel._configuration._config["services.autonomy.enabled"] = True
-    kernel._configuration._config["services.state_verification.enabled"] = True
-
+    # M9-N1: bootstrap engineering services BEFORE M10 — LearningApplyService
+    # construction requires the LearningService global (set by bootstrap).
+    kernel._bootstrap_engineering_services()
     await kernel._init_m10_autonomy()
     await kernel._start_services()
 
@@ -534,18 +688,20 @@ async def test_m10_state_verification_checkpoints():
 @pytest.mark.asyncio
 async def test_m10_self_prompting_convergence_replan():
     """Test self-prompting convergence triggers autonomous replan."""
-    config = KernelConfig()
-    kernel = HermesKernel(config=config)
+    test_overrides = {
+        "services.autonomy.enabled": True,
+        "services.self_prompting_autonomous.convergence_action": "replan",
+        "services.self_prompting_autonomous.max_cycles": 2,
+    }
+    kernel = await init_kernel_with_overrides(test_overrides)
 
-    await kernel._init_core_components()
     await kernel._init_mcp_manager()
     await kernel._init_lifecycle_manager()
     await kernel._init_m7_testing()
 
-    kernel._configuration._config["services.autonomy.enabled"] = True
-    kernel._configuration._config["services.self_prompting_autonomous.convergence_action"] = "replan"
-    kernel._configuration._config["services.self_prompting_autonomous.max_cycles"] = 2
-
+    # M9-N1: bootstrap engineering services BEFORE M10 — LearningApplyService
+    # construction requires the LearningService global (set by bootstrap).
+    kernel._bootstrap_engineering_services()
     await kernel._init_m10_autonomy()
     await kernel._start_services()
 

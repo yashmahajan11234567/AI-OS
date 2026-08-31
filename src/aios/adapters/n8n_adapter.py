@@ -25,6 +25,8 @@ import uuid
 from datetime import datetime, timezone
 from typing import Any
 
+import aiohttp
+
 from aios.adapters.base import BaseExecutionAdapter, ExecutionResult, ExecutionStatus
 
 logger = logging.getLogger(__name__)
@@ -333,8 +335,10 @@ class N8nAdapter(BaseExecutionAdapter):
         self,
         operation: str,
         correlation_id: str | None = None,
+        workflow_id: str | None = None,
+        execution_id: str | None = None,
     ) -> dict[str, Any]:
-        return {
+        provenance = {
             "source": "n8n",
             "adapter": "n8n_adapter",
             "operation": operation,
@@ -345,6 +349,14 @@ class N8nAdapter(BaseExecutionAdapter):
             "authority": "aios_directed",
             "mode": "real" if self._real_mode else "mock",
         }
+        # Real-mode provenance fields (M14-T2 spec §11.5). Mock provenance
+        # shape is unchanged for stable consumer expectation.
+        if self._real_mode:
+            if workflow_id is not None:
+                provenance["workflow_id"] = workflow_id
+            if execution_id is not None:
+                provenance["execution_id"] = execution_id
+        return provenance
 
     def _next_version(self) -> int:
         self._version_counter += 1
@@ -381,7 +393,11 @@ class N8nAdapter(BaseExecutionAdapter):
         bounds = bounds or {}
         self._validate_parameters(parameters)
         self._validate_bounds(bounds)
-        provenance = self._make_provenance("execute_workflow")
+        # Provenance before call so we can attach real-mode fields from reply.
+        provenance = self._make_provenance(
+            "execute_workflow",
+            workflow_id=workflow_id,
+        )
 
         # Append AI-OS provenance_echo expectation into bounds context.
         bounds = dict(bounds)
@@ -394,6 +410,11 @@ class N8nAdapter(BaseExecutionAdapter):
                 result = await self._engine.execute_workflow(workflow_id, parameters, bounds)
         except N8nError as e:
             return self._error_result("execute_workflow", str(e))
+
+        # Enrich provenance with real execution ID if present.
+        exec_id = result.get("execution_id")
+        if self._real_mode and exec_id:
+            provenance["execution_id"] = exec_id
 
         status = result.get("status", "failure")
         exec_status = (
@@ -432,11 +453,64 @@ class N8nAdapter(BaseExecutionAdapter):
     ) -> dict[str, Any]:
         """Real n8n REST dispatch (bounded resource).
 
-        Documented extension point; real deployments inject an HTTP client.
+        Executes workflow via n8n REST API:
+          POST {base_url}/api/v1/executions
+          Header: X-N8n-API-Key
+          Body: n8n webhook execution format.
+
+        Credentials only from constructor/env; API key never logged or in errors.
         """
-        raise N8nUnavailableError(
-            "Real n8n REST client not injected; use mock mode or inject client"
-        )
+        if not self._base_url or not self._api_key:
+            raise N8nNotConfiguredError(
+                "Real mode requires N8N_BASE_URL and N8N_API_KEY"
+            )
+
+        base = f"{self._base_url.rstrip('/')}/api/v1/executions"
+        timeout_val = bounds.get("timeout_seconds", self._timeout_seconds)
+        if not isinstance(timeout_val, (int, float)) or timeout_val <= 0:
+            timeout_val = self._timeout_seconds
+        timeout = aiohttp.ClientTimeout(total=timeout_val)
+        headers = {
+            "X-N8n-API-Key": self._api_key,
+            "Content-Type": "application/json",
+        }
+        body = {
+            "workflowId": workflow_id,
+            "data": {"main": [[{"json": parameters}]]},
+        }
+        if idempotency_key:
+            body["idempotencyKey"] = idempotency_key
+
+        try:
+            async with aiohttp.ClientSession(timeout=timeout) as session:
+                async with session.post(base, headers=headers, json=body) as response:
+                    if response.status == 200:
+                        try:
+                            return await response.json()
+                        except (aiohttp.ContentTypeError, ValueError) as e:
+                            raise N8nUnavailableError(
+                                "Malformed JSON from n8n execution endpoint"
+                            ) from e
+                    if response.status == 401:
+                        raise N8nSecurityError("n8n API key invalid or missing")
+                    if response.status == 403:
+                        raise N8nSecurityError("n8n workflow execution forbidden")
+                    if response.status == 404:
+                        raise N8nNotConfiguredError(f"n8n workflow '{workflow_id}' not found")
+                    if response.status == 429:
+                        raise N8nTimeoutError("n8n rate limit exceeded (429)")
+                    if response.status in (500, 502, 503, 504):
+                        raise N8nUnavailableError("n8n endpoint unavailable")
+                    raise N8nUnavailableError(
+                        f"Unexpected n8n status {response.status}"
+                    )
+        except asyncio.TimeoutError:
+            raise N8nTimeoutError(
+                f"n8n execution exceeded {timeout_val}s bound"
+            ) from None
+        except aiohttp.ClientError as e:
+            # Never log base URL or API key.
+            raise N8nUnavailableError("n8n endpoint unreachable") from e
 
 
 __all__ = [

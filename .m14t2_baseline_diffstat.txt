@@ -1,0 +1,18 @@
+warning: in the working copy of 'uv.lock', LF will be replaced by CRLF the next time Git touches it
+ src/aios/core/kernel.py                        |  15 +-
+ src/aios/core/lifecycle_manager.py             |   7 +
+ src/aios/core/mcp_manager.py                   |  16 +-
+ src/aios/core/resource_manager.py              |   2 +-
+ src/aios/core/structured_logger.py             |  19 +
+ src/aios/events/core/bus.py                    |  19 +
+ src/aios/services/audit_trail.py               |   2 +-
+ src/aios/services/autonomy_fallback.py         |  19 +-
+ src/aios/services/autonomy_override.py         |  50 +-
+ src/aios/services/capability_provenance_ext.py |  16 +-
+ src/aios/services/replan_detector.py           |   5 +-
+ src/aios/services/security_abac_ext.py         |  39 +-
+ src/aios/services/self_prompting_autonomous.py |   3 +-
+ tests/integration/test_m10_integration.py      | 310 +++++++++---
+ tests/security/test_m10_security.py            | 654 ++++++++++++++++++++++---
+ uv.lock                                        | 134 ++++-
+ 16 files changed, 1127 insertions(+), 183 deletions(-)

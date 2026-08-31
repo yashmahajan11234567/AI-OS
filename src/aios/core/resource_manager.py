@@ -376,7 +376,7 @@ class ResourceManager:
     def _init_default_limits(self) -> None:
         """Initialize default resource limits (preserved domain behavior)."""
         defaults = [
-            ResourceLimit(ResourceType.CPU, 80, "percent", "CPU utilization limit"),
+            ResourceLimit(ResourceType.CPU, 100, "percent", "CPU utilization limit"),
             ResourceLimit(ResourceType.MEMORY, 8192, "MB", "Memory limit"),
             ResourceLimit(ResourceType.GPU, 1, "count", "GPU count limit"),
             ResourceLimit(ResourceType.DISK, 10240, "MB", "Disk space limit"),

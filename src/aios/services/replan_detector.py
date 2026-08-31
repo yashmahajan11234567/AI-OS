@@ -16,7 +16,6 @@ from datetime import datetime
 from typing import Any
 
 from aios.events.base import Event
-from aios.events.types import WorkflowCompleted, WorkflowFailed, PlanningRequested
 from aios.events.core.bus import get_core_event_bus
 from aios.events.core.event import Event as CoreEvent
 from aios.events.core.identity import ComponentIdentity, ComponentType
@@ -90,8 +89,8 @@ class AdaptiveReplanDetector(BaseService):
     async def on_start(self) -> None:
         logger.info(f"AdaptiveReplanDetector.on_start called, enabled={self._config.enabled}")
         if self._config.enabled:
-            self.subscribe(self._on_workflow_completed, WorkflowCompleted)
-            self.subscribe(self._on_workflow_failed, WorkflowFailed)
+            self.subscribe(self._on_workflow_completed, EventType.WORKFLOW_COMPLETED)
+            self.subscribe(self._on_workflow_failed, EventType.WORKFLOW_FAILED)
             logger.info("AdaptiveReplanDetector subscribed to workflow events")
         else:
             logger.info("AdaptiveReplanDetector disabled by config")

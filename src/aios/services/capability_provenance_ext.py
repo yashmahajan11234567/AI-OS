@@ -124,8 +124,8 @@ class CapabilityProvenanceExtensionService(BaseService):
     def create_autonomous_provenance(
         self,
         capability_id: str,
-        authority: ProvenanceAuthority = ProvenanceAuthority.AUTONOMOUS,
-        source: ProvenanceSource = ProvenanceSource.GENERATED,
+        authority: ProvenanceAuthority | str = ProvenanceAuthority.AUTONOMOUS,
+        source: ProvenanceSource | str = ProvenanceSource.GENERATED,
         metadata: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         """
@@ -133,6 +133,18 @@ class CapabilityProvenanceExtensionService(BaseService):
 
         Returns signed provenance record dict.
         """
+        # Handle string inputs for authority and source
+        if isinstance(authority, str):
+            try:
+                authority = ProvenanceAuthority(authority)
+            except ValueError:
+                authority = ProvenanceAuthority.AUTONOMOUS
+        if isinstance(source, str):
+            try:
+                source = ProvenanceSource(source)
+            except ValueError:
+                source = ProvenanceSource.GENERATED
+
         record_id = f"prov_{uuid.uuid4().hex[:12]}"
         timestamp = datetime.utcnow()
 

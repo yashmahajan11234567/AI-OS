@@ -26,10 +26,14 @@ import json
 import logging
 import os
 import re
+import subprocess
 import uuid
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any
+
+import yaml
 
 from aios.adapters.base import BaseExecutionAdapter, ExecutionResult, ExecutionStatus
 
@@ -388,8 +392,10 @@ class ObsidianGitAdapter(BaseExecutionAdapter):
         self,
         operation: str,
         correlation_id: str | None = None,
+        commit_hash: str | None = None,
+        vault_path: str | None = None,
     ) -> dict[str, Any]:
-        return {
+        provenance = {
             "source": "obsidian_git",
             "adapter": "obsidian_git_adapter",
             "operation": operation,
@@ -402,6 +408,14 @@ class ObsidianGitAdapter(BaseExecutionAdapter):
             "durability": "git_version_control",
             "mode": "real" if self._real_mode else "mock",
         }
+        # Real-mode provenance fields (M14-T2 spec §9.4). Mock provenance
+        # shape is unchanged for stable consumer expectation.
+        if self._real_mode:
+            if commit_hash is not None:
+                provenance["commit_hash"] = commit_hash
+            if vault_path is not None:
+                provenance["vault_path"] = vault_path
+        return provenance
 
     def _next_version(self) -> int:
         self._version_counter += 1
@@ -436,6 +450,7 @@ class ObsidianGitAdapter(BaseExecutionAdapter):
     ) -> ExecutionResult:
         metadata = metadata or {}
         self._validate_knowledge(knowledge_id, content, knowledge_type, metadata)
+        # Create provenance before call; real-mode fields will be added after.
         provenance = self._make_provenance("create_knowledge")
         meta = dict(metadata)
         meta["knowledge_type"] = knowledge_type
@@ -448,6 +463,12 @@ class ObsidianGitAdapter(BaseExecutionAdapter):
                 result = self._store.create(knowledge_id, content, meta)
         except ObsidianGitError as e:
             return self._error_result("create_knowledge", str(e))
+        # Enrich provenance with real-mode commit hash and vault path.
+        if self._real_mode:
+            commit_hash = result.get("head_commit")
+            if commit_hash:
+                provenance["commit_hash"] = commit_hash
+            provenance["vault_path"] = self._vault_path
         return ExecutionResult(
             tool="obsidian_git_adapter",
             status=ExecutionStatus.SUCCESS,
@@ -493,6 +514,11 @@ class ObsidianGitAdapter(BaseExecutionAdapter):
                 metrics={"knowledge_id": knowledge_id},
                 raw={},
             )
+        if self._real_mode:
+            commit_hash = result.get("head_commit")
+            if commit_hash:
+                provenance["commit_hash"] = commit_hash
+            provenance["vault_path"] = self._vault_path
         return ExecutionResult(
             tool="obsidian_git_adapter",
             status=ExecutionStatus.SUCCESS,
@@ -521,6 +547,8 @@ class ObsidianGitAdapter(BaseExecutionAdapter):
                 metrics={"knowledge_id": knowledge_id, "found": False},
                 raw={},
             )
+        if self._real_mode:
+            provenance["vault_path"] = self._vault_path
         return ExecutionResult(
             tool="obsidian_git_adapter",
             status=ExecutionStatus.SUCCESS,
@@ -538,6 +566,8 @@ class ObsidianGitAdapter(BaseExecutionAdapter):
                 deleted = self._store.delete(knowledge_id)
         except ObsidianGitError as e:
             return self._error_result("delete_knowledge", str(e))
+        if self._real_mode and deleted:
+            provenance["vault_path"] = self._vault_path
         return ExecutionResult(
             tool="obsidian_git_adapter",
             status=ExecutionStatus.SUCCESS if deleted else ExecutionStatus.FAILURE,
@@ -566,23 +596,235 @@ class ObsidianGitAdapter(BaseExecutionAdapter):
     # Real-mode extension points (filesystem + git)
     # -----------------------------------------------------------------------
 
+    def _validate_vault_path(self, path: Path) -> Path:
+        """Resolve and validate path is within vault root (prevent traversal)."""
+        try:
+            resolved = path.resolve()
+            vault_resolved = Path(self._vault_path).resolve()
+        except Exception as e:
+            raise ObsidianGitValidationError("Invalid vault path") from e
+        try:
+            resolved.relative_to(vault_resolved)
+        except ValueError:
+            raise ObsidianGitSecurityError("Path traversal detected")
+        return resolved
+
+    def _knowledge_file_path(self, knowledge_id: str) -> Path:
+        """Map knowledge_id to vault file path (sanitized)."""
+        # Sanitize for filesystem safety: alphanumeric, hyphen, underscore only.
+        safe = re.sub(r"[^a-zA-Z0-9_-]", "_", knowledge_id)
+        return Path(self._vault_path) / f"{safe}.md"
+
+    def _write_frontmatter_file(
+        self, path: Path, content: str, metadata: dict[str, Any]
+    ) -> None:
+        """Atomic write: write to temp file then rename (prevent partial writes)."""
+        # Build markdown with YAML frontmatter.
+        fm = "---\n" + yaml.safe_dump(metadata, sort_keys=True, allow_unicode=True) + "---\n\n"
+        body = content
+        data = (fm + body).encode("utf-8")
+
+        temp_path = path.with_suffix(path.suffix + ".tmp")
+        self._validate_vault_path(temp_path)
+        temp_path.parent.mkdir(parents=True, exist_ok=True)
+        temp_path.write_bytes(data)
+        # Atomic rename on POSIX + Windows (NTFS).
+        temp_path.replace(path)
+
+    def _parse_markdown_file(self, path: Path) -> dict[str, Any] | None:
+        """Parse markdown file with YAML frontmatter into dict."""
+        raw = path.read_bytes()
+        parts = raw.split(b"\n---\n", 2)
+        if len(parts) < 3:
+            # Fallback: no frontmatter, treat whole file as content.
+            return {"content": raw.decode("utf-8"), "metadata": {}}
+        try:
+            metadata = yaml.safe_load(parts[1].decode("utf-8")) or {}
+            content = parts[2].decode("utf-8")
+            return {"content": content, "metadata": metadata}
+        except Exception as e:
+            raise ObsidianGitUnavailableError(
+                f"Malformed markdown file: {path}"
+            ) from e
+
+    async def _git_commit(self, message: str, file_path: Path | None = None) -> str:
+        """Stage specific file and commit; return commit hash.
+
+        Stages only the given file_path (or the file implied by the commit message)
+        rather than the entire vault working tree.
+        """
+        vault = Path(self._vault_path)
+        # Use -C to run git from the vault directory.
+        proc = await asyncio.create_subprocess_exec(
+            "git", "-C", str(vault), "status", "--porcelain",
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        await proc.communicate()
+        if proc.returncode != 0:
+            raise ObsidianGitUnavailableError("Git not available in vault")
+
+        # Stage only the specific file if provided, otherwise determine from message.
+        if file_path is not None:
+            # Stage the specific file relative to vault root.
+            rel_path = file_path.resolve().relative_to(vault.resolve())
+            proc = await asyncio.create_subprocess_exec(
+                "git", "-C", str(vault), "add", str(rel_path),
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+        else:
+            # Fallback: for delete operations, no file to add (git rm already staged).
+            # This maintains backward compatibility for any edge cases.
+            proc = None
+
+        if proc is not None:
+            await proc.communicate()
+            if proc.returncode != 0:
+                raise ObsidianGitUnavailableError("Git add failed")
+
+        proc = await asyncio.create_subprocess_exec(
+            "git", "-C", str(vault), "commit", "-m", message,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        stdout, stderr = await proc.communicate()
+        if proc.returncode != 0:
+            raise ObsidianGitUnavailableError(f"Git commit failed")
+
+        # Capture HEAD commit hash.
+        proc = await asyncio.create_subprocess_exec(
+            "git", "-C", str(vault), "rev-parse", "HEAD",
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        stdout, stderr = await proc.communicate()
+        if proc.returncode != 0:
+            raise ObsidianGitUnavailableError("Git rev-parse failed")
+        return stdout.decode("utf-8").strip()
+
+    async def _git_rm(self, path: Path, message: str) -> str:
+        """Remove file and commit; return commit hash."""
+        vault = Path(self._vault_path)
+        proc = await asyncio.create_subprocess_exec(
+            "git", "-C", str(vault), "rm", "--cached", str(path.resolve().relative_to(vault.resolve())),
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        await proc.communicate()
+        if proc.returncode != 0:
+            raise ObsidianGitUnavailableError("Git rm failed")
+
+        proc = await asyncio.create_subprocess_exec(
+            "git", "-C", str(vault), "commit", "-m", message,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        stdout, stderr = await proc.communicate()
+        if proc.returncode != 0:
+            raise ObsidianGitUnavailableError("Git commit after rm failed")
+
+        proc = await asyncio.create_subprocess_exec(
+            "git", "-C", str(vault), "rev-parse", "HEAD",
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        stdout, stderr = await proc.communicate()
+        if proc.returncode != 0:
+            raise ObsidianGitUnavailableError("Git rev-parse failed after rm")
+        return stdout.decode("utf-8").strip()
+
     async def _write_real(
         self, knowledge_id: str, content: str, metadata: dict[str, Any], update: bool = False
     ) -> dict[str, Any]:
-        """Real filesystem + git write (documented extension point)."""
-        raise ObsidianGitUnavailableError(
-            "Real Obsidian Git writer not injected; use mock mode or inject writer"
-        )
+        """Write knowledge to filesystem vault with Git commit.
+
+        1. Validate vault_path exists and is within allowed directories
+        2. Write markdown file to vault (with frontmatter from metadata)
+        3. Stage and commit via Git (using CLI)
+        4. Return commit metadata mirroring mock store semantics
+        """
+        if not self._vault_path:
+            raise ObsidianGitNotConfiguredError("Real mode requires OBSIDIAN_VAULT_PATH")
+        vault = Path(self._vault_path)
+        if not vault.exists():
+            raise ObsidianGitNotConfiguredError("Vault path does not exist")
+
+        file_path = self._knowledge_file_path(knowledge_id)
+        self._validate_vault_path(file_path)
+
+        op = "update" if update else "create"
+        commit_message = f"{op}: {knowledge_id}"
+
+        # Write file atomically.
+        self._write_frontmatter_file(file_path, content, metadata)
+
+        # Git commit - stage only the specific file being written.
+        commit_hash = await self._git_commit(commit_message, file_path)
+
+        return {
+            "knowledge_id": knowledge_id,
+            "content": content,
+            "metadata": metadata,
+            "head_commit": commit_hash,
+            "version_history": [commit_hash],
+        }
 
     async def _read_real(self, knowledge_id: str) -> dict[str, Any] | None:
-        raise ObsidianGitUnavailableError(
-            "Real Obsidian Git reader not injected; use mock mode or inject reader"
-        )
+        """Read knowledge from filesystem vault.
+
+        1. Locate markdown file by knowledge_id in vault
+        2. Parse frontmatter + body
+        3. Return structured record matching mock store format
+        4. Return None if not found (don't raise)
+        """
+        if not self._vault_path:
+            raise ObsidianGitNotConfiguredError("Real mode requires OBSIDIAN_VAULT_PATH")
+
+        file_path = self._knowledge_file_path(knowledge_id)
+        try:
+            self._validate_vault_path(file_path)
+        except ObsidianGitSecurityError:
+            return None
+
+        if not file_path.exists():
+            return None
+
+        parsed = self._parse_markdown_file(file_path)
+        return {
+            "knowledge_id": knowledge_id,
+            "content": parsed["content"],
+            "metadata": parsed["metadata"],
+            "head_commit": parsed["metadata"].get("head_commit", ""),
+            "version_history": parsed["metadata"].get("version_history", []),
+        }
 
     async def _delete_real(self, knowledge_id: str) -> bool:
-        raise ObsidianGitUnavailableError(
-            "Real Obsidian Git deleter not injected; use mock mode or inject deleter"
-        )
+        """Delete knowledge from filesystem vault with Git commit.
+
+        1. Locate and remove markdown file
+        2. Stage and commit deletion via Git
+        3. Return True if deleted, False if not found
+        """
+        if not self._vault_path:
+            raise ObsidianGitNotConfiguredError("Real mode requires OBSIDIAN_VAULT_PATH")
+
+        file_path = self._knowledge_file_path(knowledge_id)
+        try:
+            self._validate_vault_path(file_path)
+        except ObsidianGitSecurityError:
+            return False
+
+        if not file_path.exists():
+            return False
+
+        # Remove file from filesystem.
+        file_path.unlink(missing_ok=True)
+
+        # Commit deletion.
+        commit_message = f"delete: {knowledge_id}"
+        await self._git_rm(file_path, commit_message)
+        return True
 
 
 __all__ = [

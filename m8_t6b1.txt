@@ -1,0 +1,222 @@
+============================= test session starts =============================
+platform win32 -- Python 3.12.2, pytest-9.1.1, pluggy-1.6.0
+rootdir: C:\Development\AI-OS
+configfile: pyproject.toml
+plugins: anyio-4.14.2, asyncio-0.21.2
+asyncio: mode=Mode.AUTO
+collected 49 items
+
+tests\integration\test_m8_t5_dynamic_loading.py ........                 [ 16%]
+tests\integration\test_m8_t5_security.py ..............                  [ 44%]
+tests\integration\test_m8_t6_authority_boundary.py .........             [ 63%]
+tests\integration\test_m8_t6_cross_adapter_matrix.py ...........         [ 85%]
+tests\integration\test_m8_t6_degraded_mode.py .......                    [100%]
+
+============================== warnings summary ===============================
+tests/integration/test_m8_t5_dynamic_loading.py: 6 warnings
+tests/integration/test_m8_t5_security.py: 4 warnings
+tests/integration/test_m8_t6_authority_boundary.py: 2 warnings
+tests/integration/test_m8_t6_cross_adapter_matrix.py: 1 warning
+  C:\Development\AI-OS\src\aios\core\kernel.py:2251: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    started_at=datetime.utcnow(),
+
+tests/integration/test_m8_t5_dynamic_loading.py: 78 warnings
+tests/integration/test_m8_t5_security.py: 52 warnings
+tests/integration/test_m8_t6_authority_boundary.py: 26 warnings
+tests/integration/test_m8_t6_cross_adapter_matrix.py: 13 warnings
+  C:\Development\AI-OS\src\aios\services\base.py:168: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    self._started_at = datetime.utcnow()
+
+tests/integration/test_m8_t5_dynamic_loading.py: 78 warnings
+tests/integration/test_m8_t5_security.py: 52 warnings
+tests/integration/test_m8_t6_authority_boundary.py: 26 warnings
+tests/integration/test_m8_t6_cross_adapter_matrix.py: 13 warnings
+  C:\Development\AI-OS\src\aios\core\kernel.py:2298: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    started_at=datetime.utcnow(),
+
+tests/integration/test_m8_t5_dynamic_loading.py: 6 warnings
+tests/integration/test_m8_t5_security.py: 4 warnings
+tests/integration/test_m8_t6_authority_boundary.py: 2 warnings
+tests/integration/test_m8_t6_cross_adapter_matrix.py: 1 warning
+  C:\Development\AI-OS\src\aios\core\kernel.py:638: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    self._start_time = datetime.utcnow()
+
+tests/integration/test_m8_t5_dynamic_loading.py: 6 warnings
+tests/integration/test_m8_t5_security.py: 4 warnings
+tests/integration/test_m8_t6_authority_boundary.py: 2 warnings
+tests/integration/test_m8_t6_cross_adapter_matrix.py: 1 warning
+  C:\Development\AI-OS\src\aios\core\kernel.py:684: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    datetime.utcnow() - self._start_time
+
+tests/integration/test_m8_t5_dynamic_loading.py: 2 warnings
+tests/integration/test_m8_t5_security.py: 2 warnings
+tests/integration/test_m8_t6_authority_boundary.py: 4 warnings
+tests/integration/test_m8_t6_cross_adapter_matrix.py: 10 warnings
+  C:\Development\AI-OS\src\aios\core\capability_provenance.py:229: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    "timestamp": datetime.utcnow().isoformat(),
+
+tests/integration/test_m8_t6_authority_boundary.py: 3 warnings
+tests/integration/test_m8_t6_cross_adapter_matrix.py: 17 warnings
+tests/integration/test_m8_t6_degraded_mode.py: 8 warnings
+  C:\Development\AI-OS\src\aios\adapters\graphify_adapter.py:368: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    "graphify_timestamp": datetime.utcnow().isoformat(),
+
+tests/integration/test_m8_t6_authority_boundary.py: 4 warnings
+tests/integration/test_m8_t6_cross_adapter_matrix.py: 4 warnings
+tests/integration/test_m8_t6_degraded_mode.py: 6 warnings
+  C:\Development\AI-OS\src\aios\adapters\notion_adapter.py:299: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    "timestamp": datetime.utcnow().isoformat(),
+
+tests/integration/test_m8_t6_authority_boundary.py::test_a3_adapters_set_no_verdict_provenance_key
+tests/integration/test_m8_t6_authority_boundary.py::test_a5_injected_authoritative_overwritten
+tests/integration/test_m8_t6_authority_boundary.py::test_a6_spoofed_builtin_trust_overwritten
+tests/integration/test_m8_t6_authority_boundary.py::test_a6_spoofed_builtin_trust_overwritten
+tests/integration/test_m8_t6_cross_adapter_matrix.py::test_pair_hermes_knowledge_compose
+tests/integration/test_m8_t6_cross_adapter_matrix.py::test_pair_graphify_knowledge_compose
+tests/integration/test_m8_t6_cross_adapter_matrix.py::test_pair_all_external_compose
+tests/integration/test_m8_t6_degraded_mode.py::test_dg1_single_dependency_failure_others_succeed
+tests/integration/test_m8_t6_degraded_mode.py::test_dg4_execution_systems_fail_context_retrievable
+  C:\Development\AI-OS\src\aios\adapters\notion_adapter.py:339: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    "notion_timestamp": datetime.utcnow().isoformat(),
+
+tests/integration/test_m8_t6_authority_boundary.py: 4 warnings
+tests/integration/test_m8_t6_cross_adapter_matrix.py: 10 warnings
+tests/integration/test_m8_t6_degraded_mode.py: 6 warnings
+  C:\Development\AI-OS\src\aios\adapters\obsidian_adapter.py:307: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    "timestamp": datetime.utcnow().isoformat(),
+
+tests/integration/test_m8_t6_authority_boundary.py: 4 warnings
+tests/integration/test_m8_t6_cross_adapter_matrix.py: 3 warnings
+tests/integration/test_m8_t6_degraded_mode.py: 3 warnings
+  C:\Development\AI-OS\src\aios\adapters\obsidian_adapter.py:336: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    "obsidian_timestamp": datetime.utcnow().isoformat(),
+
+tests/integration/test_m8_t6_authority_boundary.py: 4 warnings
+tests/integration/test_m8_t6_cross_adapter_matrix.py: 4 warnings
+tests/integration/test_m8_t6_degraded_mode.py: 6 warnings
+  C:\Development\AI-OS\src\aios\adapters\claude_mem_adapter.py:294: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    "timestamp": datetime.utcnow().isoformat(),
+
+tests/integration/test_m8_t6_authority_boundary.py: 4 warnings
+tests/integration/test_m8_t6_cross_adapter_matrix.py: 4 warnings
+tests/integration/test_m8_t6_degraded_mode.py: 4 warnings
+  C:\Development\AI-OS\src\aios\adapters\claude_mem_adapter.py:319: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    "claude_mem_timestamp": datetime.utcnow().isoformat(),
+
+tests/integration/test_m8_t6_authority_boundary.py: 8 warnings
+tests/integration/test_m8_t6_cross_adapter_matrix.py: 4 warnings
+  C:\Development\AI-OS\src\aios\core\mcp_manager.py:349: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    status.last_connected = datetime.utcnow()
+
+tests/integration/test_m8_t6_cross_adapter_matrix.py::test_pair_hermes_playwright_compose
+tests/integration/test_m8_t6_cross_adapter_matrix.py::test_pair_hermes_graphify_compose
+tests/integration/test_m8_t6_cross_adapter_matrix.py::test_pair_hermes_knowledge_compose
+tests/integration/test_m8_t6_cross_adapter_matrix.py::test_pair_hermes_playwright_graphify_chain
+tests/integration/test_m8_t6_cross_adapter_matrix.py::test_pair_all_external_compose
+tests/integration/test_m8_t6_cross_adapter_matrix.py::test_pair_acp_fallback_provenance
+tests/integration/test_m8_t6_cross_adapter_matrix.py::test_pair_acp_fallback_provenance
+tests/integration/test_m8_t6_cross_adapter_matrix.py::test_pair_three_plus_one_forced_fail
+  C:\Development\AI-OS\src\aios\adapters\mock_hermes_server.py:353: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    {"action": "create_session", "environment": environment, "timestamp": datetime.utcnow().isoformat()}
+
+tests/integration/test_m8_t6_cross_adapter_matrix.py::test_pair_hermes_playwright_compose
+tests/integration/test_m8_t6_cross_adapter_matrix.py::test_pair_hermes_graphify_compose
+tests/integration/test_m8_t6_cross_adapter_matrix.py::test_pair_hermes_playwright_graphify_chain
+tests/integration/test_m8_t6_cross_adapter_matrix.py::test_pair_all_external_compose
+tests/integration/test_m8_t6_cross_adapter_matrix.py::test_pair_acp_fallback_provenance
+tests/integration/test_m8_t6_cross_adapter_matrix.py::test_pair_acp_fallback_provenance
+tests/integration/test_m8_t6_cross_adapter_matrix.py::test_pair_three_plus_one_forced_fail
+  C:\Development\AI-OS\src\aios\adapters\mock_hermes_server.py:386: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    "parameters": parameters, "timestamp": datetime.utcnow().isoformat()}
+
+tests/integration/test_m8_t6_cross_adapter_matrix.py::test_pair_hermes_playwright_compose
+tests/integration/test_m8_t6_cross_adapter_matrix.py::test_pair_playwright_graphify_compose
+tests/integration/test_m8_t6_cross_adapter_matrix.py::test_pair_playwright_knowledge_compose
+tests/integration/test_m8_t6_cross_adapter_matrix.py::test_pair_hermes_playwright_graphify_chain
+tests/integration/test_m8_t6_cross_adapter_matrix.py::test_pair_all_external_compose
+  C:\Development\AI-OS\src\aios\adapters\playwright_session.py:49: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    "created_at": datetime.utcnow(),
+
+tests/integration/test_m8_t6_cross_adapter_matrix.py::test_pair_hermes_playwright_compose
+tests/integration/test_m8_t6_cross_adapter_matrix.py::test_pair_playwright_graphify_compose
+tests/integration/test_m8_t6_cross_adapter_matrix.py::test_pair_playwright_knowledge_compose
+tests/integration/test_m8_t6_cross_adapter_matrix.py::test_pair_hermes_playwright_graphify_chain
+tests/integration/test_m8_t6_cross_adapter_matrix.py::test_pair_all_external_compose
+  C:\Development\AI-OS\src\aios\adapters\playwright_session.py:50: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    "last_used": datetime.utcnow(),
+
+tests/integration/test_m8_t6_cross_adapter_matrix.py::test_pair_hermes_playwright_compose
+tests/integration/test_m8_t6_cross_adapter_matrix.py::test_pair_playwright_graphify_compose
+tests/integration/test_m8_t6_cross_adapter_matrix.py::test_pair_playwright_knowledge_compose
+tests/integration/test_m8_t6_cross_adapter_matrix.py::test_pair_hermes_playwright_graphify_chain
+tests/integration/test_m8_t6_cross_adapter_matrix.py::test_pair_all_external_compose
+  C:\Development\AI-OS\src\aios\adapters\mock_playwright_mcp_server.py:342: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    "created_at": datetime.utcnow().isoformat(),
+
+tests/integration/test_m8_t6_cross_adapter_matrix.py: 15 warnings
+  C:\Development\AI-OS\src\aios\adapters\playwright_session.py:91: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    session["last_used"] = datetime.utcnow()
+
+tests/integration/test_m8_t6_cross_adapter_matrix.py::test_pair_hermes_playwright_compose
+tests/integration/test_m8_t6_cross_adapter_matrix.py::test_pair_hermes_graphify_compose
+tests/integration/test_m8_t6_cross_adapter_matrix.py::test_pair_hermes_knowledge_compose
+tests/integration/test_m8_t6_cross_adapter_matrix.py::test_pair_hermes_playwright_graphify_chain
+tests/integration/test_m8_t6_cross_adapter_matrix.py::test_pair_all_external_compose
+tests/integration/test_m8_t6_cross_adapter_matrix.py::test_pair_acp_fallback_provenance
+tests/integration/test_m8_t6_cross_adapter_matrix.py::test_pair_acp_fallback_provenance
+tests/integration/test_m8_t6_cross_adapter_matrix.py::test_pair_three_plus_one_forced_fail
+  C:\Development\AI-OS\src\aios\adapters\mock_hermes_server.py:368: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    {"action": "close_session", "timestamp": datetime.utcnow().isoformat()}
+
+tests/integration/test_m8_t6_cross_adapter_matrix.py: 10 warnings
+tests/integration/test_m8_t6_degraded_mode.py: 7 warnings
+  C:\Development\AI-OS\src\aios\adapters\graphify_adapter.py:336: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    "timestamp": datetime.utcnow().isoformat(),
+
+tests/integration/test_m8_t6_cross_adapter_matrix.py: 7 warnings
+tests/integration/test_m8_t6_degraded_mode.py: 6 warnings
+  C:\Development\AI-OS\src\aios\adapters\graphify_adapter.py:477: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    properties["created_at"] = datetime.utcnow().isoformat()
+
+tests/integration/test_m8_t6_cross_adapter_matrix.py: 7 warnings
+tests/integration/test_m8_t6_degraded_mode.py: 6 warnings
+  C:\Development\AI-OS\src\aios\adapters\graphify_adapter.py:478: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    properties["updated_at"] = datetime.utcnow().isoformat()
+
+tests/integration/test_m8_t6_cross_adapter_matrix.py::test_pair_hermes_knowledge_compose
+tests/integration/test_m8_t6_cross_adapter_matrix.py::test_pair_playwright_knowledge_compose
+tests/integration/test_m8_t6_cross_adapter_matrix.py::test_pair_graphify_knowledge_compose
+tests/integration/test_m8_t6_cross_adapter_matrix.py::test_pair_all_external_compose
+tests/integration/test_m8_t6_degraded_mode.py::test_dg1_single_dependency_failure_others_succeed
+tests/integration/test_m8_t6_degraded_mode.py::test_dg2_multiple_dependency_failures_partial_aggregate
+tests/integration/test_m8_t6_degraded_mode.py::test_dg4_execution_systems_fail_context_retrievable
+tests/integration/test_m8_t6_degraded_mode.py::test_dg6_mcp_fully_disconnected_adapters_report_error
+tests/integration/test_m8_t6_degraded_mode.py::test_dg6_disconnect_then_operation_reports_unavailable
+  C:\Development\AI-OS\tests\integration\conftest.py:424: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    created = (datetime.utcnow() - timedelta(hours=hours_ago)).isoformat()
+
+tests/integration/test_m8_t6_cross_adapter_matrix.py::test_pair_playwright_graphify_compose
+  C:\Development\AI-OS\src\aios\adapters\graphify_adapter.py:643: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    properties["created_at"] = datetime.utcnow().isoformat()
+
+tests/integration/test_m8_t6_cross_adapter_matrix.py::test_matrix_all_external_via_real_subprocess
+tests/integration/test_m8_t6_cross_adapter_matrix.py::test_matrix_all_external_via_real_subprocess
+tests/integration/test_m8_t6_cross_adapter_matrix.py::test_matrix_all_external_via_real_subprocess
+  C:\Development\AI-OS\src\aios\core\mcp_manager.py:792: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    call_id = call_id or f"call_{datetime.utcnow().timestamp()}"
+
+tests/integration/test_m8_t6_cross_adapter_matrix.py::test_matrix_all_external_via_real_subprocess
+tests/integration/test_m8_t6_cross_adapter_matrix.py::test_matrix_all_external_via_real_subprocess
+tests/integration/test_m8_t6_cross_adapter_matrix.py::test_matrix_all_external_via_real_subprocess
+  C:\Development\AI-OS\src\aios\core\mcp_manager.py:809: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    "session_id": f"mcp_{server_id}_{datetime.utcnow().timestamp()}",
+
+tests/integration/test_m8_t6_cross_adapter_matrix.py::test_matrix_all_external_via_real_subprocess
+tests/integration/test_m8_t6_cross_adapter_matrix.py::test_matrix_all_external_via_real_subprocess
+tests/integration/test_m8_t6_cross_adapter_matrix.py::test_matrix_all_external_via_real_subprocess
+  C:\Development\AI-OS\src\aios\core\mcp_manager.py:812: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    "timestamp": datetime.utcnow().isoformat(),
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+================ 49 passed, 629 warnings in 102.02s (0:01:42) =================
+EXIT=0

@@ -97,6 +97,12 @@ class MCPServerConfig:
 
 
 @dataclass
+class MCPManagerConfig:
+    """MCP Manager configuration."""
+    config_dir: Path | None = None
+
+
+@dataclass
 class MCPTool:
     """MCP tool definition."""
 
@@ -133,15 +139,20 @@ class MCPManager:
 
     def __init__(
         self,
+        config: MCPManagerConfig | None = None,
         config_dir: Path | None = None,
     ):
         """
         Initialize the MCP Manager.
 
         Args:
-            config_dir: Directory containing MCP server configs
+            config: MCPManagerConfig instance (preferred)
+            config_dir: Directory containing MCP server configs (legacy)
         """
-        self._config_dir = config_dir or Path("./config/mcp")
+        if config is not None:
+            self._config_dir = config.config_dir or Path("./config/mcp")
+        else:
+            self._config_dir = config_dir or Path("./config/mcp")
         self._config_dir.mkdir(parents=True, exist_ok=True)
 
         self._servers: dict[str, MCPServerConfig] = {}
@@ -1018,6 +1029,7 @@ def set_mcp_manager(manager: MCPManager) -> None:
 
 __all__ = [
     "MCPManager",
+    "MCPManagerConfig",
     "MCPServerConfig",
     "MCPTool",
     "MCPServerStatus",

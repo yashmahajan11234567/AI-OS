@@ -1,0 +1,693 @@
+......................................................FFFFFFFFFF........ [ 13%]
+.............................................................s.......... [ 27%]
+.....................................s.................................. [ 41%]
+........................................................................ [ 55%]
+........................................................................ [ 68%]
+................................F.............F......F.................. [ 82%]
+............................F.....F.............F....................... [ 96%]
+F..F...............                                                      [100%]
+================================== FAILURES ===================================
+C:\Users\hitoy\AppData\Local\Temp\m14t2_baseline\tests\integration\test_m10_integration.py:87: AttributeError: 'NoneType' object has no attribute 'set_test_override'
+C:\Users\hitoy\AppData\Local\Temp\m14t2_baseline\tests\integration\test_m10_integration.py:152: AttributeError: 'NoneType' object has no attribute 'set_test_override'
+C:\Users\hitoy\AppData\Local\Temp\m14t2_baseline\tests\integration\test_m10_integration.py:222: AttributeError: 'ConfigurationManager' object has no attribute '_config'
+C:\Users\hitoy\AppData\Local\Temp\m14t2_baseline\tests\integration\test_m10_integration.py:288: AttributeError: 'ConfigurationManager' object has no attribute '_config'
+C:\Users\hitoy\AppData\Local\Temp\m14t2_baseline\tests\integration\test_m10_integration.py:335: AttributeError: 'ConfigurationManager' object has no attribute '_config'
+C:\Users\hitoy\AppData\Local\Temp\m14t2_baseline\tests\integration\test_m10_integration.py:379: AttributeError: 'ConfigurationManager' object has no attribute '_config'
+C:\Users\hitoy\AppData\Local\Temp\m14t2_baseline\tests\integration\test_m10_integration.py:427: AttributeError: 'ConfigurationManager' object has no attribute '_config'
+C:\Users\hitoy\AppData\Local\Temp\m14t2_baseline\tests\integration\test_m10_integration.py:466: AttributeError: 'ConfigurationManager' object has no attribute '_config'
+C:\Users\hitoy\AppData\Local\Temp\m14t2_baseline\tests\integration\test_m10_integration.py:509: AttributeError: 'ConfigurationManager' object has no attribute '_config'
+C:\Users\hitoy\AppData\Local\Temp\m14t2_baseline\tests\integration\test_m10_integration.py:545: AttributeError: 'ConfigurationManager' object has no attribute '_config'
+C:\Users\hitoy\AppData\Local\Temp\m14t2_baseline\tests\integration\test_m9_manifest_hot_reload.py:136: AssertionError: assert set() >= {'claude_mem_...ight_browser'}
+C:\Users\hitoy\AppData\Local\Temp\m14t2_baseline\tests\integration\test_m9_provenance_closure.py:93: ModuleNotFoundError: No module named 'tests.integration.test_m8_t6_evidence_provenance'
+C:\Users\hitoy\AppData\Local\Temp\m14t2_baseline\tests\integration\test_m9_provenance_closure.py:235: ModuleNotFoundError: No module named 'aios.services.remediation'
+C:\Users\hitoy\AppData\Local\Temp\m14t2_baseline\tests\integration\test_terminal2_failure_degradation.py:317: AssertionError: anthropic defaults to REAL (spec S9)
+C:\Users\hitoy\AppData\Local\Temp\m14t2_baseline\tests\integration\test_terminal2_gated_real.py:92: AssertionError: MCP config for hermes_agent_ext missing
+C:\Users\hitoy\AppData\Local\Temp\m14t2_baseline\tests\integration\test_terminal2_gated_real.py:293: AssertionError: anthropic should default to real
+C:\Users\hitoy\AppData\Local\Temp\m14t2_baseline\src\aios\integrations\validation.py:99: AttributeError: 'function' object has no attribute 'get'
+C:\Users\hitoy\AppData\Local\Temp\m14t2_baseline\src\aios\integrations\validation.py:99: AttributeError: 'function' object has no attribute 'get'
+============================== warnings summary ===============================
+tests\integration\test_integration.py:476
+  C:\Users\hitoy\AppData\Local\Temp\m14t2_baseline\tests\integration\test_integration.py:476: PytestCollectionWarning: cannot collect test class 'TestService' because it has a __init__ constructor (from: tests/integration/test_integration.py::TestServiceRegistry)
+    class TestService(BaseService):
+
+src\aios\services\testing.py:122
+  C:\Users\hitoy\AppData\Local\Temp\m14t2_baseline\src\aios\services\testing.py:122: PytestCollectionWarning: cannot collect test class 'TestOrchestratorService' because it has a __init__ constructor (from: tests/integration/test_m7_evidence_integrity.py)
+    class TestOrchestratorService(WorkflowManager):
+
+src\aios\services\testing.py:122
+  C:\Users\hitoy\AppData\Local\Temp\m14t2_baseline\src\aios\services\testing.py:122: PytestCollectionWarning: cannot collect test class 'TestOrchestratorService' because it has a __init__ constructor (from: tests/integration/test_m7_isolation.py)
+    class TestOrchestratorService(WorkflowManager):
+
+src\aios\core\testing_evidence.py:124
+  C:\Users\hitoy\AppData\Local\Temp\m14t2_baseline\src\aios\core\testing_evidence.py:124: PytestCollectionWarning: cannot collect test class 'TestingEvidence' because it has a __init__ constructor (from: tests/integration/test_m7_isolation.py)
+    @dataclass(frozen=True)
+
+src\aios\services\testing.py:122
+  C:\Users\hitoy\AppData\Local\Temp\m14t2_baseline\src\aios\services\testing.py:122: PytestCollectionWarning: cannot collect test class 'TestOrchestratorService' because it has a __init__ constructor (from: tests/integration/test_m7_multi_perspective.py)
+    class TestOrchestratorService(WorkflowManager):
+
+src\aios\core\testing_evidence.py:124
+  C:\Users\hitoy\AppData\Local\Temp\m14t2_baseline\src\aios\core\testing_evidence.py:124: PytestCollectionWarning: cannot collect test class 'TestingEvidence' because it has a __init__ constructor (from: tests/integration/test_m7_security.py)
+    @dataclass(frozen=True)
+
+src\aios\core\testing_evidence.py:124
+  C:\Users\hitoy\AppData\Local\Temp\m14t2_baseline\src\aios\core\testing_evidence.py:124: PytestCollectionWarning: cannot collect test class 'TestingEvidence' because it has a __init__ constructor (from: tests/integration/test_m7_seeded_defects.py)
+    @dataclass(frozen=True)
+
+src\aios\services\testing.py:122
+  C:\Users\hitoy\AppData\Local\Temp\m14t2_baseline\src\aios\services\testing.py:122: PytestCollectionWarning: cannot collect test class 'TestOrchestratorService' because it has a __init__ constructor (from: tests/integration/test_m7_seeded_defects.py)
+    class TestOrchestratorService(WorkflowManager):
+
+src\aios\core\testing_evidence.py:124
+  C:\Users\hitoy\AppData\Local\Temp\m14t2_baseline\src\aios\core\testing_evidence.py:124: PytestCollectionWarning: cannot collect test class 'TestingEvidence' because it has a __init__ constructor (from: tests/integration/test_m8_t6_e2e_workflows.py)
+    @dataclass(frozen=True)
+
+src\aios\core\testing_evidence.py:124
+  C:\Users\hitoy\AppData\Local\Temp\m14t2_baseline\src\aios\core\testing_evidence.py:124: PytestCollectionWarning: cannot collect test class 'TestingEvidence' because it has a __init__ constructor (from: tests/integration/test_m8_t6_evidence_provenance.py)
+    @dataclass(frozen=True)
+
+src\aios\core\testing_evidence.py:124
+  C:\Users\hitoy\AppData\Local\Temp\m14t2_baseline\src\aios\core\testing_evidence.py:124: PytestCollectionWarning: cannot collect test class 'TestingEvidence' because it has a __init__ constructor (from: tests/integration/test_m8_t6_recovery.py)
+    @dataclass(frozen=True)
+
+src\aios\core\testing_evidence.py:124
+  C:\Users\hitoy\AppData\Local\Temp\m14t2_baseline\src\aios\core\testing_evidence.py:124: PytestCollectionWarning: cannot collect test class 'TestingEvidence' because it has a __init__ constructor (from: tests/integration/test_m8_t6_session_isolation.py)
+    @dataclass(frozen=True)
+
+src\aios\services\testing.py:122
+  C:\Users\hitoy\AppData\Local\Temp\m14t2_baseline\src\aios\services\testing.py:122: PytestCollectionWarning: cannot collect test class 'TestOrchestratorService' because it has a __init__ constructor (from: tests/integration/test_m9_closed_loop.py)
+    class TestOrchestratorService(WorkflowManager):
+
+src\aios\services\testing.py:122
+  C:\Users\hitoy\AppData\Local\Temp\m14t2_baseline\src\aios\services\testing.py:122: PytestCollectionWarning: cannot collect test class 'TestOrchestratorService' because it has a __init__ constructor (from: tests/integration/test_m9_escalation_wiring.py)
+    class TestOrchestratorService(WorkflowManager):
+
+tests/integration/test_integration.py: 3 warnings
+tests/integration/test_kernel_lifecycle_e2e.py: 15 warnings
+tests/integration/test_m13_integration.py: 8 warnings
+tests/integration/test_m8_t5_dynamic_loading.py: 6 warnings
+tests/integration/test_m8_t5_security.py: 4 warnings
+tests/integration/test_m8_t6_authority_boundary.py: 2 warnings
+tests/integration/test_m8_t6_capability_registry.py: 6 warnings
+tests/integration/test_m8_t6_cross_adapter_matrix.py: 1 warning
+tests/integration/test_m8_t6_e2e_workflows.py: 1 warning
+tests/integration/test_m8_t6_production_paths.py: 10 warnings
+tests/integration/test_m9_bootstrap.py: 11 warnings
+tests/integration/test_m9_manifest_hot_reload.py: 4 warnings
+tests/integration/test_state_manager_phase.py: 7 warnings
+tests/integration/test_storage_manager_phase.py: 10 warnings
+tests/integration/test_workflow_lifecycle.py: 15 warnings
+  C:\Users\hitoy\AppData\Local\Temp\m14t2_baseline\src\aios\core\kernel.py:2247: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    started_at=datetime.utcnow(),
+
+tests/integration/test_integration.py: 46 warnings
+tests/integration/test_kernel_lifecycle_e2e.py: 195 warnings
+tests/integration/test_m13_integration.py: 104 warnings
+tests/integration/test_m8_t5_dynamic_loading.py: 78 warnings
+tests/integration/test_m8_t5_security.py: 52 warnings
+tests/integration/test_m8_t6_authority_boundary.py: 26 warnings
+tests/integration/test_m8_t6_capability_registry.py: 78 warnings
+tests/integration/test_m8_t6_cross_adapter_matrix.py: 13 warnings
+tests/integration/test_m8_t6_e2e_workflows.py: 13 warnings
+tests/integration/test_m8_t6_production_paths.py: 130 warnings
+tests/integration/test_m9_bootstrap.py: 104 warnings
+  C:\Users\hitoy\AppData\Local\Temp\m14t2_baseline\src\aios\services\base.py:168: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    self._started_at = datetime.utcnow()
+
+tests/integration/test_integration.py: 39 warnings
+tests/integration/test_kernel_lifecycle_e2e.py: 195 warnings
+tests/integration/test_m13_integration.py: 104 warnings
+tests/integration/test_m8_t5_dynamic_loading.py: 78 warnings
+tests/integration/test_m8_t5_security.py: 52 warnings
+tests/integration/test_m8_t6_authority_boundary.py: 26 warnings
+tests/integration/test_m8_t6_capability_registry.py: 78 warnings
+tests/integration/test_m8_t6_cross_adapter_matrix.py: 13 warnings
+tests/integration/test_m8_t6_e2e_workflows.py: 13 warnings
+tests/integration/test_m8_t6_production_paths.py: 130 warnings
+tests/integration/test_m9_bootstrap.py: 142 warnings
+tests/integration/test_m9_manifest_hot_reload.py: 52 warnings
+tests/integration/test_state_manager_phase.py: 91 warnings
+tests/integration/test_storage_manager_phase.py: 130 warnings
+tests/integration/test_workflow_lifecycle.py: 195 warnings
+  C:\Users\hitoy\AppData\Local\Temp\m14t2_baseline\src\aios\core\kernel.py:2294: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    started_at=datetime.utcnow(),
+
+tests/integration/test_integration.py: 3 warnings
+tests/integration/test_kernel_lifecycle_e2e.py: 15 warnings
+tests/integration/test_m13_integration.py: 8 warnings
+tests/integration/test_m8_t5_dynamic_loading.py: 6 warnings
+tests/integration/test_m8_t5_security.py: 4 warnings
+tests/integration/test_m8_t6_authority_boundary.py: 2 warnings
+tests/integration/test_m8_t6_capability_registry.py: 6 warnings
+tests/integration/test_m8_t6_cross_adapter_matrix.py: 1 warning
+tests/integration/test_m8_t6_e2e_workflows.py: 1 warning
+tests/integration/test_m8_t6_production_paths.py: 10 warnings
+tests/integration/test_m9_bootstrap.py: 11 warnings
+tests/integration/test_m9_manifest_hot_reload.py: 4 warnings
+tests/integration/test_state_manager_phase.py: 7 warnings
+tests/integration/test_storage_manager_phase.py: 10 warnings
+tests/integration/test_structured_logger_phase.py: 11 warnings
+tests/integration/test_workflow_lifecycle.py: 15 warnings
+  C:\Users\hitoy\AppData\Local\Temp\m14t2_baseline\src\aios\core\kernel.py:636: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    self._start_time = datetime.utcnow()
+
+tests/integration/test_integration.py::TestWorkflowExecution::test_simple_workflow
+tests/integration/test_integration.py::TestWorkflowExecution::test_parallel_workflow
+tests/integration/test_integration.py::TestWorkflowExecution::test_workflow_failure
+tests/integration/test_workflow_lifecycle.py::TestWorkflowManagerLifecycle::test_workflow_manager_can_execute_workflows
+tests/integration/test_workflow_lifecycle.py::TestWorkflowManagerLifecycle::test_workflow_manager_shutdown_clears_state
+tests/integration/test_workflow_lifecycle.py::TestWorkflowManagerLifecycle::test_workflow_manager_workflow_state_persistence
+  C:\Users\hitoy\AppData\Local\Temp\m14t2_baseline\src\aios\core\workflow.py:538: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    "started_at": datetime.utcnow().isoformat(),
+
+tests/integration/test_integration.py::TestWorkflowExecution::test_simple_workflow
+tests/integration/test_integration.py::TestWorkflowExecution::test_parallel_workflow
+tests/integration/test_integration.py::TestWorkflowExecution::test_workflow_failure
+tests/integration/test_workflow_lifecycle.py::TestWorkflowManagerLifecycle::test_workflow_manager_can_execute_workflows
+tests/integration/test_workflow_lifecycle.py::TestWorkflowManagerLifecycle::test_workflow_manager_shutdown_clears_state
+tests/integration/test_workflow_lifecycle.py::TestWorkflowManagerLifecycle::test_workflow_manager_workflow_state_persistence
+  C:\Users\hitoy\AppData\Local\Temp\m14t2_baseline\src\aios\core\workflow.py:550: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    "started_at": datetime.utcnow(),
+
+tests/integration/test_integration.py::TestWorkflowExecution::test_simple_workflow
+tests/integration/test_integration.py::TestWorkflowExecution::test_parallel_workflow
+tests/integration/test_workflow_lifecycle.py::TestWorkflowManagerLifecycle::test_workflow_manager_can_execute_workflows
+tests/integration/test_workflow_lifecycle.py::TestWorkflowManagerLifecycle::test_workflow_manager_shutdown_clears_state
+tests/integration/test_workflow_lifecycle.py::TestWorkflowManagerLifecycle::test_workflow_manager_workflow_state_persistence
+  C:\Users\hitoy\AppData\Local\Temp\m14t2_baseline\src\aios\core\workflow.py:991: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    state["completed_at"] = datetime.utcnow().isoformat()
+
+tests/integration/test_integration.py::TestWorkflowExecution::test_simple_workflow
+tests/integration/test_integration.py::TestWorkflowExecution::test_parallel_workflow
+tests/integration/test_integration.py::TestWorkflowExecution::test_workflow_failure
+tests/integration/test_state_manager_phase.py::test_state_manager_business_apis_work_after_kernel_start
+tests/integration/test_state_manager_phase.py::test_state_manager_business_apis_work_after_kernel_start
+tests/integration/test_storage_manager_phase.py::test_storage_manager_business_apis_work_after_kernel_start
+tests/integration/test_workflow_lifecycle.py::TestWorkflowManagerLifecycle::test_workflow_manager_can_execute_workflows
+tests/integration/test_workflow_lifecycle.py::TestWorkflowManagerLifecycle::test_workflow_manager_shutdown_clears_state
+tests/integration/test_workflow_lifecycle.py::TestWorkflowManagerLifecycle::test_workflow_manager_workflow_state_persistence
+  C:\Users\hitoy\AppData\Local\Temp\m14t2_baseline\src\aios\core\state.py:633: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    snapshot_id=f"checkpoint_{datetime.utcnow().timestamp()}",
+
+tests/integration/test_integration.py: 8 warnings
+tests/integration/test_m13_integration.py: 2 warnings
+tests/integration/test_m7_evidence_integrity.py: 2 warnings
+tests/integration/test_m9_closed_loop.py: 11 warnings
+tests/integration/test_m9_escalation_wiring.py: 11 warnings
+tests/integration/test_state_manager_phase.py: 2 warnings
+tests/integration/test_storage_manager_phase.py: 1 warning
+tests/integration/test_workflow_lifecycle.py: 6 warnings
+  <string>:8: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+
+tests/integration/test_integration.py: 3 warnings
+tests/integration/test_kernel_lifecycle_e2e.py: 15 warnings
+tests/integration/test_m13_integration.py: 8 warnings
+tests/integration/test_m8_t5_dynamic_loading.py: 6 warnings
+tests/integration/test_m8_t5_security.py: 4 warnings
+tests/integration/test_m8_t6_authority_boundary.py: 2 warnings
+tests/integration/test_m8_t6_capability_registry.py: 6 warnings
+tests/integration/test_m8_t6_cross_adapter_matrix.py: 1 warning
+tests/integration/test_m8_t6_e2e_workflows.py: 1 warning
+tests/integration/test_m8_t6_production_paths.py: 10 warnings
+tests/integration/test_m9_bootstrap.py: 11 warnings
+tests/integration/test_m9_manifest_hot_reload.py: 4 warnings
+tests/integration/test_state_manager_phase.py: 7 warnings
+tests/integration/test_storage_manager_phase.py: 10 warnings
+tests/integration/test_structured_logger_phase.py: 11 warnings
+tests/integration/test_workflow_lifecycle.py: 15 warnings
+  C:\Users\hitoy\AppData\Local\Temp\m14t2_baseline\src\aios\core\kernel.py:682: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    datetime.utcnow() - self._start_time
+
+tests/integration/test_integration.py: 10 warnings
+tests/integration/test_m13_integration.py: 2 warnings
+tests/integration/test_m7_evidence_integrity.py: 22 warnings
+tests/integration/test_m7_security.py: 1 warning
+tests/integration/test_m9_closed_loop.py: 143 warnings
+tests/integration/test_m9_escalation_wiring.py: 143 warnings
+tests/integration/test_workflow_lifecycle.py: 3 warnings
+  <string>:9: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+
+tests/integration/test_integration.py::TestWorkflowExecution::test_workflow_failure
+  C:\Users\hitoy\AppData\Local\Temp\m14t2_baseline\src\aios\core\workflow.py:1024: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    state["failed_at"] = datetime.utcnow().isoformat()
+
+tests/integration/test_integration.py::TestCheckpointRecovery::test_create_and_restore_checkpoint
+tests/integration/test_integration.py::TestCheckpointRecovery::test_list_checkpoints
+tests/integration/test_integration.py::TestCheckpointRecovery::test_list_checkpoints
+tests/integration/test_integration.py::TestCheckpointRecovery::test_list_checkpoints
+tests/integration/test_integration.py::TestCheckpointRecovery::test_checkpoint_persistence
+  C:\Users\hitoy\AppData\Local\Temp\m14t2_baseline\src\aios\core\checkpoint.py:116: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    checkpoint_id=f"cp_{datetime.utcnow().timestamp()}_{execution_id[:8]}",
+
+tests/integration/test_integration.py::TestRootCauseAnalysis::test_classify_transient_failure
+tests/integration/test_integration.py::TestRootCauseAnalysis::test_classify_transient_failure
+tests/integration/test_integration.py::TestRootCauseAnalysis::test_classify_config_failure
+tests/integration/test_integration.py::TestRootCauseAnalysis::test_classify_config_failure
+tests/integration/test_integration.py::TestRootCauseAnalysis::test_classify_code_defect
+tests/integration/test_integration.py::TestRootCauseAnalysis::test_classify_code_defect
+tests/integration/test_integration.py::TestRootCauseAnalysis::test_retry_budget_exhausted_routes_to_service
+tests/integration/test_integration.py::TestRootCauseAnalysis::test_retry_budget_exhausted_routes_to_service
+  <string>:14: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+
+tests/integration/test_kernel_lifecycle_e2e.py::TestKernelLifecycleE2E::test_kernel_stats_after_lifecycle
+  C:\Users\hitoy\AppData\Local\Temp\m14t2_baseline\tests\integration\test_kernel_lifecycle_e2e.py:434: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    uptime = (datetime.utcnow() - kernel._start_time).total_seconds()
+
+tests/integration/test_m8_claude_mem.py::test_claude_mem_full_retrieval_flow
+tests/integration/test_m8_claude_mem.py::test_claude_mem_full_retrieval_flow
+tests/integration/test_m8_claude_mem.py::test_claude_mem_tag_filtering_with_context
+tests/integration/test_m8_claude_mem.py::test_claude_mem_tag_filtering_with_context
+tests/integration/test_m8_claude_mem.py::test_claude_mem_c14_advisory_untrusted
+tests/integration/test_m8_claude_mem.py::test_claude_mem_provenance_fields_complete
+tests/integration/test_m8_claude_mem.py::test_claude_mem_no_secrets_in_provenance
+tests/integration/test_m8_claude_mem.py::test_claude_mem_injected_content_logged_not_fatal
+  C:\Users\hitoy\AppData\Local\Temp\m14t2_baseline\tests\integration\test_m8_claude_mem.py:78: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    created = (datetime.utcnow() - timedelta(hours=hours_ago)).isoformat()
+
+tests/integration/test_m8_claude_mem.py: 8 warnings
+tests/integration/test_m8_t6_authority_boundary.py: 4 warnings
+tests/integration/test_m8_t6_cross_adapter_matrix.py: 4 warnings
+tests/integration/test_m8_t6_degraded_mode.py: 6 warnings
+tests/integration/test_m8_t6_e2e_workflows.py: 2 warnings
+tests/integration/test_m8_t6_evidence_provenance.py: 3 warnings
+tests/integration/test_m8_t6_failure_injection.py: 3 warnings
+tests/integration/test_m8_t6_security_integration.py: 1 warning
+tests/integration/test_m8_t6_session_isolation.py: 2 warnings
+  C:\Users\hitoy\AppData\Local\Temp\m14t2_baseline\src\aios\adapters\claude_mem_adapter.py:294: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    "timestamp": datetime.utcnow().isoformat(),
+
+tests/integration/test_m8_claude_mem.py: 7 warnings
+tests/integration/test_m8_t6_authority_boundary.py: 4 warnings
+tests/integration/test_m8_t6_cross_adapter_matrix.py: 4 warnings
+tests/integration/test_m8_t6_degraded_mode.py: 4 warnings
+tests/integration/test_m8_t6_e2e_workflows.py: 2 warnings
+tests/integration/test_m8_t6_evidence_provenance.py: 3 warnings
+tests/integration/test_m8_t6_security_integration.py: 1 warning
+tests/integration/test_m8_t6_session_isolation.py: 2 warnings
+  C:\Users\hitoy\AppData\Local\Temp\m14t2_baseline\src\aios\adapters\claude_mem_adapter.py:319: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    "claude_mem_timestamp": datetime.utcnow().isoformat(),
+
+tests/integration/test_m8_claude_mem.py::test_claude_mem_full_retrieval_flow
+  C:\Users\hitoy\AppData\Local\Temp\m14t2_baseline\src\aios\adapters\mock_claude_mem_server.py:179: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    cutoff = datetime.utcnow() - timedelta(hours=hours)
+
+tests/integration/test_m8_graphify.py: 32 warnings
+tests/integration/test_m8_t6_cross_adapter_matrix.py: 10 warnings
+tests/integration/test_m8_t6_degraded_mode.py: 7 warnings
+tests/integration/test_m8_t6_e2e_workflows.py: 4 warnings
+tests/integration/test_m8_t6_evidence_provenance.py: 15 warnings
+tests/integration/test_m8_t6_failure_injection.py: 3 warnings
+tests/integration/test_m8_t6_production_paths.py: 6 warnings
+tests/integration/test_m8_t6_recovery.py: 3 warnings
+tests/integration/test_m8_t6_security_integration.py: 2 warnings
+tests/integration/test_m8_t6_session_isolation.py: 4 warnings
+tests/integration/test_m9_provenance_closure.py: 10 warnings
+  C:\Users\hitoy\AppData\Local\Temp\m14t2_baseline\src\aios\adapters\graphify_adapter.py:336: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    "timestamp": datetime.utcnow().isoformat(),
+
+tests/integration/test_m8_graphify.py: 54 warnings
+tests/integration/test_m8_t6_authority_boundary.py: 3 warnings
+tests/integration/test_m8_t6_cross_adapter_matrix.py: 17 warnings
+tests/integration/test_m8_t6_degraded_mode.py: 8 warnings
+tests/integration/test_m8_t6_e2e_workflows.py: 6 warnings
+tests/integration/test_m8_t6_evidence_provenance.py: 14 warnings
+tests/integration/test_m8_t6_failure_injection.py: 4 warnings
+tests/integration/test_m8_t6_production_paths.py: 10 warnings
+tests/integration/test_m8_t6_recovery.py: 4 warnings
+tests/integration/test_m8_t6_security_integration.py: 4 warnings
+tests/integration/test_m8_t6_session_isolation.py: 6 warnings
+tests/integration/test_m9_provenance_closure.py: 13 warnings
+  C:\Users\hitoy\AppData\Local\Temp\m14t2_baseline\src\aios\adapters\graphify_adapter.py:368: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    "graphify_timestamp": datetime.utcnow().isoformat(),
+
+tests/integration/test_m8_graphify.py: 15 warnings
+tests/integration/test_m8_t6_cross_adapter_matrix.py: 7 warnings
+tests/integration/test_m8_t6_degraded_mode.py: 6 warnings
+tests/integration/test_m8_t6_e2e_workflows.py: 2 warnings
+tests/integration/test_m8_t6_evidence_provenance.py: 5 warnings
+tests/integration/test_m8_t6_failure_injection.py: 3 warnings
+tests/integration/test_m8_t6_production_paths.py: 4 warnings
+tests/integration/test_m8_t6_recovery.py: 2 warnings
+tests/integration/test_m8_t6_security_integration.py: 2 warnings
+tests/integration/test_m8_t6_session_isolation.py: 2 warnings
+tests/integration/test_m9_provenance_closure.py: 5 warnings
+  C:\Users\hitoy\AppData\Local\Temp\m14t2_baseline\src\aios\adapters\graphify_adapter.py:477: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    properties["created_at"] = datetime.utcnow().isoformat()
+
+tests/integration/test_m8_graphify.py: 15 warnings
+tests/integration/test_m8_t6_cross_adapter_matrix.py: 7 warnings
+tests/integration/test_m8_t6_degraded_mode.py: 6 warnings
+tests/integration/test_m8_t6_e2e_workflows.py: 2 warnings
+tests/integration/test_m8_t6_evidence_provenance.py: 5 warnings
+tests/integration/test_m8_t6_failure_injection.py: 3 warnings
+tests/integration/test_m8_t6_production_paths.py: 4 warnings
+tests/integration/test_m8_t6_recovery.py: 2 warnings
+tests/integration/test_m8_t6_security_integration.py: 2 warnings
+tests/integration/test_m8_t6_session_isolation.py: 2 warnings
+tests/integration/test_m9_provenance_closure.py: 5 warnings
+  C:\Users\hitoy\AppData\Local\Temp\m14t2_baseline\src\aios\adapters\graphify_adapter.py:478: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    properties["updated_at"] = datetime.utcnow().isoformat()
+
+tests/integration/test_m8_graphify.py::test_graphify_full_crud_cycle
+tests/integration/test_m9_provenance_closure.py::TestD03StoredProvenanceMarked::test_update_node_properties_advisory
+  C:\Users\hitoy\AppData\Local\Temp\m14t2_baseline\src\aios\adapters\graphify_adapter.py:565: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    properties["updated_at"] = datetime.utcnow().isoformat()
+
+tests/integration/test_m8_graphify.py::test_graphify_edge_operations
+tests/integration/test_m8_graphify.py::test_graphify_query_and_path
+tests/integration/test_m8_graphify.py::test_graphify_query_and_path
+tests/integration/test_m8_graphify.py::test_graphify_get_related_entities
+tests/integration/test_m8_graphify.py::test_graphify_get_dependency_chain
+tests/integration/test_m8_graphify.py::test_graphify_get_dependency_chain
+tests/integration/test_m8_t6_cross_adapter_matrix.py::test_pair_playwright_graphify_compose
+  C:\Users\hitoy\AppData\Local\Temp\m14t2_baseline\src\aios\adapters\graphify_adapter.py:643: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    properties["created_at"] = datetime.utcnow().isoformat()
+
+tests/integration/test_m8_hermes_acp.py::test_acp_mock_server_roundtrip
+  C:\Users\hitoy\AppData\Local\Temp\m14t2_baseline\src\aios\adapters\mock_hermes_acp_server.py:92: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    "created_at": datetime.utcnow().isoformat(),
+
+tests/integration/test_m8_hermes_acp.py::test_acp_mock_server_roundtrip
+  C:\Users\hitoy\AppData\Local\Temp\m14t2_baseline\src\aios\adapters\mock_hermes_acp_server.py:132: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    "timestamp": datetime.utcnow().isoformat(),
+
+tests/integration/test_m8_hermes_acp.py::test_acp_mock_server_roundtrip
+  C:\Users\hitoy\AppData\Local\Temp\m14t2_baseline\src\aios\adapters\mock_hermes_acp_server.py:175: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    {"action": "cancel", "timestamp": datetime.utcnow().isoformat()}
+
+tests/integration/test_m8_hermes_acp.py::test_acp_mock_server_roundtrip
+  C:\Users\hitoy\AppData\Local\Temp\m14t2_baseline\src\aios\adapters\mock_hermes_acp_server.py:200: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    {"action": "close", "timestamp": datetime.utcnow().isoformat()}
+
+tests/integration/test_m8_hermes_acp.py: 16 warnings
+tests/integration/test_m8_t6_cross_adapter_matrix.py: 8 warnings
+tests/integration/test_m8_t6_e2e_workflows.py: 4 warnings
+tests/integration/test_m8_t6_evidence_provenance.py: 5 warnings
+tests/integration/test_m8_t6_failure_injection.py: 1 warning
+tests/integration/test_m8_t6_recovery.py: 2 warnings
+tests/integration/test_m8_t6_session_isolation.py: 5 warnings
+  C:\Users\hitoy\AppData\Local\Temp\m14t2_baseline\src\aios\adapters\mock_hermes_server.py:353: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    {"action": "create_session", "environment": environment, "timestamp": datetime.utcnow().isoformat()}
+
+tests/integration/test_m8_hermes_acp.py: 15 warnings
+tests/integration/test_m8_t6_cross_adapter_matrix.py: 7 warnings
+tests/integration/test_m8_t6_e2e_workflows.py: 2 warnings
+tests/integration/test_m8_t6_evidence_provenance.py: 5 warnings
+tests/integration/test_m8_t6_session_isolation.py: 3 warnings
+  C:\Users\hitoy\AppData\Local\Temp\m14t2_baseline\src\aios\adapters\mock_hermes_server.py:386: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    "parameters": parameters, "timestamp": datetime.utcnow().isoformat()}
+
+tests/integration/test_m8_hermes_acp.py: 16 warnings
+tests/integration/test_m8_t6_cross_adapter_matrix.py: 8 warnings
+tests/integration/test_m8_t6_e2e_workflows.py: 4 warnings
+tests/integration/test_m8_t6_evidence_provenance.py: 5 warnings
+tests/integration/test_m8_t6_recovery.py: 1 warning
+tests/integration/test_m8_t6_session_isolation.py: 4 warnings
+  C:\Users\hitoy\AppData\Local\Temp\m14t2_baseline\src\aios\adapters\mock_hermes_server.py:368: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    {"action": "close_session", "timestamp": datetime.utcnow().isoformat()}
+
+tests/integration/test_m8_notion.py: 24 warnings
+tests/integration/test_m8_t6_authority_boundary.py: 4 warnings
+tests/integration/test_m8_t6_cross_adapter_matrix.py: 4 warnings
+tests/integration/test_m8_t6_degraded_mode.py: 6 warnings
+tests/integration/test_m8_t6_e2e_workflows.py: 2 warnings
+tests/integration/test_m8_t6_evidence_provenance.py: 6 warnings
+tests/integration/test_m8_t6_failure_injection.py: 14 warnings
+tests/integration/test_m8_t6_security_integration.py: 2 warnings
+tests/integration/test_m8_t6_session_isolation.py: 2 warnings
+  C:\Users\hitoy\AppData\Local\Temp\m14t2_baseline\src\aios\adapters\notion_adapter.py:299: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    "timestamp": datetime.utcnow().isoformat(),
+
+tests/integration/test_m8_notion.py::test_notion_full_page_lifecycle
+tests/integration/test_m8_notion.py::test_notion_query_database_flow
+tests/integration/test_m8_notion.py::test_notion_query_database_flow
+tests/integration/test_m8_notion.py::test_notion_c14_advisory_on_retrieval
+tests/integration/test_m8_notion.py::test_notion_provenance_fields_complete
+tests/integration/test_m8_notion.py::test_notion_no_secrets_in_provenance
+  C:\Users\hitoy\AppData\Local\Temp\m14t2_baseline\src\aios\adapters\mock_notion_server.py:227: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    now = datetime.utcnow().isoformat()
+
+tests/integration/test_m8_notion.py: 13 warnings
+tests/integration/test_m8_t6_authority_boundary.py: 4 warnings
+tests/integration/test_m8_t6_cross_adapter_matrix.py: 3 warnings
+tests/integration/test_m8_t6_degraded_mode.py: 2 warnings
+tests/integration/test_m8_t6_e2e_workflows.py: 2 warnings
+tests/integration/test_m8_t6_evidence_provenance.py: 4 warnings
+tests/integration/test_m8_t6_failure_injection.py: 4 warnings
+tests/integration/test_m8_t6_security_integration.py: 1 warning
+tests/integration/test_m8_t6_session_isolation.py: 2 warnings
+  C:\Users\hitoy\AppData\Local\Temp\m14t2_baseline\src\aios\adapters\notion_adapter.py:339: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    "notion_timestamp": datetime.utcnow().isoformat(),
+
+tests/integration/test_m8_notion.py::test_notion_full_page_lifecycle
+  C:\Users\hitoy\AppData\Local\Temp\m14t2_baseline\src\aios\adapters\mock_notion_server.py:253: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    page["last_edited_time"] = datetime.utcnow().isoformat()
+
+tests/integration/test_m8_obsidian.py: 30 warnings
+tests/integration/test_m8_t6_authority_boundary.py: 4 warnings
+tests/integration/test_m8_t6_cross_adapter_matrix.py: 10 warnings
+tests/integration/test_m8_t6_degraded_mode.py: 6 warnings
+tests/integration/test_m8_t6_e2e_workflows.py: 6 warnings
+tests/integration/test_m8_t6_evidence_provenance.py: 16 warnings
+tests/integration/test_m8_t6_failure_injection.py: 5 warnings
+tests/integration/test_m8_t6_production_paths.py: 2 warnings
+tests/integration/test_m8_t6_security_integration.py: 3 warnings
+tests/integration/test_m8_t6_session_isolation.py: 4 warnings
+tests/integration/test_m9_provenance_closure.py: 7 warnings
+  C:\Users\hitoy\AppData\Local\Temp\m14t2_baseline\src\aios\adapters\obsidian_adapter.py:307: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    "timestamp": datetime.utcnow().isoformat(),
+
+tests/integration/test_m8_obsidian.py: 11 warnings
+tests/integration/test_m8_t6_authority_boundary.py: 4 warnings
+tests/integration/test_m8_t6_cross_adapter_matrix.py: 3 warnings
+tests/integration/test_m8_t6_degraded_mode.py: 3 warnings
+tests/integration/test_m8_t6_e2e_workflows.py: 2 warnings
+tests/integration/test_m8_t6_evidence_provenance.py: 6 warnings
+tests/integration/test_m8_t6_failure_injection.py: 1 warning
+tests/integration/test_m8_t6_security_integration.py: 2 warnings
+tests/integration/test_m8_t6_session_isolation.py: 2 warnings
+tests/integration/test_m9_provenance_closure.py: 3 warnings
+  C:\Users\hitoy\AppData\Local\Temp\m14t2_baseline\src\aios\adapters\obsidian_adapter.py:336: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    "obsidian_timestamp": datetime.utcnow().isoformat(),
+
+tests/integration/test_m8_playwright.py: 18 warnings
+tests/integration/test_m8_t6_cross_adapter_matrix.py: 5 warnings
+tests/integration/test_m8_t6_e2e_workflows.py: 1 warning
+tests/integration/test_m8_t6_evidence_provenance.py: 2 warnings
+tests/integration/test_m8_t6_failure_injection.py: 2 warnings
+tests/integration/test_m8_t6_session_isolation.py: 2 warnings
+tests/integration/test_m9_provenance_closure.py: 2 warnings
+  C:\Users\hitoy\AppData\Local\Temp\m14t2_baseline\src\aios\adapters\playwright_session.py:49: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    "created_at": datetime.utcnow(),
+
+tests/integration/test_m8_playwright.py: 18 warnings
+tests/integration/test_m8_t6_cross_adapter_matrix.py: 5 warnings
+tests/integration/test_m8_t6_e2e_workflows.py: 1 warning
+tests/integration/test_m8_t6_evidence_provenance.py: 2 warnings
+tests/integration/test_m8_t6_failure_injection.py: 2 warnings
+tests/integration/test_m8_t6_session_isolation.py: 2 warnings
+tests/integration/test_m9_provenance_closure.py: 2 warnings
+  C:\Users\hitoy\AppData\Local\Temp\m14t2_baseline\src\aios\adapters\playwright_session.py:50: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    "last_used": datetime.utcnow(),
+
+tests/integration/test_m8_playwright.py: 18 warnings
+tests/integration/test_m8_t6_cross_adapter_matrix.py: 5 warnings
+tests/integration/test_m8_t6_e2e_workflows.py: 1 warning
+tests/integration/test_m8_t6_evidence_provenance.py: 2 warnings
+tests/integration/test_m8_t6_failure_injection.py: 2 warnings
+tests/integration/test_m8_t6_session_isolation.py: 2 warnings
+tests/integration/test_m9_provenance_closure.py: 2 warnings
+  C:\Users\hitoy\AppData\Local\Temp\m14t2_baseline\src\aios\adapters\mock_playwright_mcp_server.py:342: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    "created_at": datetime.utcnow().isoformat(),
+
+tests/integration/test_m8_playwright.py: 21 warnings
+tests/integration/test_m8_t6_cross_adapter_matrix.py: 15 warnings
+tests/integration/test_m8_t6_e2e_workflows.py: 3 warnings
+tests/integration/test_m8_t6_evidence_provenance.py: 2 warnings
+tests/integration/test_m8_t6_failure_injection.py: 2 warnings
+tests/integration/test_m9_provenance_closure.py: 3 warnings
+  C:\Users\hitoy\AppData\Local\Temp\m14t2_baseline\src\aios\adapters\playwright_session.py:91: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    session["last_used"] = datetime.utcnow()
+
+tests/integration/test_m8_playwright.py::test_context_isolation
+tests/integration/test_m8_playwright.py::test_context_isolation
+tests/integration/test_m8_playwright.py::test_no_shared_cookies
+tests/integration/test_m8_playwright.py::test_no_shared_cookies
+tests/integration/test_m8_playwright.py::test_navigation_success
+tests/integration/test_m8_playwright.py::test_provenance_complete
+tests/integration/test_m8_playwright.py::test_full_browser_flow
+tests/integration/test_m8_playwright.py::test_mock_server_deterministic
+tests/integration/test_m8_playwright.py::test_mock_server_deterministic
+  C:\Users\hitoy\AppData\Local\Temp\m14t2_baseline\src\aios\adapters\mock_playwright_mcp_server.py:234: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    "timestamp": datetime.utcnow().isoformat(),
+
+tests/integration/test_m8_playwright.py: 19 warnings
+tests/integration/test_m8_t5_dynamic_loading.py: 2 warnings
+tests/integration/test_m8_t5_security.py: 2 warnings
+tests/integration/test_m8_t6_authority_boundary.py: 4 warnings
+tests/integration/test_m8_t6_cross_adapter_matrix.py: 10 warnings
+tests/integration/test_m8_t6_e2e_workflows.py: 2 warnings
+tests/integration/test_m8_t6_evidence_provenance.py: 2 warnings
+tests/integration/test_m8_t6_failure_injection.py: 1 warning
+tests/integration/test_m8_t6_security_integration.py: 1 warning
+tests/integration/test_m9_provenance_closure.py: 3 warnings
+  C:\Users\hitoy\AppData\Local\Temp\m14t2_baseline\src\aios\core\capability_provenance.py:229: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    "timestamp": datetime.utcnow().isoformat(),
+
+tests/integration/test_m8_playwright.py::test_context_isolation
+tests/integration/test_m8_playwright.py::test_context_isolation
+tests/integration/test_m8_playwright.py::test_click_success
+tests/integration/test_m8_playwright.py::test_full_browser_flow
+  C:\Users\hitoy\AppData\Local\Temp\m14t2_baseline\src\aios\adapters\mock_playwright_mcp_server.py:256: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    "timestamp": datetime.utcnow().isoformat(),
+
+tests/integration/test_m8_playwright.py::test_type_text_success
+tests/integration/test_m8_playwright.py::test_full_browser_flow
+  C:\Users\hitoy\AppData\Local\Temp\m14t2_baseline\src\aios\adapters\mock_playwright_mcp_server.py:278: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    "timestamp": datetime.utcnow().isoformat(),
+
+tests/integration/test_m8_t6_authority_boundary.py: 8 warnings
+tests/integration/test_m8_t6_capability_registry.py: 24 warnings
+tests/integration/test_m8_t6_cross_adapter_matrix.py: 4 warnings
+tests/integration/test_m8_t6_e2e_workflows.py: 4 warnings
+tests/integration/test_m8_t6_production_paths.py: 41 warnings
+tests/integration/test_m8_t7_def01_transport.py: 2 warnings
+tests/integration/test_m9_manifest_hot_reload.py: 16 warnings
+tests/integration/test_terminal2_cross_integration_e2e.py: 2 warnings
+tests/integration/test_terminal2_failure_degradation.py: 1 warning
+tests/integration/test_terminal2_gated_real.py: 1 warning
+  C:\Users\hitoy\AppData\Local\Temp\m14t2_baseline\src\aios\core\mcp_manager.py:338: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    status.last_connected = datetime.utcnow()
+
+tests/integration/test_m8_t6_cross_adapter_matrix.py: 4 warnings
+tests/integration/test_m8_t6_degraded_mode.py: 5 warnings
+tests/integration/test_m8_t6_e2e_workflows.py: 2 warnings
+tests/integration/test_m8_t6_evidence_provenance.py: 3 warnings
+tests/integration/test_m8_t6_security_integration.py: 1 warning
+tests/integration/test_m8_t6_session_isolation.py: 2 warnings
+  C:\Users\hitoy\AppData\Local\Temp\m14t2_baseline\tests\integration\conftest.py:424: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    created = (datetime.utcnow() - timedelta(hours=hours_ago)).isoformat()
+
+tests/integration/test_m8_t6_cross_adapter_matrix.py: 3 warnings
+tests/integration/test_m8_t6_production_paths.py: 12 warnings
+  C:\Users\hitoy\AppData\Local\Temp\m14t2_baseline\src\aios\core\mcp_manager.py:781: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    call_id = call_id or f"call_{datetime.utcnow().timestamp()}"
+
+tests/integration/test_m8_t6_cross_adapter_matrix.py: 3 warnings
+tests/integration/test_m8_t6_production_paths.py: 12 warnings
+  C:\Users\hitoy\AppData\Local\Temp\m14t2_baseline\src\aios\core\mcp_manager.py:798: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    "session_id": f"mcp_{server_id}_{datetime.utcnow().timestamp()}",
+
+tests/integration/test_m8_t6_cross_adapter_matrix.py: 3 warnings
+tests/integration/test_m8_t6_production_paths.py: 12 warnings
+  C:\Users\hitoy\AppData\Local\Temp\m14t2_baseline\src\aios\core\mcp_manager.py:801: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    "timestamp": datetime.utcnow().isoformat(),
+
+tests/integration/test_m8_t6_e2e_workflows.py::test_e2e2_architecture_consumes_graphify
+  C:\Users\hitoy\AppData\Local\Temp\m14t2_baseline\src\aios\adapters\architecture_agency_adapter.py:164: RuntimeWarning: coroutine 'GraphifyAdapter.get_dependency_chain' was never awaited
+  Enable tracemalloc to get traceback where the object was allocated.
+  See https://docs.pytest.org/en/stable/how-to/capture-warnings.html#resource-warnings for more info.
+
+tests/integration/test_m8_t6_production_paths.py::test_prod_hermes_bridge_mcp_path
+  C:\Users\hitoy\AppData\Local\Temp\m14t2_baseline\src\aios\core\resource_manager.py:940: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+
+tests/integration/test_m8_t6_production_paths.py::test_prod_subprocess_real_mcpmanager_used
+  C:\Users\hitoy\AppData\Roaming\Python\Python312\site-packages\_pytest\unraisableexception.py:67: PytestUnraisableExceptionWarning: Exception ignored in: <function BaseSubprocessTransport.__del__ at 0x0000010A071F0400>
+  
+  Traceback (most recent call last):
+    File "C:\Program Files\Python312\Lib\asyncio\base_subprocess.py", line 125, in __del__
+      _warn(f"unclosed transport {self!r}", ResourceWarning, source=self)
+                                 ^^^^^^^^
+    File "C:\Program Files\Python312\Lib\asyncio\base_subprocess.py", line 70, in __repr__
+      info.append(f'stdin={stdin.pipe}')
+                          ^^^^^^^^^^^^
+    File "C:\Program Files\Python312\Lib\asyncio\proactor_events.py", line 80, in __repr__
+      info.append(f'fd={self._sock.fileno()}')
+                        ^^^^^^^^^^^^^^^^^^^
+    File "C:\Program Files\Python312\Lib\asyncio\windows_utils.py", line 102, in fileno
+      raise ValueError("I/O operation on closed pipe")
+  ValueError: I/O operation on closed pipe
+  
+  Enable tracemalloc to get traceback where the object was allocated.
+  See https://docs.pytest.org/en/stable/how-to/capture-warnings.html#resource-warnings for more info.
+    warnings.warn(pytest.PytestUnraisableExceptionWarning(msg))
+
+tests/integration/test_m8_t6_production_paths.py::test_prod_subprocess_real_mcpmanager_used
+tests/integration/test_terminal2_gated_real.py::test_anthropic_default_real_no_gate
+tests/integration/test_terminal2_gated_real.py::test_mcp_connect_fails_closed_for_real_without_gate
+tests/integration/test_user_resource_onboarding.py::test_state_transition_emits_event
+  C:\Users\hitoy\AppData\Roaming\Python\Python312\site-packages\_pytest\unraisableexception.py:67: PytestUnraisableExceptionWarning: Exception ignored in: <function _ProactorBasePipeTransport.__del__ at 0x0000010A071F1C60>
+  
+  Traceback (most recent call last):
+    File "C:\Program Files\Python312\Lib\asyncio\proactor_events.py", line 116, in __del__
+      _warn(f"unclosed transport {self!r}", ResourceWarning, source=self)
+                                 ^^^^^^^^
+    File "C:\Program Files\Python312\Lib\asyncio\proactor_events.py", line 80, in __repr__
+      info.append(f'fd={self._sock.fileno()}')
+                        ^^^^^^^^^^^^^^^^^^^
+    File "C:\Program Files\Python312\Lib\asyncio\windows_utils.py", line 102, in fileno
+      raise ValueError("I/O operation on closed pipe")
+  ValueError: I/O operation on closed pipe
+  
+  Enable tracemalloc to get traceback where the object was allocated.
+  See https://docs.pytest.org/en/stable/how-to/capture-warnings.html#resource-warnings for more info.
+    warnings.warn(pytest.PytestUnraisableExceptionWarning(msg))
+
+tests/integration/test_m8_t7_def01_transport.py::TestSecurityGateReceivesEnum::test_gate_rejects_invalid_semantics_after_coercion
+  C:\Users\hitoy\AppData\Local\Temp\m14t2_baseline\src\aios\core\security_manager.py:1498: RuntimeWarning: coroutine 'EventBus.publish' was never awaited
+  Enable tracemalloc to get traceback where the object was allocated.
+  See https://docs.pytest.org/en/stable/how-to/capture-warnings.html#resource-warnings for more info.
+
+tests/integration/test_m9_bootstrap.py: 38 warnings
+tests/integration/test_m9_manifest_hot_reload.py: 52 warnings
+tests/integration/test_state_manager_phase.py: 91 warnings
+tests/integration/test_storage_manager_phase.py: 130 warnings
+tests/integration/test_workflow_lifecycle.py: 195 warnings
+  C:\Users\hitoy\AppData\Local\Temp\m14t2_baseline\src\aios\services\base.py:168: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+
+tests/integration/test_storage_manager_phase.py::test_storage_manager_business_apis_work_after_kernel_start
+  <string>:7: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+
+tests/integration/test_terminal2_gated_real.py::test_anthropic_default_real_no_gate
+tests/integration/test_terminal2_gated_real.py::test_mcp_connect_fails_closed_for_real_without_gate
+tests/integration/test_user_resource_onboarding.py::test_state_transition_emits_event
+  C:\Users\hitoy\AppData\Roaming\Python\Python312\site-packages\_pytest\unraisableexception.py:67: PytestUnraisableExceptionWarning: Exception ignored in: <function BaseSubprocessTransport.__del__ at 0x0000010A071F0400>
+  
+  Traceback (most recent call last):
+    File "C:\Program Files\Python312\Lib\asyncio\base_subprocess.py", line 126, in __del__
+      self.close()
+    File "C:\Program Files\Python312\Lib\asyncio\base_subprocess.py", line 104, in close
+      proto.pipe.close()
+    File "C:\Program Files\Python312\Lib\asyncio\proactor_events.py", line 109, in close
+      self._loop.call_soon(self._call_connection_lost, None)
+    File "C:\Program Files\Python312\Lib\asyncio\base_events.py", line 793, in call_soon
+      self._check_closed()
+    File "C:\Program Files\Python312\Lib\asyncio\base_events.py", line 540, in _check_closed
+      raise RuntimeError('Event loop is closed')
+  RuntimeError: Event loop is closed
+  
+  Enable tracemalloc to get traceback where the object was allocated.
+  See https://docs.pytest.org/en/stable/how-to/capture-warnings.html#resource-warnings for more info.
+    warnings.warn(pytest.PytestUnraisableExceptionWarning(msg))
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ===========================
+FAILED tests/integration/test_m10_integration.py::test_m10_full_kernel_startup
+FAILED tests/integration/test_m10_integration.py::test_m10_autonomous_objective_to_replan_loop
+FAILED tests/integration/test_m10_integration.py::test_m10_autonomous_judge_emits_independent
+FAILED tests/integration/test_m10_integration.py::test_m10_autonomy_override_fallback_chain
+FAILED tests/integration/test_m10_integration.py::test_m10_capability_provenance_with_autonomous
+FAILED tests/integration/test_m10_integration.py::test_m10_audit_trail_captures_all_autonomous
+FAILED tests/integration/test_m10_integration.py::test_m10_resource_quota_enforcement
+FAILED tests/integration/test_m10_integration.py::test_m10_security_abac_blocks_unauthorized
+FAILED tests/integration/test_m10_integration.py::test_m10_state_verification_checkpoints
+FAILED tests/integration/test_m10_integration.py::test_m10_self_prompting_convergence_replan
+FAILED tests/integration/test_m9_manifest_hot_reload.py::TestKernelHappyReload::test_reload_keeps_stock_capabilities_green
+FAILED tests/integration/test_m9_provenance_closure.py::TestD04CorrelationPropagation::test_notion_propagates_ambient_correlation
+FAILED tests/integration/test_m9_provenance_closure.py::TestSpoofResistance::test_remediation_proposal_forced_advisory
+FAILED tests/integration/test_terminal2_failure_degradation.py::test_kernel_boot_mock_mode_all_adapters_wired
+FAILED tests/integration/test_terminal2_gated_real.py::test_acp_config_has_metadata_entrypoint
+FAILED tests/integration/test_terminal2_gated_real.py::test_anthropic_default_real_no_gate
+FAILED tests/integration/test_user_resource_onboarding.py::test_state_transition_emits_event
+FAILED tests/integration/test_user_resource_onboarding.py::test_mock_mode_no_real_validation
+18 failed, 503 passed, 2 skipped, 4590 warnings in 3544.57s (0:59:04)

@@ -1,0 +1,14 @@
+{
+  "snapshot_id": "checkpoint_1788010096.368475",
+  "scope": "workflow",
+  "identifier": "test_wf",
+  "state": {
+    "key1": "value1",
+    "key2": "value2"
+  },
+  "metadata": {
+    "final": true
+  },
+  "timestamp": "2026-08-29T18:58:16.368475",
+  "version": 1
+}

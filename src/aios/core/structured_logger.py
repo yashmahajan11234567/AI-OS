@@ -52,11 +52,22 @@ from aios.core.sinks import (
     Sink,
     SinkHealth,
 )
+from dataclasses import dataclass
 from aios.events.core.event import Event
 from aios.events.core.serialization import compute_checksum
 from aios.events.core.types import EventType, SemanticVersion
 
 logger = logging.getLogger("aios.core.structured_logger")
+
+
+@dataclass
+class StructuredLoggerConfig:
+    """Configuration for StructuredLogger (test compatibility)."""
+    level: str = "INFO"
+    buffer_capacity: int = 10_000
+    flush_interval: float = 0.1
+    max_retries: int = 3
+    backoff_base: float = 0.01
 
 
 # ---------------------------------------------------------------------------
@@ -953,6 +964,11 @@ def set_logger(logger_instance: StructuredLogger) -> None:
         _INSTANCE = logger_instance
 
 
+# Alias for test compatibility
+set_structured_logger = set_logger
+get_structured_logger = get_logger
+
+
 def reset_structured_logger_singleton() -> None:
     """Reset the process-wide StructuredLogger singleton (tests only)."""
     global _INSTANCE
@@ -977,6 +993,7 @@ def _make_logger_identity() -> Any:
 
 __all__ = [
     "StructuredLogger",
+    "StructuredLoggerConfig",
     "BoundLogger",
     "LogContext",
     "LogEntry",
@@ -985,7 +1002,9 @@ __all__ = [
     "LoggerState",
     "CorrelationContext",
     "get_logger",
+    "get_structured_logger",
     "set_logger",
+    "set_structured_logger",
     "reset_structured_logger_singleton",
     "get_correlation_context",
     "set_correlation_context",

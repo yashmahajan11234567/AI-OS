@@ -110,11 +110,10 @@ class AutonomyFallbackService(BaseService):
     async def on_start(self) -> None:
         logger.info(f"AutonomyFallbackService.on_start called, state={self._fallback_state.value}")
         if self._config.enabled:
-            # Subscribe to trigger events
-            from aios.events.types import SecurityViolation, ResourceExhausted, HumanEscalationRequired
-            self.subscribe(self._on_security_violation, SecurityViolation)
-            self.subscribe(self._on_resource_exhausted, ResourceExhausted)
-            self.subscribe(self._on_human_escalation, HumanEscalationRequired)
+            # Subscribe to trigger events using canonical EventTypes
+            self.subscribe(self._on_security_violation, EventType.SECURITY_ISSUE_FOUND)
+            self.subscribe(self._on_resource_exhausted, EventType.RESOURCE_EXHAUSTED)
+            self.subscribe(self._on_human_escalation, EventType.HUMAN_ESCALATION_REQUIRED)
             logger.info("AutonomyFallbackService subscribed to trigger events")
 
     async def on_stop(self) -> None:
@@ -226,6 +225,16 @@ class AutonomyFallbackService(BaseService):
 
         # Attempt to re-enable autonomous services
         success = await self._enable_autonomous_services()
+
+        # Also re-enable autonomy in the override service
+        if success:
+            try:
+                from aios.services.autonomy_override import get_autonomy_override
+                override_svc = get_autonomy_override()
+                if override_svc.current_state != override_svc.current_state.ENABLED:
+                    await override_svc.enable_autonomy(triggered_by=triggered_by, description="Recovery from fallback")
+            except Exception as e:
+                logger.debug(f"Could not re-enable autonomy override: {e}")
 
         if success:
             # Mark latest fallback event as resolved

@@ -100,15 +100,35 @@ class DashboardService(BaseService):
     def _now(self) -> str:
         return datetime.now(timezone.utc).isoformat()
 
-    async def _emit(self, event_type: EventType, payload: dict[str, Any]) -> None:
-        """Emit a canonical dashboard event (C1). Failures are non-fatal."""
+    async def _emit(
+        self,
+        event_type: EventType,
+        payload: dict[str, Any],
+        correlation_id: str | None = None,
+    ) -> None:
+        """Emit a canonical dashboard event (C1). Failures are non-fatal.
+
+        Correlation is carried on the canonical top-level ``Event.correlationId``
+        field (a UUID), never inside the payload. INV-EVT-011 forbids base-contract
+        field names (incl. ``correlationId`` / ``correlation_id``) inside an
+        EventPayload, so the dashboard-local ``correlation_id`` hex string is
+        preserved in the payload under the non-forbidden ``request_id`` key, while
+        the same UUID is placed on the Event's top-level ``correlationId`` so the
+        event passes validation and reaches the real EventBus.
+        """
         if self._event_bus is None:
             return
         try:
+            # Canonical correlation: a UUID on the Event's top-level field.
+            corr_uuid = (
+                uuid.UUID(correlation_id)
+                if correlation_id is not None
+                else uuid.uuid4()
+            )
             event = Event(
                 eventType=event_type,
                 source=self._identity,
-                correlationId=uuid.uuid4(),
+                correlationId=corr_uuid,
                 payload=payload,
             )
             result = self._event_bus.publish(event)
@@ -398,8 +418,9 @@ class DashboardService(BaseService):
                 "action": action,
                 "params": params,
                 "principal": principal,
-                "correlation_id": correlation_id,
+                "request_id": correlation_id,
             },
+            correlation_id=correlation_id,
         )
 
         # --- Gate 1: SecurityManager authorization (fail-closed) ---
@@ -423,8 +444,9 @@ class DashboardService(BaseService):
                     "action": action,
                     "principal": principal,
                     "decision": getattr(decision, "value", str(decision)),
-                    "correlation_id": correlation_id,
+                    "request_id": correlation_id,
                 },
+                correlation_id=correlation_id,
             )
             return DashboardActionResult(
                 action=action,
@@ -437,13 +459,15 @@ class DashboardService(BaseService):
         # --- Gate 2: bounded execution (AI-OS performs the work) ---
         await self._emit(
             EventType.DASHBOARD_ACTION_AUTHORIZED,
-            {"action": action, "principal": principal, "correlation_id": correlation_id},
+            {"action": action, "principal": principal, "request_id": correlation_id},
+            correlation_id=correlation_id,
         )
         try:
             data = await self._execute_bounded_action(action, params)
             await self._emit(
                 EventType.DASHBOARD_ACTION_COMPLETED,
-                {"action": action, "principal": principal, "correlation_id": correlation_id, "data": data},
+                {"action": action, "principal": principal, "request_id": correlation_id, "data": data},
+                correlation_id=correlation_id,
             )
             return DashboardActionResult(
                 action=action,
