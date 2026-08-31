@@ -128,7 +128,7 @@ from aios.adapters.graphify_adapter import GraphifyAdapter
 from aios.adapters.notion_adapter import NotionAdapter
 from aios.adapters.obsidian_adapter import ObsidianAdapter
 from aios.adapters.claude_mem_adapter import ClaudeMemAdapter
-from aios.adapters.supabase_adapter import SupabaseAdapter
+from aios.adapters.supabase_adapter import SupabaseAdapter, AIOS_TEST_SCHEMA, AIOS_OWNED_SCHEMAS
 from aios.adapters.n8n_adapter import N8nAdapter
 from aios.adapters.obsidian_git_adapter import ObsidianGitAdapter
 # M13 — Terminal Architecture & Separation contract enforcement
@@ -237,6 +237,7 @@ class HermesKernel:
         self._self_prompt_generator: SelfPromptGenerator | None = None
         # M13 — bounded external-resource adapters (T2) and terminal contract state
         self._supabase_adapter: SupabaseAdapter | None = None
+        self._supabase_test_adapter: SupabaseAdapter | None = None
         self._n8n_adapter: N8nAdapter | None = None
         self._obsidian_git_adapter: ObsidianGitAdapter | None = None
         self._terminal_contract_violations: list[AuthorityViolation] = []
@@ -400,6 +401,15 @@ class HermesKernel:
     def supabase_adapter(self) -> SupabaseAdapter | None:
         """Get the M13 Supabase persistence adapter (T2 bounded resource)."""
         return self._supabase_adapter
+
+    @property
+    def supabase_test_adapter(self) -> SupabaseAdapter | None:
+        """Get the M14-T2 Supabase test adapter (T2 bounded test resource).
+
+        Isolated test adapter with schema boundary limited to 'aios_real_test'.
+        Only available when SUPABASE_TEST_URL and SUPABASE_TEST_ANON_KEY are provided.
+        """
+        return getattr(self, '_supabase_test_adapter', None)
 
     @property
     def n8n_adapter(self) -> N8nAdapter | None:
@@ -1510,11 +1520,16 @@ class HermesKernel:
         Supabase is a BOUNDED persistence resource. AI-OS owns semantic meaning;
         Supabase stores dumb bytes with durability. Default MOCK store; real mode
         gated by AIOS_REAL_INTEGRATION_ENABLED=1 + SUPABASE_URL/SUPABASE_ANON_KEY.
+
+        M14-T2: Also registers a separate test adapter (capability=supabase_test)
+        with its own schema boundary (aios_real_test) and test credentials
+        (SUPABASE_TEST_URL/SUPABASE_TEST_ANON_KEY) when both are present.
         """
         if not self._capability_manager:
             logger.debug("CapabilityManager not available; skipping Supabase init")
             return
 
+        # --- Production Adapter ---
         real_mode = self._read_config_bool("services.supabase.real_mode_enabled", False) or (
             os.environ.get("AIOS_REAL_INTEGRATION_ENABLED") == "1"
         )
@@ -1536,6 +1551,8 @@ class HermesKernel:
             security_manager=self._security_manager,
             url=supabase_url or None,
             anon_key=supabase_anon_key or None,
+            schema_allowlist=AIOS_OWNED_SCHEMAS,
+            project_classification="production",
         )
         self._supabase_adapter = adapter
 
@@ -1565,6 +1582,61 @@ class HermesKernel:
             f"M13 Supabase capability registered (supabase_persistence, mode="
             f"{'real' if real_mode else 'mock'})"
         )
+
+        # --- M14-T2 Test Adapter (isolated test resource) ---
+        # Only construct/test-register when BOTH test credentials are present.
+        # This MUST fail closed - no silent fallbacks.
+        supabase_test_url = os.environ.get("SUPABASE_TEST_URL")
+        supabase_test_anon_key = os.environ.get("SUPABASE_TEST_ANON_KEY")
+
+        if supabase_test_url and supabase_test_anon_key:
+            test_real_mode = (
+                self._read_config_bool("services.supabase_test.real_mode_enabled", False)
+                or os.environ.get("AIOS_REAL_INTEGRATION_ENABLED") == "1"
+            )
+
+            test_adapter = SupabaseAdapter(
+                mcp_manager=self._mcp_manager,
+                server_id="supabase_test",
+                timeout_seconds=30,
+                real_mode_enabled=test_real_mode,
+                security_manager=self._security_manager,
+                url=supabase_test_url,
+                anon_key=supabase_test_anon_key,
+                schema_allowlist=AIOS_TEST_SCHEMA,
+                project_classification="test",
+            )
+            self._supabase_test_adapter = test_adapter
+
+            self._capability_manager.register(
+                capability_id="supabase_test",
+                facade="persistence",
+                provider_id="supabase_test",
+                provider_metadata={
+                    "server_id": "supabase_test",
+                    "transport": "rest",
+                    "timeout_seconds": 30,
+                    "real_mode": test_real_mode,
+                },
+                security_context={
+                    "requires_validation": True,
+                    "allowed_operations": ["insert", "get", "update", "delete", "query"],
+                    "sensitive_keys": [
+                        "password", "token", "secret", "api_key",
+                        "authorization", "credential", "private_key", "service_role_key",
+                    ],
+                    "max_content_size": 102400,
+                },
+                tags=("persistence", "supabase", "storage", "durability", "test"),
+            )
+
+            logger.debug(
+                f"M14-T2 Supabase test capability registered (supabase_test, mode="
+                f"{'real' if test_real_mode else 'mock'})"
+            )
+        else:
+            self._supabase_test_adapter = None
+            logger.debug("M14-T2 Supabase test adapter not registered (test credentials not provided)")
     async def _init_n8n(self) -> None:
         """Register M13 n8n bounded execution capability and adapter.
 
@@ -1710,6 +1782,7 @@ class HermesKernel:
         # Validate the live M13 adapter instances' declared metadata too.
         for adapter in (
             getattr(self, "_supabase_adapter", None),
+            getattr(self, "_supabase_test_adapter", None),
             getattr(self, "_n8n_adapter", None),
             getattr(self, "_obsidian_git_adapter", None),
         ):

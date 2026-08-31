@@ -120,6 +120,9 @@ AIOS_OWNED_SCHEMAS = frozenset(
     }
 )
 
+# Test-only schema (M14-T2 isolated test adapter).
+AIOS_TEST_SCHEMA = frozenset({"aios_real_test"})
+
 
 # ---------------------------------------------------------------------------
 # Mock Store (safe in-memory fallback)
@@ -207,6 +210,8 @@ class SupabaseAdapter(BaseExecutionAdapter):
         security_manager: Any | None = None,
         url: str | None = None,
         anon_key: str | None = None,
+        schema_allowlist: frozenset[str] | None = None,
+        project_classification: str = "production",
     ) -> None:
         """Initialize Supabase adapter.
 
@@ -220,6 +225,10 @@ class SupabaseAdapter(BaseExecutionAdapter):
             security_manager: Optional SecurityManager for gate-before-connect.
             url: Supabase project URL (real mode). Read from env if omitted.
             anon_key: Supabase anon/public key (real mode). Read from env if omitted.
+            schema_allowlist: Allowed schemas for this adapter instance. Defaults
+                              to AIOS_OWNED_SCHEMAS for production adapter.
+            project_classification: "production" or "test". Defaults to "production".
+                                    Used for provenance and security distinction.
         """
         super().__init__(tool=None)
         self._mcp_manager = mcp_manager
@@ -229,12 +238,34 @@ class SupabaseAdapter(BaseExecutionAdapter):
         self._connected = False
         self._version_counter = 0
 
-        # Resolve credentials from env (never from config files).
-        self._url = url or os.environ.get("SUPABASE_URL")
-        self._anon_key = anon_key or os.environ.get("SUPABASE_ANON_KEY")
+        # Schema allowlist defaults to AI-OS owned schemas (production boundary).
+        self._schema_allowlist = (
+            schema_allowlist if schema_allowlist is not None else AIOS_OWNED_SCHEMAS
+        )
 
-        # Real mode requires explicit enable + usable credentials.
-        self._real_mode = bool(real_mode_enabled) and bool(self._url) and bool(self._anon_key)
+        # Project classification for provenance and security distinction.
+        # Must be "production" or "test".
+        if project_classification not in ("production", "test"):
+            raise ValueError(
+                f"project_classification must be 'production' or 'test', got '{project_classification}'"
+            )
+        self._project_classification = project_classification
+
+        # Resolve credentials from env (never from config files).
+        # For test adapter, use test-specific env vars.
+        if project_classification == "test":
+            self._url = url or os.environ.get("SUPABASE_TEST_URL")
+            self._anon_key = anon_key or os.environ.get("SUPABASE_TEST_ANON_KEY")
+        else:
+            self._url = url or os.environ.get("SUPABASE_URL")
+            self._anon_key = anon_key or os.environ.get("SUPABASE_ANON_KEY")
+
+        # Real mode requires explicit enable + usable credentials + AIOS_REAL_INTEGRATION_ENABLED gate
+        # (fail-closed safety gate for gated real-mode operations).
+        real_integration_enabled = os.environ.get("AIOS_REAL_INTEGRATION_ENABLED", "").lower() in (
+            "1", "true", "yes", "on"
+        )
+        self._real_mode = bool(real_mode_enabled) and bool(self._url) and bool(self._anon_key) and real_integration_enabled
         self._store = _MockSupabaseStore() if not self._real_mode else None
 
     # -----------------------------------------------------------------------
@@ -265,16 +296,23 @@ class SupabaseAdapter(BaseExecutionAdapter):
                     principal="aios_kernel",
                     action="supabase_connect",
                     resource=self._url,
-                    context={"server_id": self._server_id},
+                    context={
+                        "server_id": self._server_id,
+                        "project_classification": self._project_classification,
+                    },
                 )
                 if decision.value != "allow":
-                    logger.warning("Supabase connect denied by SecurityManager")
+                    logger.warning(
+                        f"Supabase connect denied by SecurityManager "
+                        f"(project_classification={self._project_classification})"
+                    )
                     return False
             # In a real deployment an aiohttp/requests health-check would run here.
             # We mark connected; actual REST calls happen in _call_rest.
         self._connected = True
         logger.debug(
-            f"SupabaseAdapter connected (mode={'real' if self._real_mode else 'mock'})"
+            f"SupabaseAdapter connected (mode={'real' if self._real_mode else 'mock'}, "
+            f"project_classification={self._project_classification})"
         )
         return True
 
@@ -329,9 +367,9 @@ class SupabaseAdapter(BaseExecutionAdapter):
     # -----------------------------------------------------------------------
 
     def _validate_schema(self, schema: str) -> None:
-        if schema not in AIOS_OWNED_SCHEMAS:
+        if schema not in self._schema_allowlist:
             raise SupabaseValidationError(
-                f"Schema '{schema}' is not AI-OS-owned; refusing operation"
+                f"Schema '{schema}' is not allowed for this adapter instance (project_classification={self._project_classification}); refusing operation"
             )
 
     def _validate_row(self, row: dict[str, Any]) -> None:
@@ -369,6 +407,8 @@ class SupabaseAdapter(BaseExecutionAdapter):
             "authority": "aios_owned",
             "semantic_owner": "aios_kernel",
             "mode": "real" if self._real_mode else "mock",
+            "project_classification": self._project_classification,
+            "resource_type": "supabase_project",
         }
         # Real-mode provenance fields (M14-T2 spec §10.5). Mock provenance is
         # unchanged so existing consumers see a stable shape.
@@ -445,9 +485,10 @@ class SupabaseAdapter(BaseExecutionAdapter):
             if method == "insert":
                 table, row = args[0], args[1]
                 headers["Prefer"] = "return=representation"
-                return await self._rest_request(
+                rows = await self._rest_request(
                     "POST", f"{base}/{table}", headers, timeout, json_body=row
                 )
+                return rows[0] if rows else None
             elif method == "get":
                 table, row_id = args[0], args[1]
                 headers["Prefer"] = "return=representation"
@@ -527,9 +568,11 @@ class SupabaseAdapter(BaseExecutionAdapter):
                 http_method, url, headers=headers, params=params, json=json_body
             ) as response:
                 table = url.rsplit("/", 1)[-1].split("?")[0]
-                if response.status in (200, 201):
-                    if response.content_length in (None, 0):
-                        return True  # Prefer: return=minimal (delete)
+                if response.status in (200, 201, 204):
+                    # DELETE uses Prefer: return=minimal → empty body is success (204).
+                    # POST/PATCH/GET use Prefer: return=representation → expect JSON.
+                    if http_method == "DELETE":
+                        return True
                     try:
                         return await response.json()
                     except (aiohttp.ContentTypeError, ValueError) as e:
@@ -545,12 +588,18 @@ class SupabaseAdapter(BaseExecutionAdapter):
                         "Supabase authentication/authorization failed"
                     )
                 if response.status == 404:
-                    # get/query return None; delete returns False (spec §10.2.1).
-                    if http_method in ("GET",):
+                    # GET on a missing table/row = empty result set (200-like).
+                    # DELETE on a missing row = nothing deleted (False).
+                    # POST/PATCH on a missing table = real failure (table gone);
+                    # returning None here would crash insert()/update() with an
+                    # AttributeError on .get("id"). Surface it as a clear error.
+                    if http_method == "GET":
                         return []
                     if http_method == "DELETE":
                         return False
-                    return None
+                    raise SupabaseUnavailableError(
+                        f"Supabase table '{table}' not found"
+                    )
                 if response.status in (500, 502, 503, 504):
                     raise SupabaseUnavailableError(
                         "Supabase endpoint unavailable"
@@ -567,8 +616,9 @@ class SupabaseAdapter(BaseExecutionAdapter):
         self._validate_schema(schema)
         self._validate_row(row)
         provenance = self._make_provenance("insert", table=schema)
+        # Don't add provenance to the row - it's AI-OS metadata, not Supabase data.
+        # Supabase table schema doesn't include _aios_provenance column.
         row = dict(row)
-        row["_aios_provenance"] = provenance
         try:
             result = await self._dispatch("insert", schema, row)
         except SupabaseError as e:

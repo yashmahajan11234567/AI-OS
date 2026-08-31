@@ -261,6 +261,11 @@ CANONICAL_INTEGRATIONS = (
     "freellmapi",         # local LLM provider (dev/test only)
     "anthropic",          # standard model provider
     "openai",             # standard model provider
+    # M13/M14 bounded resources
+    "supabase",           # production persistence (AIOS_OWNED_SCHEMAS)
+    "supabase_test",      # M14-T2 isolated test adapter (aios_real_test only)
+    "n8n",                # bounded automation/execution
+    "obsidian_git",       # knowledge/durability with Git
 )
 
 

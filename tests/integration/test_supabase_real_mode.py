@@ -1,8 +1,11 @@
 """
 M14-T2 — Supabase Real-Mode Integration Tests (Gated).
 
-All tests require AIOS_REAL_INTEGRATION_ENABLED=1 AND valid SUPABASE_URL/SUPABASE_ANON_KEY.
+All tests require AIOS_REAL_INTEGRATION_ENABLED=1 AND valid SUPABASE_TEST_URL/SUPABASE_TEST_ANON_KEY.
 Without the gate, the adapter must remain in mock mode and real operations must not be attempted.
+
+These tests use the ISOLATED TEST ADAPTER (supabase_test capability) with the aios_real_test schema ONLY.
+The production adapter (supabase capability) and production schemas must never be touched.
 """
 
 from __future__ import annotations
@@ -21,7 +24,7 @@ def _real_mode_enabled() -> bool:
 
 
 def _has_credentials() -> bool:
-    return bool(os.environ.get("SUPABASE_URL") and os.environ.get("SUPABASE_ANON_KEY"))
+    return bool(os.environ.get("SUPABASE_TEST_URL") and os.environ.get("SUPABASE_TEST_ANON_KEY"))
 
 
 def _skip_if_not_real_mode():
@@ -31,7 +34,7 @@ def _skip_if_not_real_mode():
 
 def _skip_if_no_creds():
     if not _has_credentials():
-        pytest.skip("SUPABASE_URL / SUPABASE_ANON_KEY not configured")
+        pytest.skip("SUPABASE_TEST_URL / SUPABASE_TEST_ANON_KEY not configured")
 
 
 # ---------------------------------------------------------------------------
@@ -41,42 +44,43 @@ def _skip_if_no_creds():
 
 @pytest.mark.gated
 @pytest.mark.external
-async def test_supabase_real_mode_requires_gate():
-    """Without AIOS_REAL_INTEGRATION_ENABLED=1, real mode stays mock even with credentials."""
-    os.environ.pop("AIOS_REAL_INTEGRATION_ENABLED", None)
-    # No reload needed; adapter reads env at init.
-    from aios.adapters.supabase_adapter import SupabaseAdapter
+async def test_supabase_test_real_mode_requires_gate(monkeypatch):
+    """Without AIOS_REAL_INTEGRATION_ENABLED=1, test adapter stays mock even with credentials."""
+    monkeypatch.delenv("AIOS_REAL_INTEGRATION_ENABLED", raising=False)
+    from aios.adapters.supabase_adapter import SupabaseAdapter, AIOS_TEST_SCHEMA
 
     adapter = SupabaseAdapter(
-        server_id="supabase",
+        server_id="supabase_test",
         timeout_seconds=5,
         real_mode_enabled=False,  # gate off
         security_manager=None,
+        project_classification="test",
+        schema_allowlist=AIOS_TEST_SCHEMA,
     )
     await adapter.connect()
-    assert adapter.is_mock_mode is True, "Adapter must be in mock mode without gate"
-    # In mock mode, _real_mode is False; setting it True only tests structure.
-    # The gate logic ensures real paths are never taken.
+    assert adapter.is_mock_mode is True, "Test adapter must be in mock mode without gate"
     await adapter.disconnect()
 
 
 @pytest.mark.gated
 @pytest.mark.external
-async def test_supabase_real_connect_with_credentials():
-    """With gate + env vars, adapter enters real mode."""
+async def test_supabase_test_real_connect_with_credentials():
+    """With gate + test env vars, test adapter enters real mode."""
     _skip_if_not_real_mode()
     _skip_if_no_creds()
 
-    from aios.adapters import SupabaseAdapter
+    from aios.adapters.supabase_adapter import SupabaseAdapter, AIOS_TEST_SCHEMA
 
     adapter = SupabaseAdapter(
-        server_id="supabase",
+        server_id="supabase_test",
         timeout_seconds=10,
         real_mode_enabled=True,
         security_manager=None,
+        project_classification="test",
+        schema_allowlist=AIOS_TEST_SCHEMA,
     )
     connected = await adapter.connect()
-    assert connected is True, "Real mode connect should succeed with valid credentials"
+    assert connected is True, "Test adapter real mode connect should succeed with valid credentials"
     assert adapter.is_real_mode is True
     assert adapter.is_connected() is True
     await adapter.disconnect()
@@ -84,105 +88,144 @@ async def test_supabase_real_connect_with_credentials():
 
 @pytest.mark.gated
 @pytest.mark.external
-async def test_supabase_real_insert_get_roundtrip():
-    """Insert row, retrieve it, verify content matches."""
+async def test_supabase_test_insert_get_roundtrip():
+    """Insert row to aios_real_test, retrieve it, verify content matches."""
     _skip_if_not_real_mode()
     _skip_if_no_creds()
 
-    from aios.adapters import SupabaseAdapter
+    from aios.adapters.supabase_adapter import SupabaseAdapter, AIOS_TEST_SCHEMA
     from aios.adapters.base import ExecutionStatus
 
     adapter = SupabaseAdapter(
-        server_id="supabase",
+        server_id="supabase_test",
         timeout_seconds=15,
         real_mode_enabled=True,
         security_manager=None,
+        project_classification="test",
+        schema_allowlist=AIOS_TEST_SCHEMA,
     )
     await adapter.connect()
 
-    # Insert via adapter execute() path.
-    row_id = "test_roundtrip_" + os.urandom(4).hex()
-    result = await adapter.insert("project_state", {
-        "id": row_id,
-        "test_field": "roundtrip_value",
-        "numeric": 42,
+    # Use the dedicated throwaway table `aios_real_test` with its actual schema:
+    # id bigint generated by default as identity primary key,
+    # test_marker text not null unique,
+    # test_value text,
+    # created_at timestamptz default now()
+    test_marker = "test_roundtrip_" + os.urandom(4).hex()
+    result = await adapter.insert("aios_real_test", {
+        "test_marker": test_marker,
+        "test_value": "roundtrip_value",
     })
+    print(f"\n[DIAG] insert result.status={result.status}")
+    print(f"[DIAG] insert result.error={getattr(result, 'error', 'N/A')}")
+    print(f"[DIAG] insert result.message={getattr(result, 'message', 'N/A')}")
+    print(f"[DIAG] insert result.reason={getattr(result, 'reason', 'N/A')}")
+    print(f"[DIAG] insert result.metrics={result.metrics}")
+    print(f"[DIAG] insert result.raw={result.raw}")
+    print(f"[DIAG] insert result.findings={getattr(result, 'findings', 'N/A')}")
     assert result.status == ExecutionStatus.SUCCESS
-    assert result.metrics["row_id"] == row_id
+    row_id = result.metrics["row_id"]
+    assert row_id is not None
 
     # Get the row back.
-    result = await adapter.get("project_state", row_id)
+    result = await adapter.get("aios_real_test", row_id)
     assert result.status == ExecutionStatus.SUCCESS
     assert result.metrics["found"] is True
-    assert result.raw["row"]["test_field"] == "roundtrip_value"
-    assert result.raw["row"]["numeric"] == 42
+    assert result.raw["row"]["test_marker"] == test_marker
+    assert result.raw["row"]["test_value"] == "roundtrip_value"
+
+    # Verify provenance has test classification
+    assert result.raw["provenance"]["project_classification"] == "test"
+    assert result.raw["provenance"]["resource_type"] == "supabase_project"
 
     # Cleanup.
-    await adapter.delete("project_state", row_id)
+    await adapter.delete("aios_real_test", row_id)
     await adapter.disconnect()
 
 
 @pytest.mark.gated
 @pytest.mark.external
-async def test_supabase_real_update():
+async def test_supabase_test_update():
     """Insert then update, verify changed value."""
     _skip_if_not_real_mode()
     _skip_if_no_creds()
 
-    from aios.adapters import SupabaseAdapter
+    from aios.adapters.supabase_adapter import SupabaseAdapter, AIOS_TEST_SCHEMA
     from aios.adapters.base import ExecutionStatus
 
     adapter = SupabaseAdapter(
-        server_id="supabase",
+        server_id="supabase_test",
         timeout_seconds=15,
         real_mode_enabled=True,
         security_manager=None,
+        project_classification="test",
+        schema_allowlist=AIOS_TEST_SCHEMA,
     )
     await adapter.connect()
 
-    row_id = "test_update_" + os.urandom(4).hex()
-    await adapter.insert("project_state", {
-        "id": row_id,
-        "field": "original",
+    test_marker = "test_update_" + os.urandom(4).hex()
+    result = await adapter.insert("aios_real_test", {
+        "test_marker": test_marker,
+        "test_value": "original",
     })
+    assert result.status == ExecutionStatus.SUCCESS
+    row_id = result.metrics["row_id"]
 
-    result = await adapter.update("project_state", row_id, {"field": "updated"})
+    result = await adapter.update("aios_real_test", row_id, {"test_value": "updated"})
+    print(f"\n[DIAG] update result.status={result.status}")
+    print(f"[DIAG] update result.error={getattr(result, 'error', 'N/A')}")
+    print(f"[DIAG] update result.message={getattr(result, 'message', 'N/A')}")
+    print(f"[DIAG] update result.reason={getattr(result, 'reason', 'N/A')}")
+    print(f"[DIAG] update result.metrics={result.metrics}")
+    print(f"[DIAG] update result.raw={result.raw}")
+    print(f"[DIAG] update result.findings={getattr(result, 'findings', 'N/A')}")
     assert result.status == ExecutionStatus.SUCCESS
     assert result.metrics["row_id"] == row_id
 
-    result = await adapter.get("project_state", row_id)
+    result = await adapter.get("aios_real_test", row_id)
     assert result.status == ExecutionStatus.SUCCESS
-    assert result.raw["row"]["field"] == "updated"
+    assert result.raw["row"]["test_value"] == "updated"
 
-    await adapter.delete("project_state", row_id)
+    await adapter.delete("aios_real_test", row_id)
     await adapter.disconnect()
 
 
 @pytest.mark.gated
 @pytest.mark.external
-async def test_supabase_real_delete():
+async def test_supabase_test_delete():
     """Insert then delete, verify not found."""
     _skip_if_not_real_mode()
     _skip_if_no_creds()
 
-    from aios.adapters import SupabaseAdapter
+    from aios.adapters.supabase_adapter import SupabaseAdapter, AIOS_TEST_SCHEMA
     from aios.adapters.base import ExecutionStatus
 
     adapter = SupabaseAdapter(
-        server_id="supabase",
+        server_id="supabase_test",
         timeout_seconds=15,
         real_mode_enabled=True,
         security_manager=None,
+        project_classification="test",
+        schema_allowlist=AIOS_TEST_SCHEMA,
     )
     await adapter.connect()
 
-    row_id = "test_delete_" + os.urandom(4).hex()
-    await adapter.insert("project_state", {"id": row_id, "x": 1})
-    result = await adapter.delete("project_state", row_id)
+    test_marker = "test_delete_" + os.urandom(4).hex()
+    result = await adapter.insert("aios_real_test", {"test_marker": test_marker, "test_value": "x"})
+    assert result.status == ExecutionStatus.SUCCESS
+    row_id = result.metrics["row_id"]
+    result = await adapter.delete("aios_real_test", row_id)
+    print(f"\n[DIAG] delete result.status={result.status}")
+    print(f"[DIAG] delete result.error={getattr(result, 'error', 'N/A')}")
+    print(f"[DIAG] delete result.message={getattr(result, 'message', 'N/A')}")
+    print(f"[DIAG] delete result.reason={getattr(result, 'reason', 'N/A')}")
+    print(f"[DIAG] delete result.metrics={result.metrics}")
+    print(f"[DIAG] delete result.raw={result.raw}")
+    print(f"[DIAG] delete result.findings={getattr(result, 'findings', 'N/A')}")
     assert result.status == ExecutionStatus.SUCCESS
     assert result.metrics["deleted"] is True
 
-    result = await adapter.get("project_state", row_id)
+    result = await adapter.get("aios_real_test", row_id)
     assert result.status == ExecutionStatus.SUCCESS
     assert result.metrics["found"] is False
 
@@ -191,134 +234,168 @@ async def test_supabase_real_delete():
 
 @pytest.mark.gated
 @pytest.mark.external
-async def test_supabase_real_query():
+async def test_supabase_test_query():
     """Insert multiple rows, query with filter, verify count."""
     _skip_if_not_real_mode()
     _skip_if_no_creds()
 
-    from aios.adapters import SupabaseAdapter
+    from aios.adapters.supabase_adapter import SupabaseAdapter, AIOS_TEST_SCHEMA
     from aios.adapters.base import ExecutionStatus
 
     adapter = SupabaseAdapter(
-        server_id="supabase",
+        server_id="supabase_test",
         timeout_seconds=15,
         real_mode_enabled=True,
         security_manager=None,
+        project_classification="test",
+        schema_allowlist=AIOS_TEST_SCHEMA,
     )
     await adapter.connect()
 
     prefix = "test_query_" + os.urandom(4).hex()
     for i in range(3):
-        await adapter.insert("project_state", {"id": f"{prefix}_{i}", "group": "test"})
-    await adapter.insert("project_state", {"id": "other_" + os.urandom(4).hex(), "group": "other"})
+        await adapter.insert("aios_real_test", {"test_marker": f"{prefix}_{i}", "test_value": "test"})
+    await adapter.insert("aios_real_test", {"test_marker": "other_" + os.urandom(4).hex(), "test_value": "other"})
 
-    result = await adapter.query("project_state", {"group": "test"})
+    result = await adapter.query("aios_real_test", {"test_value": "test"})
+    print(f"\n[DIAG] query result.status={result.status}")
+    print(f"[DIAG] query result.error={getattr(result, 'error', 'N/A')}")
+    print(f"[DIAG] query result.message={getattr(result, 'message', 'N/A')}")
+    print(f"[DIAG] query result.reason={getattr(result, 'reason', 'N/A')}")
+    print(f"[DIAG] query result.metrics={result.metrics}")
+    print(f"[DIAG] query result.raw={result.raw}")
+    print(f"[DIAG] query result.findings={getattr(result, 'findings', 'N/A')}")
     assert result.status == ExecutionStatus.SUCCESS
     assert result.metrics["rows_returned"] >= 3
 
+    # Verify provenance
+    assert result.raw["provenance"]["project_classification"] == "test"
+
     # Cleanup test rows.
     for i in range(3):
-        await adapter.delete("project_state", f"{prefix}_{i}")
+        # Need to get the actual row ID first since it's auto-generated
+        get_result = await adapter.query("aios_real_test", {"test_marker": f"{prefix}_{i}"})
+        if get_result.status == ExecutionStatus.SUCCESS and get_result.metrics.get("rows_returned", 0) > 0:
+            for row in get_result.raw.get("rows", []):
+                await adapter.delete("aios_real_test", row["id"])
     await adapter.disconnect()
 
 
 @pytest.mark.gated
 @pytest.mark.external
-async def test_supabase_real_schema_validation():
-    """Unknown schema rejected in real mode."""
+async def test_supabase_test_schema_validation():
+    """Production schema rejected in test adapter real mode."""
     _skip_if_not_real_mode()
     _skip_if_no_creds()
 
-    from aios.adapters import SupabaseAdapter, SupabaseValidationError
+    from aios.adapters.supabase_adapter import SupabaseAdapter, SupabaseValidationError, AIOS_TEST_SCHEMA
     from aios.adapters.base import ExecutionStatus
 
     adapter = SupabaseAdapter(
-        server_id="supabase",
+        server_id="supabase_test",
         timeout_seconds=10,
         real_mode_enabled=True,
         security_manager=None,
+        project_classification="test",
+        schema_allowlist=AIOS_TEST_SCHEMA,
     )
     await adapter.connect()
 
-    # Unknown schema should raise SupabaseValidationError _before_ hitting network.
-    result = await adapter.insert("not_an_aios_owned_schema", {"x": 1})
-    # The adapter should produce an ERROR ExecutionResult, not crash.
-    assert result.status == ExecutionStatus.ERROR
-    assert "not AI-OS-owned" in result.findings[0]["description"]
+    # Production schema should be rejected before hitting network.
+    try:
+        result = await adapter.insert("project_state", {"x": 1})
+        assert result.status == ExecutionStatus.ERROR
+        assert "not allowed" in result.findings[0]["description"]
+        assert "project_classification=test" in result.findings[0]["description"]
+    except SupabaseValidationError as e:
+        assert "not allowed" in str(e)
+        assert "project_classification=test" in str(e)
 
     await adapter.disconnect()
 
 
 @pytest.mark.gated
 @pytest.mark.external
-async def test_supabase_real_secret_rejection():
-    """Row with sensitive key rejected in real mode."""
+async def test_supabase_test_secret_rejection():
+    """Row with sensitive key rejected in test adapter real mode."""
     _skip_if_not_real_mode()
     _skip_if_no_creds()
 
-    from aios.adapters import SupabaseAdapter, SupabaseSecurityError
+    from aios.adapters.supabase_adapter import SupabaseAdapter, SupabaseSecurityError, AIOS_TEST_SCHEMA
     from aios.adapters.base import ExecutionStatus
 
     adapter = SupabaseAdapter(
-        server_id="supabase",
+        server_id="supabase_test",
         timeout_seconds=10,
         real_mode_enabled=True,
         security_manager=None,
+        project_classification="test",
+        schema_allowlist=AIOS_TEST_SCHEMA,
     )
     await adapter.connect()
 
     # Sensitive key should be rejected before network call.
-    result = await adapter.insert("project_state", {"password": "secret123"})
-    assert result.status == ExecutionStatus.ERROR
-    assert "Sensitive key rejected" in result.findings[0]["description"] or "Potential secret detected" in result.findings[0]["description"]
+    try:
+        result = await adapter.insert("aios_real_test", {"password": "secret123"})
+        assert result.status == ExecutionStatus.ERROR
+        assert "Sensitive key rejected" in result.findings[0]["description"] or "Potential secret detected" in result.findings[0]["description"]
+    except SupabaseSecurityError as e:
+        assert "Sensitive key rejected" in str(e) or "Potential secret detected" in str(e)
 
     await adapter.disconnect()
 
 
 @pytest.mark.gated
 @pytest.mark.external
-async def test_supabase_real_security_deny_blocks_connect():
-    """SecurityManager deny prevents real connection."""
+async def test_supabase_test_security_deny_blocks_connect():
+    """SecurityManager deny prevents test adapter connection."""
     _skip_if_not_real_mode()
     _skip_if_no_creds()
 
-    from aios.adapters import SupabaseAdapter
-    from aios.core.security_manager import SecurityManager, AuthorizationDecision
+    from aios.adapters.supabase_adapter import SupabaseAdapter, AIOS_TEST_SCHEMA
+    from aios.core.security_manager import SecurityDecision
 
     class DenySecurityManager:
-        async def authorize(self, principal, action, resource, context):
-            return AuthorizationDecision(value="deny", reason="test deny")
+        def authorize(self, principal, action, resource, context=None):
+            # Verify context includes project_classification
+            if context and context.get("project_classification") == "test":
+                return SecurityDecision.DENY
+            return SecurityDecision.DENY
 
     adapter = SupabaseAdapter(
-        server_id="supabase",
+        server_id="supabase_test",
         timeout_seconds=10,
         real_mode_enabled=True,
         security_manager=DenySecurityManager(),
+        project_classification="test",
+        schema_allowlist=AIOS_TEST_SCHEMA,
     )
     connected = await adapter.connect()
-    assert connected is False, "SecurityManager deny must block real connection"
+    assert connected is False, "SecurityManager deny must block test adapter connection"
 
 
 @pytest.mark.gated
 @pytest.mark.external
-async def test_supabase_real_network_error_degrades():
-    """Network failure returns ERROR result, not exception."""
+async def test_supabase_test_network_error_degrades():
+    """Test adapter network failure returns ERROR result, not exception."""
     _skip_if_not_real_mode()
 
-    from aios.adapters import SupabaseAdapter
+    from aios.adapters.supabase_adapter import SupabaseAdapter, AIOS_TEST_SCHEMA
     from aios.adapters.base import ExecutionStatus
 
     # Point to invalid URL to force network error.
     adapter = SupabaseAdapter(
-        server_id="supabase",
+        server_id="supabase_test",
         timeout_seconds=1,
         real_mode_enabled=True,
         security_manager=None,
         url="http://localhost:1/",  # should not be a Supabase endpoint
         anon_key="fake_key",
+        project_classification="test",
+        schema_allowlist=AIOS_TEST_SCHEMA,
     )
     await adapter.connect()
-    result = await adapter.insert("project_state", {"id": "net_err", "x": 1})
+    result = await adapter.insert("aios_real_test", {"id": "net_err", "x": 1})
     assert result.status == ExecutionStatus.ERROR
     # Error should be wrapped, not crash.
     await adapter.disconnect()

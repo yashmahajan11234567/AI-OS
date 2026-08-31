@@ -120,6 +120,13 @@ integrations:
     # url: ""
     # anon_key: ""
 
+  supabase_test:
+    mode: mock
+    real_gated: true
+    requires_user_resource: true
+    user_resource_present: false   # SUPABASE_TEST_URL, SUPABASE_TEST_ANON_KEY not provided/verified
+    notes: "Dedicated throwaway test project; never production. Uses aios_real_test schema only."
+
   n8n:
     mode: mock
     real_gated: true
