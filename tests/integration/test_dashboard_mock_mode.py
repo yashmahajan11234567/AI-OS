@@ -99,12 +99,15 @@ def _make_service(kernel=None, security=None, event_bus=None, security_manager=N
 
 
 def _all_page_names() -> list[str]:
+    # M13 base pages + M14-T2 additions (Project Workspace, Integrations & Credentials).
     return [
         "planning_chat",
         "resource_onboarding",
         "project_execution",
         "knowledge_history",
         "system_health",
+        "project_workspace",
+        "integrations_credentials",
     ]
 
 
@@ -127,7 +130,7 @@ def test_dashboard_backend_created_without_kernel():
 
 
 def test_dashboard_get_all_pages_returns_structure():
-    """get_all_pages() returns the canonical structure with all five pages."""
+    """get_all_pages() returns the canonical structure with all seven pages."""
     svc = _make_service(kernel=_FakeKernel())
     pages = svc.get_all_pages()
     assert "generated_at" in pages
@@ -341,7 +344,7 @@ def test_dashboard_server_start_stop():
 
 
 def test_dashboard_server_api_pages(running_server):
-    """GET /api/pages returns valid JSON with all five pages."""
+    """GET /api/pages returns valid JSON with all seven pages."""
     with urllib.request.urlopen("http://127.0.0.1:8807/api/pages", timeout=2) as resp:
         assert resp.headers.get("X-AIOS-Authority") == "aios_sole"
         data = __import__("json").loads(resp.read())

@@ -46,17 +46,21 @@
 <nav>
   <button data-page="planning_chat" class="active">1 · Planning Chat</button>
   <button data-page="resource_onboarding">2 · Resource Onboarding</button>
-  <button data-page="project_execution">3 · Project / Execution</button>
-  <button data-page="knowledge_history">4 · Knowledge / History</button>
-  <button data-page="system_health">5 · System / Health</button>
+  <button data-page="project_workspace">3 · Project Workspace</button>
+  <button data-page="project_execution">4 · Project / Execution</button>
+  <button data-page="knowledge_history">5 · Knowledge / History</button>
+  <button data-page="integrations_credentials">6 · Integrations &amp; Credentials</button>
+  <button data-page="system_health">7 · System / Health</button>
 </nav>
 <main>
   <div class="note" id="meta"></div>
 
   <section class="page active" id="page-planning_chat"></section>
   <section class="page" id="page-resource_onboarding"></section>
+  <section class="page" id="page-project_workspace"></section>
   <section class="page" id="page-project_execution"></section>
   <section class="page" id="page-knowledge_history"></section>
+  <section class="page" id="page-integrations_credentials"></section>
   <section class="page" id="page-system_health"></section>
 </main>
 <div id="toast"></div>
@@ -84,8 +88,10 @@ function render() {
     `Snapshot @ ${gen} · authority model: ${DATA.authority_model}`;
   renderPlanning();
   renderOnboarding();
+  renderProject();
   renderExecution();
   renderKnowledge();
+  renderIntegrations();
   renderHealth();
 }
 
@@ -152,6 +158,95 @@ function renderKnowledge() {
   html += card("Obsidian Git History (local only)",
     `<div class="json">${escapeHtml(JSON.stringify(p.obsidian_git_history||[], null, 2))}</div>`);
   document.getElementById('page-knowledge_history').innerHTML = html;
+}
+
+function renderProject() {
+  const p = DATA.pages.project_workspace;
+  if (!p || !p.available) {
+    document.getElementById('page-project_workspace').innerHTML =
+      card("Project Workspace", `<div class="note">${escapeHtml(p && p.reason ? p.reason : 'Project service unavailable (non-authoritative).')}</div>`);
+    return;
+  }
+  let html = "";
+  if (p.project && p.found) {
+    // Single-project view
+    const proj = p.project;
+    html += card(`Project: ${proj.name}`,
+      kv("state", proj.state) + kv("messages", proj.message_count) +
+      kv("decisions", proj.decision_count) + kv("tasks", proj.task_count) +
+      kv("notion_page_id", proj.notion_page_id || "—"));
+    html += card("Allowed transitions (AI-OS-validated)",
+      (p.allowed_transitions||[]).map(t => `<span class="pill">${t}</span>`).join(" ") || "<div class='note'>none</div>");
+    const msgs = (p.messages||[]).map(m =>
+      `<div class="row"><span class="k">${escapeHtml(m.role)}</span><span class="v">${escapeHtml(String(m.content).slice(0,200))}</span></div>`).join('');
+    html += card("Chat (project-scoped, persisted to vault)", msgs || "<div class='note'>no messages</div>");
+    const decs = (p.decisions||[]).map(d =>
+      `<div class="row"><span class="k">${escapeHtml(d.title)}</span><span class="v">${escapeHtml(d.outcome||'pending')}</span></div>`).join('');
+    html += card("Decisions (append-only, AI-OS-owned)", decs || "<div class='note'>none</div>");
+    const tasks = (p.tasks||[]).map(t =>
+      `<div class="row"><span class="k">${escapeHtml(t.title)}</span><span class="v">${escapeHtml(t.status)}</span></div>`).join('');
+    html += card("Tasks", tasks || "<div class='note'>none</div>");
+    html += `<div class="card"><h3>Lifecycle actions (gated via SecurityManager)</h3>
+      <button class="action" onclick="act('project.transition',{project_id:'${proj.project_id}',to_state:'DISCUSSION'})">→ DISCUSSION</button>
+      <button class="action" onclick="act('project.transition',{project_id:'${proj.project_id}',to_state:'RESEARCH'})">→ RESEARCH</button>
+      <button class="action" onclick="act('project.transition',{project_id:'${proj.project_id}',to_state:'PLANNING'})">→ PLANNING</button>
+      <button class="action" onclick="act('project.publish_notion',{project_id:'${proj.project_id}'})">Publish final plan to Notion</button>
+      <button class="action" onclick="act('project.clear_action',{project_id:'${proj.project_id}'})">Clear for action</button>
+      <div class="note" style="margin-top:8px">Discussion never becomes execution. Every action is advisory until AI-OS (SecurityManager) approves it.</div></div>`;
+  } else {
+    // Index view
+    const projs = (p.projects||[]).map(pr =>
+      `<div class="row"><span class="k">${escapeHtml(pr.name)}</span><span class="v">${escapeHtml(pr.state)} · ${pr.message_count} msgs</span></div>`).join('');
+    html += card("Projects", projs || "<div class='note'>no projects</div>");
+    html += `<div class="card"><h3>New project</h3>
+      <input id="proj-name" placeholder="Project name" style="background:var(--bg);color:var(--text);border:1px solid var(--border);padding:6px;border-radius:6px;width:60%">
+      <button class="action" onclick="createProject()">Create project</button>
+      <div class="note" style="margin-top:8px">Project creation is a local workspace scaffold — no AI-OS decision authority.</div></div>`;
+  }
+  document.getElementById('page-project_workspace').innerHTML = html;
+}
+
+function createProject() {
+  const name = document.getElementById('proj-name').value || 'Untitled Project';
+  act('project.create', {name});
+}
+
+function renderIntegrations() {
+  const p = DATA.pages.integrations_credentials;
+  let html = card("Go-Live Readiness",
+    kv("core_services", p.readiness.core_services) +
+    kv("required_credentials", p.readiness.required_credentials) +
+    kv("external_integrations", p.readiness.external_integrations) +
+    kv("knowledge_system", p.readiness.knowledge_system) +
+    kv("model_providers", p.readiness.model_providers) +
+    kv("database", p.readiness.database) +
+    `<span class="pill ${p.readiness.status==='READY'?'ok':'warn'}">${p.readiness.status}</span>` +
+    (p.readiness.missing && p.readiness.missing.length ? `<div class="note">Missing: ${escapeHtml(p.readiness.missing.join(', '))}</div>` : ""));
+  html += `<div class="card"><h3>Secret exposure</h3><div class="note">${escapeHtml(p.secret_exposure)}</div></div>`;
+  const rows = (p.integrations||[]).map(i => {
+    const cred = i.credential_configured ? `<span class="pill ok">CRED CONFIGURED</span>` : `<span class="pill bad">NO CREDENTIAL</span>`;
+    const mode = i.mode === 'real' ? `<span class="pill warn">REAL MODE</span>` : `<span class="pill ok">MOCK MODE</span>`;
+    const cfgBits = [];
+    if (i.requires_filesystem_path) cfgBits.push("FS path");
+    if (i.requires_git_config) cfgBits.push("Git");
+    if (i.requires_local_endpoint) cfgBits.push("Endpoint");
+    if (i.not_required_reason) cfgBits.push("not required");
+    return `<div class="card"><h3>${escapeHtml(i.integration_name)}</h3>
+      ${kv("purpose", i.purpose || "—")}
+      ${kv("state", i.state)}
+      ${kv("mode", i.mode)}
+      ${kv("real_allowed", i.real_allowed)}
+      ${kv("credential_required", (i.required_credentials||[]).join(", ") || "none")}
+      ${kv("config_requires", cfgBits.join(", ") || "none")}
+      <div class="row"><span class="k">credential</span><span class="v">${cred}</span></div>
+      <div class="row"><span class="k">mode</span><span class="v">${mode}</span></div>
+      <div class="row"><span class="k">last_verified</span><span class="v">${escapeHtml(String(i.last_verified||'—'))}</span></div>
+      <button class="action" onclick="act('integration.validate',{name:'${i.integration_name}'})">Validate</button>
+      <button class="action" onclick="act('integration.health_check',{name:'${i.integration_name}'})">Health check</button>
+    </div>`;
+  }).join('');
+  html += card(`Integrations (${p.integrations.length})`, rows || "<div class='note'>none</div>");
+  document.getElementById('page-integrations_credentials').innerHTML = html;
 }
 
 function renderHealth() {

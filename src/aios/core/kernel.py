@@ -256,6 +256,7 @@ class HermesKernel:
         self._integration_status_service: Any | None = None
         # M13 — non-authoritative dashboard backend (Terminal 3 reads AI-OS state)
         self._dashboard_service: Any | None = None
+        self._project_service: Any | None = None
         # M13 — bounded failure-recovery coordinator (AI-OS-authoritative)
         self._failure_recovery_manager: FailureRecoveryManager | None = None
 
@@ -374,6 +375,11 @@ class HermesKernel:
     def dashboard_service(self):
         """Get the non-authoritative M13 Dashboard backend (Terminal 3 UI reads AI-OS state)."""
         return self._dashboard_service
+
+    @property
+    def project_service(self):
+        """Get the non-authoritative M14-T2 Project Workspace service (bounded UI resource)."""
+        return self._project_service
 
     @property
     def self_loop_engine(self) -> SelfLoopEngine | None:
@@ -595,6 +601,11 @@ class HermesKernel:
         # M13 — non-authoritative dashboard backend (Terminal 3 reads AI-OS state;
         # forwards user actions through SecurityManager, holds no authority itself)
         await self._init_dashboard_backend()
+
+        # M14-T2 — bounded Project Workspace service (non-authoritative; delegates
+        # lifecycle/execution authority to AI-OS). Additive; does not alter the
+        # SecurityManager, terminal contract, or M7–M14 verified behavior.
+        await self._init_project_service()
 
         # M9-N1 — bootstrap engineering services into the canonical C2 registry
         # so the start loop below can run them (GAP-A closure). Runs BEFORE
@@ -2136,6 +2147,61 @@ class HermesKernel:
 
         self._dashboard_service = service
         logger.debug("M13 Dashboard backend registered (engineering.dashboard_backend)")
+
+    async def _init_project_service(self) -> None:
+        """M14-T2 — register the bounded Project Workspace service.
+
+        Terminal 2 authors this integration (PAGE 1 "Project Workspace") so
+        Terminal 3 can host the project-based dashboard. The service is BOUNDED:
+        it holds NO governance/decision/security/execution authority. Project
+        lifecycle transitions and the Notion handoff are delegated to the kernel's
+        authoritative components; the dashboard only forwards user intent through
+        the SecurityManager gate (fail-closed).
+
+        This wiring is additive and does NOT modify SecurityManager, the terminal
+        contract, or any M7–M14 verified functionality.
+        """
+        if not self._service_registry or not self._event_bus:
+            logger.debug("Core components not available; skipping Project Service init")
+            return
+
+        try:
+            from aios.services.project_service import (
+                ProjectService,
+                create_project_service,
+            )
+        except ImportError:
+            logger.debug("ProjectService not available; skipping")
+            return
+
+        service = await create_project_service(
+            kernel=self,
+            event_bus=self._event_bus,
+            security_manager=self._security_manager,
+            config={},
+        )
+
+        from aios.core.service_registry import ServiceType
+
+        try:
+            await self._service_registry.register(
+                service,
+                service_id="engineering.project_workspace",
+                service_type=ServiceType.ENGINEERING,
+                metadata={
+                    "version": "1.0.0",
+                    "description": "Bounded Project Workspace service (non-authoritative, AI-OS-owned lifecycle)",
+                },
+            )
+        except Exception as exc:  # noqa: BLE001 — registration is best-effort
+            logger.debug("ProjectService registry registration skipped: %s", exc)
+
+        self._project_service = service
+        # Give the DashboardService a direct handle so get_project_workspace() can
+        # reach it without depending on full kernel wiring in every test context.
+        if self._dashboard_service is not None:
+            self._dashboard_service._project_service = service
+        logger.debug("M14-T2 Project Workspace service registered (engineering.project_workspace)")
 
     async def _init_self_loop(self) -> None:
         """Initialize M13 SelfLoopEngine — single authoritative autonomous decision-making engine.

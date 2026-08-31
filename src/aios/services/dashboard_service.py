@@ -22,6 +22,8 @@ Pages exposed (read-only data bundles):
   3. Project / Execution  -> active cycles + bounded-execution + recovery summary
   4. Knowledge / History  -> durability/persistence adapter stats
   5. System / Health      -> kernel stats + service status + authority summary
+  6. Project Workspace    -> project-scoped chat/knowledge/decisions/plans (NEW)
+  7. Integrations & Credentials -> ALL integrations config/credential/health (NEW)
 """
 
 from __future__ import annotations
@@ -38,6 +40,11 @@ from aios.events.core.event import Event
 from aios.events.core.identity import ComponentIdentity, ComponentType
 from aios.events.core.types import SemanticVersion
 from aios.services.base import BaseService
+from aios.services.project_service import (
+    ProjectService,
+    ProjectState,
+    can_transition,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -89,6 +96,7 @@ class DashboardService(BaseService):
         self._kernel = kernel
         self._security_manager = security_manager
         self._config = config or {}
+        self._project_service = None
         self._identity = ComponentIdentity(
             component_type=ComponentType.ENGINEERING_SERVICE,
             component_name="dashboard_backend",
@@ -366,11 +374,160 @@ class DashboardService(BaseService):
         }
 
     # ============================================================
+    # PAGE 6 — Project Workspace (project-scoped chat/knowledge)
+    # ============================================================
+
+    def _resolve_project_service(self) -> Optional[ProjectService]:
+        """Resolve the bounded ProjectService (authored by AI-OS Terminal 1)."""
+        if self._project_service is not None:
+            return self._project_service
+        if self._kernel is not None:
+            return getattr(self._kernel, "project_service", None)
+        return None
+
+    def get_project_workspace(self, project_id: Optional[str] = None) -> dict[str, Any]:
+        """Read-only view of the project workspace (PAGE 1 of the spec).
+
+        The dashboard visualizes project state, chat, knowledge, decisions, plans,
+        and tasks. It NEVER authorizes transitions or executions itself — every
+        mutation is forwarded through ``request_action`` -> SecurityManager.
+        """
+        svc = self._resolve_project_service()
+        if svc is None:
+            return {
+                "page": "project_workspace",
+                "authority": "aios_sole",
+                "available": False,
+                "reason": "project_service not wired (authored by AI-OS Terminal 1)",
+                "read_only": True,
+                "projects": [],
+            }
+        if project_id:
+            snapshot = svc.get_project_snapshot(project_id)
+            snapshot["page"] = "project_workspace"
+            snapshot["authority"] = "aios_sole"
+            snapshot["read_only"] = True
+            snapshot["available"] = True
+            return snapshot
+        index = svc.get_workspace_index()
+        index["page"] = "project_workspace"
+        index["authority"] = "aios_sole"
+        index["read_only"] = True
+        index["available"] = True
+        return index
+
+    # ============================================================
+    # PAGE 7 — Integrations & Credentials (authoritative inventory)
+    # ============================================================
+
+    def get_integrations_credentials(self) -> dict[str, Any]:
+        """Central config/credential/connection/health view of ALL integrations.
+
+        For every integration discovered by the authoritative inventory it shows:
+        name, purpose, required credentials, whether a credential is configured
+        (YES/NO — never the value), filesystem/Git/local-endpoint config, status,
+        connection mode (mock/real), and health. No secret value is ever exposed;
+        secret redaction is delegated to the existing ``redact_secrets`` and the
+        ``IntegrationStatusReport.to_dict(redact_secrets=True)`` path.
+        """
+        from aios.integrations import CANONICAL_INTEGRATIONS, load_integrations_config
+        from aios.integrations.config import IntegrationMode
+
+        status_service = (
+            getattr(self._kernel, "integration_status_service", None) if self._kernel else None
+        )
+
+        integrations: list[dict[str, Any]] = []
+        try:
+            if status_service is not None:
+                integrations = status_service.get_all_status_dict(redact_secrets=True)
+        except Exception:  # noqa: BLE001 — defensive read
+            integrations = []
+
+        # Merge authoritative metadata (purpose, required credential kinds, config
+        # categories) from the local inventory so the dashboard shows the full
+        # picture, not just what the runtime status service happens to expose.
+        registry = load_integrations_config()
+        meta = _INTEGRATION_INVENTORY
+        merged: list[dict[str, Any]] = []
+        seen = set()
+        for entry in integrations:
+            name = entry.get("integration_name") or entry.get("name")
+            seen.add(name)
+            detail = dict(meta.get(name, {}))
+            entry["purpose"] = detail.get("purpose", "")
+            entry["required_credentials"] = detail.get("required_credentials", [])
+            entry["requires_filesystem_path"] = detail.get("requires_filesystem_path", False)
+            entry["requires_git_config"] = detail.get("requires_git_config", False)
+            entry["requires_local_endpoint"] = detail.get("requires_local_endpoint", False)
+            entry["not_required_reason"] = detail.get("not_required_reason", "")
+            entry["credential_configured"] = _infer_credential_configured(name, registry, entry)
+            entry["last_verified"] = entry.get("last_health_check") or entry.get("last_validated")
+            merged.append(entry)
+        # Include authoritative entries not surfaced by the runtime status service.
+        # Covers BOTH the canonical registry integrations AND the inventory-only
+        # integrations (obsidian_git, supabase, n8n) so the dashboard satisfies the
+        # spec requirement to show ALL integrations from the authoritative inventory.
+        for name in sorted(set(list(CANONICAL_INTEGRATIONS) + list(meta.keys()))):
+            if name in seen:
+                continue
+            detail = meta.get(name, {})
+            entry = registry.get(name)
+            mode = entry.mode.value if entry else "mock"
+            merged.append({
+                "integration_name": name,
+                "state": entry.state.value if entry else "absent",
+                "mode": mode,
+                "real_allowed": entry.real_allowed() if entry else False,
+                "user_resource_present": entry.user_resource_present if entry else False,
+                "real_gated": entry.real_gated if entry else True,
+                "requires_user_resource": entry.requires_user_resource if entry else True,
+                "purpose": detail.get("purpose", ""),
+                "required_credentials": detail.get("required_credentials", []),
+                "requires_filesystem_path": detail.get("requires_filesystem_path", False),
+                "requires_git_config": detail.get("requires_git_config", False),
+                "requires_local_endpoint": detail.get("requires_local_endpoint", False),
+                "not_required_reason": detail.get("not_required_reason", ""),
+                "credential_configured": _infer_credential_configured(name, registry, {}),
+                "last_verified": None,
+            })
+
+        # Go-live readiness summary (architecturally safe: reports config state
+        # only, never attempts connections or reveals secrets).
+        required_creds = [m for m in meta.values() if m.get("required_credentials")]
+        configured = sum(1 for m in merged if m.get("credential_configured"))
+        total_creds = len(required_creds)
+        missing = [
+            m.get("integration_name")
+            for m in merged
+            if m.get("required_credentials") and not m.get("credential_configured")
+        ]
+        readiness = {
+            "core_services": _kernel_core_ok(self._kernel),
+            "required_credentials": f"{configured}/{total_creds}",
+            "external_integrations": f"{len(merged)}/{len(merged)}",
+            "knowledge_system": _adapter_present(self._kernel, "obsidian_git_adapter"),
+            "model_providers": _model_providers_status(),
+            "database": _adapter_present(self._kernel, "supabase_adapter"),
+            "status": "READY" if not missing and _kernel_core_ok(self._kernel) else "NOT READY",
+            "missing": missing,
+        }
+
+        return {
+            "page": "integrations_credentials",
+            "authority": "aios_sole",
+            "integrations": merged,
+            "secret_exposure": "NONE — values never transmitted; only configured YES/NO",
+            "readiness": readiness,
+            "read_only": True,
+        }
+
+    # ============================================================
     # Aggregated snapshot for frontend
     # ============================================================
 
     def get_all_pages(self) -> dict[str, Any]:
-        """All five read-only page bundles in one call."""
+        """All seven read-only page bundles in one call."""
         return {
             "generated_at": self._now(),
             "authority_model": "aios_sole_authority",
@@ -380,6 +537,8 @@ class DashboardService(BaseService):
                 "project_execution": self.get_project_execution(),
                 "knowledge_history": self.get_knowledge_history(),
                 "system_health": self.get_system_health(),
+                "project_workspace": self.get_project_workspace(),
+                "integrations_credentials": self.get_integrations_credentials(),
             },
         }
 
@@ -409,6 +568,10 @@ class DashboardService(BaseService):
           - "self_loop.control"      {op: pause|resume|stop}
           - "self_loop.start_cycle"  {}  (user-initiated trigger; engine validates)
           - "failure_recovery.trigger" {component}
+          - "project.create"         {name, description?}  (local workspace scaffold)
+          - "project.transition"     {project_id, to_state}  (AI-OS validates lifecycle)
+          - "project.publish_notion" {project_id, plan?}    (bounded Notion handoff)
+          - "project.clear_action"   {project_id}           (READY_FOR_ACTION transition)
         """
         params = params or {}
         correlation_id = uuid.uuid4().hex
@@ -430,7 +593,12 @@ class DashboardService(BaseService):
                 decision = self._security_manager.authorize(
                     principal=principal,
                     action=action,
-                    resource=params.get("name") or params.get("component") or action,
+                    resource=(
+                        params.get("name")
+                        or params.get("component")
+                        or params.get("project_id")
+                        or action
+                    ),
                     context={"source": "dashboard", "params": params, "correlation_id": correlation_id},
                 )
             except Exception as exc:  # noqa: BLE001 — security failure must block
@@ -536,7 +704,79 @@ class DashboardService(BaseService):
             record = await manager.recover(component)
             return {"recovery_id": record.recovery_id, "outcome": record.outcome}
 
+        # --- Project Workspace actions (PAGE 1) ---
+        # All of these delegate to the authoritative ProjectService / kernel. The
+        # dashboard service itself decides nothing; it only forwards after the
+        # SecurityManager gate (fail-closed) has returned ALLOW.
+        if action in (
+            "project.create",
+            "project.transition",
+            "project.publish_notion",
+            "project.clear_action",
+        ):
+            project_service = self._resolve_project_service()
+            if project_service is None:
+                raise RuntimeError("ProjectService unavailable (authored by AI-OS Terminal 1)")
+            return await self._execute_project_action(action, params, project_service)
+
         raise ValueError(f"Unsupported dashboard action: {action}")
+
+    async def _execute_project_action(
+        self,
+        action: str,
+        params: dict[str, Any],
+        project_service: ProjectService,
+    ) -> dict[str, Any]:
+        """Perform a gated, bounded project operation. No autonomous authority.
+
+        Every transition/handoff is validated by AI-OS (ProjectService lifecycle
+        rules + the kernel's adapters). The dashboard never performs execution
+        without an explicit, authorized request.
+        """
+        if action == "project.create":
+            project = project_service.create_project(
+                name=params.get("name", "Untitled Project"),
+                description=params.get("description", ""),
+                owner=params.get("owner", "dashboard_user"),
+            )
+            return {"project_id": project.project_id, "state": project.state.value}
+
+        if action == "project.transition":
+            project_id = params.get("project_id")
+            to_state_raw = params.get("to_state")
+            to_state = ProjectState(to_state_raw) if to_state_raw else None
+            if project_id is None or to_state is None:
+                raise ValueError("project.transition requires project_id and to_state")
+            ok, reason = project_service.validate_transition(project_id, to_state)
+            if not ok:
+                raise ValueError(f"Lifecycle transition rejected by AI-OS: {reason}")
+            project = project_service.apply_transition(project_id, to_state)
+            return {"project_id": project_id, "state": project.state.value}
+
+        if action == "project.publish_notion":
+            project_id = params.get("project_id")
+            if project_id is None:
+                raise ValueError("project.publish_notion requires project_id")
+            result = await project_service.publish_final_plan_to_notion(
+                project_id, plan=params.get("plan")
+            )
+            return result
+
+        if action == "project.clear_action":
+            project_id = params.get("project_id")
+            if project_id is None:
+                raise ValueError("project.clear_action requires project_id")
+            ok, reason = project_service.validate_transition(
+                project_id, ProjectState.READY_FOR_ACTION
+            )
+            if not ok:
+                raise ValueError(f"Cannot clear for action: {reason}")
+            project = project_service.apply_transition(
+                project_id, ProjectState.READY_FOR_ACTION
+            )
+            return {"project_id": project_id, "state": project.state.value}
+
+        raise ValueError(f"Unsupported project action: {action}")
 
 
 # ------------------------------------------------------------------- serde utils
@@ -578,6 +818,207 @@ def _serialize_self_prompt(prompt: Any) -> dict[str, Any]:
         }
     except Exception:  # noqa: BLE001
         return {}
+
+
+# -------------------------------------------------------------------
+# Integrations & Credentials helper tables
+# -------------------------------------------------------------------
+
+# Authoritative inventory metadata (spec §Page 2). Purpose, required credential
+# kinds, and configuration categories per integration. This augments (never
+# replaces) the runtime IntegrationStatusService output. No secret values here.
+_INTEGRATION_INVENTORY: dict[str, dict[str, Any]] = {
+    "hermes_agent_acp": {
+        "purpose": "Agent communication protocol (ACP) — preferred worker path",
+        "required_credentials": ["hermes-agent repo path"],
+        "requires_filesystem_path": True,
+        "requires_git_config": False,
+        "requires_local_endpoint": False,
+    },
+    "hermes_agent_ext": {
+        "purpose": "Agent communication protocol (MCP fallback worker path)",
+        "required_credentials": ["MCP server config"],
+        "requires_filesystem_path": False,
+        "requires_git_config": False,
+        "requires_local_endpoint": True,
+    },
+    "playwright_mcp": {
+        "purpose": "Browser execution substrate",
+        "required_credentials": ["Node.js + @playwright/mcp + browser"],
+        "requires_filesystem_path": False,
+        "requires_git_config": False,
+        "requires_local_endpoint": True,
+    },
+    "obsidian": {
+        "purpose": "Knowledge/durability layer (vault)",
+        "required_credentials": ["vault path (local)"],
+        "requires_filesystem_path": True,
+        "requires_git_config": False,
+        "requires_local_endpoint": False,
+    },
+    "graphify": {
+        "purpose": "Knowledge/relationship graph",
+        "required_credentials": ["endpoint"],
+        "requires_filesystem_path": False,
+        "requires_git_config": False,
+        "requires_local_endpoint": True,
+    },
+    "claude_mem": {
+        "purpose": "External memory context (advisory)",
+        "required_credentials": ["token"],
+        "requires_filesystem_path": True,
+        "requires_git_config": False,
+        "requires_local_endpoint": False,
+    },
+    "notion": {
+        "purpose": "Planning publication target (final approved plans)",
+        "required_credentials": ["Notion API token"],
+        "requires_filesystem_path": False,
+        "requires_git_config": False,
+        "requires_local_endpoint": True,
+    },
+    "agent_reach": {
+        "purpose": "Agent communication protocol (registered-capability only)",
+        "required_credentials": [],
+        "requires_filesystem_path": False,
+        "requires_git_config": False,
+        "requires_local_endpoint": False,
+        "not_required_reason": "capability registration only; no external credential",
+    },
+    "freellmapi": {
+        "purpose": "Local LLM provider (dev/test only)",
+        "required_credentials": ["API URL + key"],
+        "requires_filesystem_path": False,
+        "requires_git_config": False,
+        "requires_local_endpoint": True,
+    },
+    "anthropic": {
+        "purpose": "Standard model provider",
+        "required_credentials": ["API key (runtime)"],
+        "requires_filesystem_path": False,
+        "requires_git_config": False,
+        "requires_local_endpoint": True,
+    },
+    "openai": {
+        "purpose": "Standard model provider",
+        "required_credentials": ["API key (runtime)"],
+        "requires_filesystem_path": False,
+        "requires_git_config": False,
+        "requires_local_endpoint": True,
+    },
+    "supabase": {
+        "purpose": "Persistent storage layer",
+        "required_credentials": ["URL + anon key"],
+        "requires_filesystem_path": False,
+        "requires_git_config": False,
+        "requires_local_endpoint": True,
+    },
+    "n8n": {
+        "purpose": "Bounded automation/execution",
+        "required_credentials": ["Base URL + API key"],
+        "requires_filesystem_path": False,
+        "requires_git_config": False,
+        "requires_local_endpoint": True,
+    },
+    "obsidian_git": {
+        "purpose": "Git durability for knowledge vault",
+        "required_credentials": ["Vault path + Git remote"],
+        "requires_filesystem_path": True,
+        "requires_git_config": True,
+        "requires_local_endpoint": False,
+    },
+}
+
+
+def _infer_credential_configured(
+    name: str, registry: Any, entry: dict[str, Any]
+) -> bool:
+    """Infer ONLY whether a credential/required-resource is configured (YES/NO).
+
+    Never returns the value. Uses the existing integration config + env-var
+    presence detection (redacted). Falls back to user_resource_present for
+    resource-gated integrations.
+    """
+    from aios.security.secrets import is_secret_env_key
+
+    detail = _INTEGRATION_INVENTORY.get(name, {})
+    required = detail.get("required_credentials", [])
+    if not required:
+        return True  # nothing required -> trivially "configured / NOT REQUIRED"
+    # If the runtime status service already computed a user-resource presence,
+    # trust it (it never exposes the value).
+    if entry.get("user_resource_present"):
+        return True
+    # Detect env-var presence by key name only (no values touched).
+    cfg = registry.get(name) if registry is not None else None
+    if cfg is not None:
+        # IntegrationConfig may carry flags set by validation.
+        if getattr(cfg, "user_resource_present", False):
+            return True
+    # Conservative env-key presence check (key names only, never values).
+    import os
+
+    cand = [c.lower() for c in required]
+    for key in os.environ:
+        kl = key.lower()
+        if any(is_secret_env_key(key) for _ in [0]):
+            pass
+        # Map known required credential hints to env vars.
+        if "api key" in kl or "token" in kl or "anon key" in kl or "api_key" in kl:
+            if kl.endswith("_key") or "token" in kl or "secret" in kl or kl.endswith("_anon_key"):
+                if is_secret_env_key(key):
+                    return True
+        if "vault path" in cand or "vault" in kl:
+            if kl in ("obsidian_vault_path", "obsidian__vault_path"):
+                if os.environ.get(key):
+                    return True
+        if "git remote" in cand or "remote" in kl:
+            if kl in ("obsidian_git_remote_url",):
+                if os.environ.get(key):
+                    return True
+        if "endpoint" in cand or "base url" in cand or "url" in kl:
+            if any(t in kl for t in ("url", "endpoint", "base_url")):
+                if is_secret_env_key(key) or kl in (
+                    "supabase_url", "n8n_base_url", "graphify_endpoint",
+                    "freellm_api_endpoint", "notion_parent_id",
+                ):
+                    if os.environ.get(key):
+                        return True
+    return False
+
+
+def _kernel_core_ok(kernel: Any) -> bool:
+    if kernel is None:
+        return False
+    try:
+        stats = kernel.get_stats()
+        return bool(stats.get("kernel", {}).get("running", False))
+    except Exception:  # noqa: BLE001
+        return False
+
+
+def _adapter_present(kernel: Any, attr: str) -> bool:
+    if kernel is None:
+        return False
+    return getattr(kernel, attr, None) is not None
+
+
+def _model_providers_status() -> str:
+    """Report model-provider credential presence as X/Y without exposing values."""
+    import os
+
+    from aios.security.secrets import is_secret_env_key
+
+    total = 0
+    present = 0
+    for key in os.environ:
+        if is_secret_env_key(key) and ("ANTHROPIC" in key or "OPENAI" in key or "FREELLM" in key):
+            total += 1
+            present += 1
+    # If no env keys at all, we still report the known provider count (2 standard).
+    if total == 0:
+        return "0/2"
+    return f"{present}/{total}"
 
 
 # Service registry key

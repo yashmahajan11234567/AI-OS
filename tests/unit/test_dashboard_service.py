@@ -25,6 +25,9 @@ def kernel_mock():
     kernel = MagicMock()
     kernel.terminal_contract_violations = []
     kernel.get_stats.return_value = {"kernel": {"name": "aios", "running": True}}
+    # ProjectService is authored by AI-OS and wired separately; leave it unset so
+    # the Project Workspace page reports unavailable (non-authoritative) by default.
+    kernel.project_service = None
     return kernel
 
 
