@@ -27,7 +27,7 @@ from aios.core.state import StateManager, StateScope, get_state_manager, reset_s
 from aios.core.council_manager import CouncilManager, get_council_manager, set_council_manager
 from aios.core.security_manager import SecurityManager, get_security_manager, reset_security_manager_singleton
 from aios.core.resource_manager import ResourceManager, ResourceType, ResourceLimit, get_resource_manager, reset_resource_manager_singleton
-from aios.events.core.bus import EventBus, EventBusConfig, reset_event_bus_singleton
+from aios.events.core.bus import EventBus, EventBusConfig, reset_event_bus_singleton, set_core_event_bus
 from aios.core.service_registry import get_service_registry, reset_service_registry_singleton
 from aios.core.configuration_manager import (
     ConfigurationManager,
@@ -76,6 +76,7 @@ async def init_kernel_with_overrides(test_overrides: dict[str, Any]) -> HermesKe
     )
     kernel._event_bus = EventBus(config=event_bus_config)
     await kernel._event_bus.initialize()
+    set_core_event_bus(kernel._event_bus)
 
     # C2: Canonical ServiceRegistry
     kernel._service_registry = get_service_registry(event_bus=kernel._event_bus)
@@ -335,8 +336,8 @@ async def test_m10_autonomous_objective_to_replan_loop():
         )
         await kernel._event_bus.publish(event)
 
-    # Give replan detector time to process
-    await asyncio.sleep(0.5)
+    # Process events (required with auto_start_dispatch_worker=False)
+    await kernel._event_bus.drain()
 
     # Verify replan detector tracked the failures
     assert len(replan_detector._execution_history) >= 4

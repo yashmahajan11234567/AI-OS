@@ -709,6 +709,7 @@ class HermesKernel:
         )
         self._event_bus = CoreEventBus(config=event_bus_config)
         await self._event_bus.initialize()
+        set_core_event_bus(self._event_bus)
 
         # C2: Canonical ServiceRegistry (Phase 1) — depends on canonical EventBus
         reset_core_service_registry_singleton()

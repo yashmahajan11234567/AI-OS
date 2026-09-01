@@ -24,6 +24,7 @@ from aios.events.core.bus import (
     EventBus as CoreEventBus,
     EventBusConfig,
     reset_event_bus_singleton as reset_core_event_bus_singleton,
+    set_core_event_bus,
 )
 from aios.core.service_registry import (
     ServiceRegistry as CoreServiceRegistry,
@@ -730,6 +731,7 @@ class HermesKernel:
         )
         self._event_bus = CoreEventBus(config=event_bus_config)
         await self._event_bus.initialize()
+        set_core_event_bus(self._event_bus)
 
         # C2: Canonical ServiceRegistry (Phase 1) — depends on canonical EventBus
         reset_core_service_registry_singleton()
@@ -1860,64 +1862,76 @@ class HermesKernel:
             AutonomousObjectiveGenerator,
             ObjectiveConfig,
             get_objective_generator,
+            set_objective_generator,
         )
         from aios.services.replan_detector import (
             AdaptiveReplanDetector,
             ReplanDetectorConfig,
             get_replan_detector,
+            set_replan_detector,
         )
         from aios.services.autonomous_judge import (
             AutonomousFinalJudge,
             AutonomousJudgeConfig,
             AutonomousJudgeMode,
             get_autonomous_judge,
+            set_autonomous_judge,
         )
         from aios.services.self_prompting_autonomous import (
             SelfPromptingAutonomousService,
             AutonomousSelfPromptingConfig,
             ConvergenceAction,
             get_self_prompting_autonomous,
+            set_self_prompting_autonomous,
         )
         from aios.services.learning_apply import (
             LearningApplyService,
             LearningApplyConfig,
             get_learning_apply,
+            set_learning_apply,
         )
         from aios.services.capability_provenance_ext import (
             CapabilityProvenanceExtensionService,
             CapabilityProvenanceConfig,
             ProvenanceAuthority,
             get_capability_provenance_ext,
+            set_capability_provenance_ext,
         )
         from aios.services.state_verification import (
             StateVerificationService,
             StateVerificationConfig,
             get_state_verification,
+            set_state_verification,
         )
         from aios.services.security_abac_ext import (
             SecurityAbacExtensionService,
             SecurityAbacConfig,
             get_security_abac_ext,
+            set_security_abac_ext,
         )
         from aios.services.resource_manager_quota import (
             ResourceManagerQuotaService,
             AutonomousQuotaConfig,
             get_resource_manager_quota,
+            set_resource_manager_quota,
         )
         from aios.services.autonomy_override import (
             AutonomyOverrideService,
             AutonomyOverrideConfig,
             get_autonomy_override,
+            set_autonomy_override,
         )
         from aios.services.audit_trail import (
             AuditTrailService,
             AuditConfig,
             get_audit_trail,
+            set_audit_trail,
         )
         from aios.services.autonomy_fallback import (
             AutonomyFallbackService,
             AutonomyFallbackConfig,
             get_autonomy_fallback,
+            set_autonomy_fallback,
         )
 
         # N1: Objective Generator
@@ -1928,7 +1942,7 @@ class HermesKernel:
         )
         objective_generator = AutonomousObjectiveGenerator(config=og_config)
         self.register_service(objective_generator)
-        get_objective_generator(og_config)
+        set_objective_generator(objective_generator)
 
         # N2: Replan Detector
         rd_config = ReplanDetectorConfig(
@@ -1940,7 +1954,7 @@ class HermesKernel:
         )
         replan_detector = AdaptiveReplanDetector(config=rd_config)
         self.register_service(replan_detector)
-        get_replan_detector(rd_config)
+        set_replan_detector(replan_detector)
 
         # N3: Autonomous Judge
         from aios.core.council_manager import get_council_manager
@@ -1955,7 +1969,7 @@ class HermesKernel:
         )
         autonomous_judge = AutonomousFinalJudge(config=aj_config, council_manager=council)
         self.register_service(autonomous_judge)
-        get_autonomous_judge(aj_config, council)
+        set_autonomous_judge(autonomous_judge)
 
         # N4: Self-Prompting Autonomous Enhancement
         sp_config = AutonomousSelfPromptingConfig(
@@ -1968,7 +1982,7 @@ class HermesKernel:
         )
         self_prompting_auto = SelfPromptingAutonomousService(config=sp_config)
         self.register_service(self_prompting_auto)
-        get_self_prompting_autonomous(sp_config)
+        set_self_prompting_autonomous(self_prompting_auto)
 
         # N5: Learning Application Feedback Loop
         la_config = LearningApplyConfig(
@@ -1978,7 +1992,7 @@ class HermesKernel:
         )
         learning_apply = LearningApplyService(config=la_config)
         self.register_service(learning_apply)
-        get_learning_apply(la_config)
+        set_learning_apply(learning_apply)
 
         # N6: Capability Provenance Extensions
         cp_config = CapabilityProvenanceConfig(
@@ -1987,7 +2001,7 @@ class HermesKernel:
         )
         capability_provenance_ext = CapabilityProvenanceExtensionService(config=cp_config)
         self.register_service(capability_provenance_ext)
-        get_capability_provenance_ext(cp_config)
+        set_capability_provenance_ext(capability_provenance_ext)
 
         # N7: State Verification
         sv_config = StateVerificationConfig(
@@ -1996,7 +2010,7 @@ class HermesKernel:
         )
         state_verification = StateVerificationService(config=sv_config, state_manager=self._state_manager)
         self.register_service(state_verification)
-        get_state_verification(sv_config, self._state_manager)
+        set_state_verification(state_verification)
 
         # N8: Security ABAC Extensions
         sa_config = SecurityAbacConfig(
@@ -2005,7 +2019,7 @@ class HermesKernel:
         )
         security_abac_ext = SecurityAbacExtensionService(config=sa_config, security_manager=self._security_manager)
         self.register_service(security_abac_ext)
-        get_security_abac_ext(sa_config, self._security_manager)
+        set_security_abac_ext(security_abac_ext)
 
         # N9: Resource Manager Quotas
         rq_config = AutonomousQuotaConfig(
@@ -2016,7 +2030,7 @@ class HermesKernel:
         )
         resource_manager_quota = ResourceManagerQuotaService(config=rq_config, resource_manager=self._resource_manager)
         self.register_service(resource_manager_quota)
-        get_resource_manager_quota(rq_config, self._resource_manager)
+        set_resource_manager_quota(resource_manager_quota)
 
         # N10: Autonomy Override
         ao_config = AutonomyOverrideConfig(
@@ -2024,7 +2038,7 @@ class HermesKernel:
         )
         autonomy_override = AutonomyOverrideService(config=ao_config)
         self.register_service(autonomy_override)
-        get_autonomy_override(ao_config)
+        set_autonomy_override(autonomy_override)
 
         # N11: Audit Trail
         at_config = AuditConfig(
@@ -2033,7 +2047,7 @@ class HermesKernel:
         )
         audit_trail = AuditTrailService(config=at_config)
         self.register_service(audit_trail)
-        get_audit_trail(at_config)
+        set_audit_trail(audit_trail)
 
         # N12: Autonomy Fallback
         af_config = AutonomyFallbackConfig(
@@ -2045,7 +2059,7 @@ class HermesKernel:
         )
         autonomy_fallback = AutonomyFallbackService(config=af_config)
         self.register_service(autonomy_fallback)
-        get_autonomy_fallback(af_config)
+        set_autonomy_fallback(autonomy_fallback)
 
         logger.info("M10 autonomy services initialized and registered")
 
