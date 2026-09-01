@@ -60,9 +60,11 @@ class TestN8nCreation:
         assert real_adapter.is_real_mode is True
 
     def test_real_mode_disabled_without_credentials(self, monkeypatch):
-        # Clear relevant environment variables to ensure clean state
+        # Clear relevant environment variables to ensure clean state.
+        # M14-T2 added N8N_WEBHOOK_URL — it also gates real mode, so it must be cleared here.
         monkeypatch.delenv("N8N_BASE_URL", raising=False)
         monkeypatch.delenv("N8N_API_KEY", raising=False)
+        monkeypatch.delenv("N8N_WEBHOOK_URL", raising=False)
         a = N8nAdapter(real_mode_enabled=True)
         assert a.is_mock_mode is True
 
@@ -221,9 +223,11 @@ class TestN8nRealMode:
 
     @pytest.mark.asyncio
     async def test_not_configured_without_url_stays_mock(self, monkeypatch):
-        # Clear relevant environment variables to ensure clean state
+        # Clear relevant environment variables to ensure clean state.
+        # M14-T2 added N8N_WEBHOOK_URL — it also gates real mode, so it must be cleared here.
         monkeypatch.delenv("N8N_BASE_URL", raising=False)
         monkeypatch.delenv("N8N_API_KEY", raising=False)
+        monkeypatch.delenv("N8N_WEBHOOK_URL", raising=False)
         # Safe default: real_mode_enabled without a base_url keeps the adapter in
         # mock mode; connect() succeeds and never raises.
         a = N8nAdapter(real_mode_enabled=True, api_key="k")
