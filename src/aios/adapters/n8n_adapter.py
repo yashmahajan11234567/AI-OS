@@ -217,6 +217,7 @@ class N8nAdapter(BaseExecutionAdapter):
         security_manager: Any | None = None,
         base_url: str | None = None,
         api_key: str | None = None,
+        webhook_url: str | None = None,
     ) -> None:
         super().__init__(tool=None)
         self._mcp_manager = mcp_manager
@@ -226,10 +227,30 @@ class N8nAdapter(BaseExecutionAdapter):
         self._connected = False
         self._version_counter = 0
 
+        # REST endpoint config. base_url/api_key are read from constructor
+        # first, then env. Record whether base_url was provided explicitly so
+        # we can prefer the user-intent path below.
         self._base_url = base_url or os.environ.get("N8N_BASE_URL")
         self._api_key = api_key or os.environ.get("N8N_API_KEY")
+        base_url_explicit = base_url is not None
 
-        self._real_mode = bool(real_mode_enabled) and bool(self._base_url) and bool(self._api_key)
+        # Webhook URL is the production-webhook dispatch path (n8n-activated
+        # workflow webhook). Honored only when the caller did NOT pass an
+        # explicit base_url — explicit base_url means the caller wants REST
+        # dispatch (e.g. tests forcing the REST path with a broken URL).
+        if webhook_url is not None:
+            self._webhook_url = webhook_url
+        elif not base_url_explicit:
+            self._webhook_url = os.environ.get("N8N_WEBHOOK_URL")
+        else:
+            self._webhook_url = None
+
+        # Real mode requires explicit enablement plus SOMETHING to dispatch to:
+        # either the legacy REST endpoint (base_url + api_key) or a configured
+        # production webhook (webhook_url). Webhook-only is a valid bounded path.
+        has_rest = bool(self._base_url) and bool(self._api_key)
+        has_webhook = bool(self._webhook_url)
+        self._real_mode = bool(real_mode_enabled) and (has_rest or has_webhook)
         self._engine = _MockN8nEngine() if not self._real_mode else None
 
     # -----------------------------------------------------------------------
@@ -391,8 +412,6 @@ class N8nAdapter(BaseExecutionAdapter):
     ) -> ExecutionResult:
         parameters = parameters or {}
         bounds = bounds or {}
-        self._validate_parameters(parameters)
-        self._validate_bounds(bounds)
         # Provenance before call so we can attach real-mode fields from reply.
         provenance = self._make_provenance(
             "execute_workflow",
@@ -404,8 +423,18 @@ class N8nAdapter(BaseExecutionAdapter):
         bounds["bounded_by"] = "aios_kernel"
 
         try:
+            self._validate_parameters(parameters)
+            self._validate_bounds(bounds)
+
             if self._real_mode:
-                result = await self._call_rest(workflow_id, parameters, bounds, idempotency_key)
+                if self._webhook_url:
+                    result = await self._call_webhook(
+                        workflow_id, parameters, bounds, idempotency_key
+                    )
+                else:
+                    result = await self._call_rest(
+                        workflow_id, parameters, bounds, idempotency_key
+                    )
             else:
                 result = await self._engine.execute_workflow(workflow_id, parameters, bounds)
         except N8nError as e:
@@ -511,6 +540,91 @@ class N8nAdapter(BaseExecutionAdapter):
         except aiohttp.ClientError as e:
             # Never log base URL or API key.
             raise N8nUnavailableError("n8n endpoint unreachable") from e
+
+    async def _call_webhook(
+        self,
+        workflow_id: str,
+        parameters: dict[str, Any],
+        bounds: dict[str, Any],
+        idempotency_key: str | None,
+    ) -> dict[str, Any]:
+        """Real n8n production-webhook dispatch (bounded resource).
+
+        Posts to the configured N8N_WEBHOOK_URL — the production webhook URL
+        that n8n publishes for an activated workflow (e.g.
+        http://host/webhook/aios-echo). Distinct from the legacy REST execution
+        endpoint used by `_call_rest`. Used when N8N_WEBHOOK_URL is configured;
+        the REST path is preserved unchanged when it is not.
+
+        Webhooks in n8n are public POST endpoints; API-key auth is not part of
+        the webhook contract. The same security/provenance/bounds/idempotency
+        contract applies — webhook payload contents are still validated, the
+        AI-OS provenance echo is still attached, and the URL is never logged.
+        """
+        if not self._webhook_url:
+            raise N8nNotConfiguredError(
+                "Webhook dispatch requires N8N_WEBHOOK_URL"
+            )
+
+        webhook = self._webhook_url.rstrip("/")
+        timeout_val = bounds.get("timeout_seconds", self._timeout_seconds)
+        if not isinstance(timeout_val, (int, float)) or timeout_val <= 0:
+            timeout_val = self._timeout_seconds
+        timeout = aiohttp.ClientTimeout(total=timeout_val)
+        headers = {"Content-Type": "application/json"}
+        body: dict[str, Any] = {
+            "workflowId": workflow_id,
+            "data": parameters,
+        }
+        if idempotency_key:
+            body["idempotencyKey"] = idempotency_key
+
+        try:
+            async with aiohttp.ClientSession(timeout=timeout) as session:
+                async with session.post(webhook, headers=headers, json=body) as response:
+                    text = await response.text()
+                    if response.status == 200:
+                        try:
+                            payload = json.loads(text) if text else {}
+                        except ValueError as e:
+                            raise N8nUnavailableError(
+                                "Malformed JSON from n8n webhook"
+                            ) from e
+                        # Normalize webhook reply into the same result shape the
+                        # REST path returns, so downstream provenance/status
+                        # handling is identical.
+                        return {
+                            "execution_id": str(uuid.uuid4()),
+                            "workflow_id": workflow_id,
+                            "status": "success",
+                            "output": payload if isinstance(payload, dict) else {"data": payload},
+                            "errors": [],
+                            "artifacts": [],
+                            "metrics": {
+                                "execution_time_ms": 0,
+                                "retries_attempted": 0,
+                                "started_at": datetime.now(timezone.utc).isoformat(),
+                                "completed_at": datetime.now(timezone.utc).isoformat(),
+                            },
+                        }
+                    if response.status == 404:
+                        raise N8nNotConfiguredError(
+                            f"n8n webhook not found for workflow '{workflow_id}'"
+                        )
+                    if response.status == 429:
+                        raise N8nTimeoutError("n8n webhook rate limit exceeded (429)")
+                    if response.status in (500, 502, 503, 504):
+                        raise N8nUnavailableError("n8n webhook endpoint unavailable")
+                    raise N8nUnavailableError(
+                        f"Unexpected n8n status {response.status}"
+                    )
+        except asyncio.TimeoutError:
+            raise N8nTimeoutError(
+                f"n8n webhook execution exceeded {timeout_val}s bound"
+            ) from None
+        except aiohttp.ClientError as e:
+            # Never log webhook URL or API key.
+            raise N8nUnavailableError("n8n webhook unreachable") from e
 
 
 __all__ = [

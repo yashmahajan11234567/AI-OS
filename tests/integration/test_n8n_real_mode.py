@@ -41,9 +41,9 @@ def _skip_if_no_creds():
 
 @pytest.mark.gated
 @pytest.mark.external
-async def test_n8n_real_mode_requires_gate():
+async def test_n8n_real_mode_requires_gate(monkeypatch):
     """Without AIOS_REAL_INTEGRATION_ENABLED=1, real mode stays mock even with credentials."""
-    os.environ.pop("AIOS_REAL_INTEGRATION_ENABLED", None)
+    monkeypatch.delenv("AIOS_REAL_INTEGRATION_ENABLED", raising=False)
     # No reload needed; adapter reads env at init.
     from aios.adapters.n8n_adapter import N8nAdapter
 
@@ -98,10 +98,9 @@ async def test_n8n_real_workflow_execution():
     )
     await adapter.connect()
 
-    # Use a known-good mock workflow name for real endpoint; real n8n must have
-    # a workflow with this ID installed. If not, it will 404 (tested separately).
+    # Use the actual published production n8n workflow ID established for M14-T2
     result = await adapter.execute_workflow(
-        workflow_id="echo",
+        workflow_id="3y99peW4PfV7bOki",
         parameters={"msg": "m14t2 test"},
         bounds={"timeout_seconds": 30},
     )
@@ -175,7 +174,7 @@ async def test_n8n_real_bounds_validation():
     _skip_if_not_real_mode()
     _skip_if_no_creds()
 
-    from aios.adapters.n8n_adapter import N8nAdapter, N8nValidationError
+    from aios.adapters.n8n_adapter import N8nAdapter
     from aios.adapters.base import ExecutionStatus
 
     adapter = N8nAdapter(
@@ -187,10 +186,11 @@ async def test_n8n_real_bounds_validation():
     await adapter.connect()
 
     result = await adapter.execute_workflow(
-        workflow_id="echo", parameters={}, bounds={"timeout_seconds": -1}
+        workflow_id="3y99peW4PfV7bOki",  # AIOS Echo Test workflow ID from user description
+        parameters={}, bounds={"timeout_seconds": -1}
     )
     assert result.status == ExecutionStatus.ERROR
-    assert "Invalid execution bound" in result.findings[0]["description"] or "Invalid bound" in result.findings[0]["description"]
+    assert any("Invalid execution bound" in finding["description"] for finding in result.findings)
 
     await adapter.disconnect()
 
@@ -215,7 +215,7 @@ async def test_n8n_real_idempotency_key():
 
     key = "idem_" + os.urandom(8).hex()
     result = await adapter.execute_workflow(
-        workflow_id="echo",
+        workflow_id="3y99peW4PfV7bOki",  # AIOS Echo Test workflow ID from user description
         parameters={"idempotency_test": True},
         bounds={"timeout_seconds": 15},
         idempotency_key=key,
@@ -234,11 +234,11 @@ async def test_n8n_real_security_deny_blocks_connect():
     _skip_if_no_creds()
 
     from aios.adapters.n8n_adapter import N8nAdapter
-    from aios.core.security_manager import AuthorizationDecision
+    from aios.core.security_manager import SecurityDecision
 
     class DenySecurityManager:
-        async def authorize(self, principal, action, resource, context):
-            return AuthorizationDecision(value="deny", reason="test deny")
+        def authorize(self, principal, action, resource, context):
+            return SecurityDecision.DENY
 
     adapter = N8nAdapter(
         server_id="n8n",

@@ -1663,6 +1663,10 @@ class HermesKernel:
             self._read_config_str("services.n8n.api_key", "")
             or os.environ.get("N8N_API_KEY")
         )
+        n8n_webhook_url = (
+            self._read_config_str("services.n8n.webhook_url", "")
+            or os.environ.get("N8N_WEBHOOK_URL")
+        )
         adapter = N8nAdapter(
             mcp_manager=self._mcp_manager,
             server_id="n8n",
@@ -1671,6 +1675,7 @@ class HermesKernel:
             security_manager=self._security_manager,
             base_url=n8n_base_url or None,
             api_key=n8n_api_key or None,
+            webhook_url=n8n_webhook_url or None,
         )
         self._n8n_adapter = adapter
 

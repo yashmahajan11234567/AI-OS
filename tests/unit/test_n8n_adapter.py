@@ -22,8 +22,6 @@ from unittest.mock import MagicMock
 from aios.adapters.n8n_adapter import (
     N8nAdapter,
     N8nError,
-    N8nValidationError,
-    N8nSecurityError,
     N8nNotConfiguredError,
     MOCK_WORKFLOWS,
 )
@@ -61,7 +59,10 @@ class TestN8nCreation:
     def test_real_mode_with_credentials(self, real_adapter):
         assert real_adapter.is_real_mode is True
 
-    def test_real_mode_disabled_without_credentials(self):
+    def test_real_mode_disabled_without_credentials(self, monkeypatch):
+        # Clear relevant environment variables to ensure clean state
+        monkeypatch.delenv("N8N_BASE_URL", raising=False)
+        monkeypatch.delenv("N8N_API_KEY", raising=False)
         a = N8nAdapter(real_mode_enabled=True)
         assert a.is_mock_mode is True
 
@@ -144,20 +145,36 @@ class TestN8nValidation:
     async def test_reject_oversized_params(self, adapter):
         await adapter.connect()
         big = {"data": "x" * 60000}
-        with pytest.raises(N8nValidationError):
-            await adapter.execute_workflow("echo", big)
+        result = await adapter.execute_workflow("echo", big)
+        assert result.status == ExecutionStatus.ERROR
+        assert any(
+            "exceeds max size" in finding["description"]
+            or "max size" in finding["description"]
+            for finding in result.findings
+        )
 
     @pytest.mark.asyncio
     async def test_reject_sensitive_param(self, adapter):
         await adapter.connect()
-        with pytest.raises(N8nSecurityError):
-            await adapter.execute_workflow("echo", {"password": "s3cret"})
+        result = await adapter.execute_workflow("echo", {"password": "s3cret"})
+        assert result.status == ExecutionStatus.ERROR
+        assert any(
+            "Sensitive parameter key rejected" in finding["description"]
+            or "Potential secret detected" in finding["description"]
+            for finding in result.findings
+        )
 
     @pytest.mark.asyncio
     async def test_reject_bad_bounds(self, adapter):
         await adapter.connect()
-        with pytest.raises(N8nValidationError):
-            await adapter.execute_workflow("echo", {}, bounds={"timeout_seconds": -5})
+        result = await adapter.execute_workflow(
+            "echo", {}, bounds={"timeout_seconds": -5}
+        )
+        assert result.status == ExecutionStatus.ERROR
+        assert any(
+            "Invalid execution bound" in finding["description"]
+            for finding in result.findings
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -203,7 +220,10 @@ class TestN8nRealMode:
         assert res.status == ExecutionStatus.ERROR
 
     @pytest.mark.asyncio
-    async def test_not_configured_without_url_stays_mock(self):
+    async def test_not_configured_without_url_stays_mock(self, monkeypatch):
+        # Clear relevant environment variables to ensure clean state
+        monkeypatch.delenv("N8N_BASE_URL", raising=False)
+        monkeypatch.delenv("N8N_API_KEY", raising=False)
         # Safe default: real_mode_enabled without a base_url keeps the adapter in
         # mock mode; connect() succeeds and never raises.
         a = N8nAdapter(real_mode_enabled=True, api_key="k")

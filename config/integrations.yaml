@@ -131,9 +131,11 @@ integrations:
     mode: mock
     real_gated: true
     # Real mode requires: N8N_BASE_URL, N8N_API_KEY env vars
+    # For webhook execution: N8N_WEBHOOK_URL env var
     # Uncomment below when credentials are available:
     # base_url: ""
     # api_key: ""
+    # webhook_url: ""
 
   obsidian_git:
     mode: mock
