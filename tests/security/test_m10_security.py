@@ -5,7 +5,6 @@ Security-specific tests for M10 autonomy services per M10-IMPLEMENTATION-SPEC.md
 """
 
 import pytest
-import asyncio
 from datetime import datetime
 import uuid
 
@@ -928,8 +927,9 @@ async def test_resource_quota_exhaustion_triggers_fallback():
     await kernel._init_lifecycle_manager()
     await kernel._init_m7_testing()
 
-    reset_resource_manager_singleton()
-    resource_manager = get_resource_manager()
+    # Use kernel's ResourceManager directly (it's already set as singleton by kernel init)
+    # Do NOT reset the singleton - kernel owns this ResourceManager instance
+    resource_manager = kernel._resource_manager
     resource_manager.set_limit(ResourceLimit(ResourceType.CPU, 100, "percent"))
 
     # M9-N1: bootstrap engineering services BEFORE M10 — LearningApplyService
@@ -948,7 +948,8 @@ async def test_resource_quota_exhaustion_triggers_fallback():
     for _ in range(6):  # Quota is 5% of 100 = 5
         await quota._consume_quota("objective_generator", ResourceType.CPU, 1.0)
 
-    await asyncio.sleep(0.2)
+    # Process events (required with auto_start_dispatch_worker=False)
+    await kernel._event_bus.drain()
 
     # Fallback should have been triggered
     assert fallback.fallback_state == FallbackState.ADVISORY_ONLY

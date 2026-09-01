@@ -28,3 +28,9 @@ dist/
 .DS_Store
 Thumbs.db
 /hermes-agent/
+
+# Workflow test artifacts
+data/state/workflow_*_checkpoint_*.json
+
+# Engineering learning memory artifacts
+data/memory/engineering/learning/*.json
