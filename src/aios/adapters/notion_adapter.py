@@ -22,6 +22,25 @@ from aios.adapters.base import BaseExecutionAdapter, ExecutionResult, ExecutionS
 
 logger = logging.getLogger(__name__)
 
+# ---------------------------------------------------------------------------
+# Tool Mapping
+# ---------------------------------------------------------------------------
+
+# Maps AI-OS operation names to possible tool names (ordered by preference)
+# First choice: official Notion MCP server tool names
+# Second choice: legacy mock server tool names (for backward compatibility)
+_TOOL_MAPPING = {
+    "search_pages": ["notion-search", "search_pages"],
+    "get_page": ["notion-fetch", "get_page"],
+    "create_page": ["notion-create-pages", "create_page"],
+    "update_page": ["notion-update-page", "update_page"],
+    "query_database": ["notion-query-data-sources", "query_database"],
+}
+
+# Dynamic mapping of AI-OS operations to actual tool names provided by the connected server
+# Populated during tool discovery in _discover_tools()
+_actual_tool_mapping: dict[str, str] = {}
+
 
 # ---------------------------------------------------------------------------
 # Error Hierarchy
@@ -136,6 +155,8 @@ class NotionAdapter(BaseExecutionAdapter):
         self._connected = False
         self._version_counter = 0
         self._tools_discovered = False
+        # Mapping of AI-OS operations to actual tool names provided by server
+        self._actual_tool_mapping: dict[str, str] = {}
 
     # -----------------------------------------------------------------------
     # BaseExecutionAdapter implementation
@@ -226,7 +247,7 @@ class NotionAdapter(BaseExecutionAdapter):
             raise NotionUnavailableError(f"Failed to connect: {e}") from e
 
     async def _discover_tools(self) -> None:
-        """Discover available Notion tools via tools/list."""
+        """Discover available Notion tools via tools/list and map to AI-OS operations."""
         if self._tools_discovered:
             return
 
@@ -236,13 +257,32 @@ class NotionAdapter(BaseExecutionAdapter):
                 timeout=self._timeout_seconds,
             )
             if tools_result.get("success"):
-                tools = tools_result.get("result", {})
-                logger.debug(f"Notion tools discovered: {list(tools.keys())}")
+                tools_dict = tools_result.get("result", {})
+                # Extract the list of tools from the result
+                tools_list = tools_dict.get("tools", []) if isinstance(tools_dict, dict) else []
+                logger.debug(f"Notion tools discovered: {[t.get('name') for t in tools_list if isinstance(t, dict)]}")
+
+                # Build mapping from AI-OS operations to actual tool names
+                self._actual_tool_mapping = {}
+                for ai_os_operation, possible_names in _TOOL_MAPPING.items():
+                    # Find the first possible name that the server actually provides
+                    for possible_name in possible_names:
+                        if any(t.get("name") == possible_name for t in tools_list if isinstance(t, dict)):
+                            self._actual_tool_mapping[ai_os_operation] = possible_name
+                            break
+                    # If no match found, use the first possible name as fallback
+                    if ai_os_operation not in self._actual_tool_mapping:
+                        self._actual_tool_mapping[ai_os_operation] = possible_names[0]
+
                 self._tools_discovered = True
+                logger.debug(f"Tool mapping: {self._actual_tool_mapping}")
             else:
                 logger.warning("Notion tools discovery returned no result")
         except Exception as e:
             logger.warning(f"Failed to discover Notion tools: {e}")
+            # Fallback to default mapping if discovery fails
+            for ai_os_operation, possible_names in _TOOL_MAPPING.items():
+                self._actual_tool_mapping[ai_os_operation] = possible_names[0]
 
     async def disconnect(self) -> None:
         """Disconnect from Notion MCP server."""
@@ -420,15 +460,32 @@ class NotionAdapter(BaseExecutionAdapter):
         except Exception as e:
             raise NotionTimeoutError(f"Notion tool '{tool_name}' failed: {e}") from e
 
-        if not result.get("success"):
+        # Handle both mock server format and official server format
+        # Mock server format: {"success": True, "result": actual_result}
+        # Official server format: actual_result (with provenance added by MCPManager)
+        if isinstance(result, dict) and result.get("success") is False:
+            # Explicit failure from mock server
             error_msg = result.get("error", "Unknown error")
             if "not found" in error_msg.lower():
                 return {"success": False, "not_found": True, "error": error_msg}
             raise MalformedNotionResponseError(
                 f"Notion tool '{tool_name}' returned error: {error_msg}"
             )
-
-        return result.get("result", {})
+        elif isinstance(result, dict) and result.get("success") is True:
+            # Success from mock server - extract the actual result
+            return result.get("result", {})
+        else:
+            # Missing or invalid success flag - treat as malformed response
+            # This covers both official server format (which should have success added by MCPManager)
+            # and truly malformed responses
+            if isinstance(result, dict) and "success" not in result:
+                # Explicitly malformed response - no success indicator at all
+                raise MalformedNotionResponseError(
+                    f"Notion tool '{tool_name}' returned malformed response (missing success indicator)"
+                )
+            # Official server format or other valid response - return as-is
+            # (provenance already added by MCPManager)
+            return result
 
     # -----------------------------------------------------------------------
     # Page Operations
@@ -441,9 +498,10 @@ class NotionAdapter(BaseExecutionAdapter):
         self._validate_query(query)
         limit = min(limit, MAX_SEARCH_RESULTS)
 
+        tool_name = self._actual_tool_mapping.get("search_pages", "search_pages")
         try:
             result = await self._call_tool(
-                "search_pages",
+                tool_name,
                 {"query": query, "parent": parent, "limit": limit},
                 "search_pages",
             )
@@ -467,9 +525,10 @@ class NotionAdapter(BaseExecutionAdapter):
 
     async def get_page(self, page_id: str) -> ExecutionResult:
         """Retrieve a Notion page by ID."""
+        tool_name = self._actual_tool_mapping.get("get_page", "get_page")
         try:
             result = await self._call_tool(
-                "get_page", {"page_id": page_id}, "get_page"
+                tool_name, {"page_id": page_id}, "get_page"
             )
         except NotionTimeoutError as e:
             return self._error_result("get_page", f"Notion get_page timed out: {e}")
@@ -520,16 +579,22 @@ class NotionAdapter(BaseExecutionAdapter):
         self._validate_content(content)
         self._validate_content(properties)
 
-        result = await self._call_tool(
-            "create_page",
-            {
-                "title": title,
-                "parent_id": parent_id,
-                "content": content,
-                "properties": properties,
-            },
-            "create_page",
-        )
+        tool_name = self._actual_tool_mapping.get("create_page", "create_page")
+        try:
+            result = await self._call_tool(
+                tool_name,
+                {
+                    "title": title,
+                    "parent_id": parent_id,
+                    "content": content,
+                    "properties": properties,
+                },
+                "create_page",
+            )
+        except NotionTimeoutError as e:
+            return self._error_result("create_page", f"Notion create_page timed out: {e}")
+        except NotionError as e:
+            return self._error_result("create_page", f"Notion create_page failed: {e}")
 
         success = result.get("created", False)
         page_id = result.get("page_id", "")
@@ -571,11 +636,17 @@ class NotionAdapter(BaseExecutionAdapter):
         self._validate_content(content)
         self._validate_content(properties)
 
-        result = await self._call_tool(
-            "update_page",
-            {"page_id": page_id, "content": content, "properties": properties},
-            "update_page",
-        )
+        tool_name = self._actual_tool_mapping.get("update_page", "update_page")
+        try:
+            result = await self._call_tool(
+                tool_name,
+                {"page_id": page_id, "content": content, "properties": properties},
+                "update_page",
+            )
+        except NotionTimeoutError as e:
+            return self._error_result("update_page", f"Notion update_page timed out: {e}")
+        except NotionError as e:
+            return self._error_result("update_page", f"Notion update_page failed: {e}")
 
         success = result.get("updated", False)
 
@@ -615,9 +686,10 @@ class NotionAdapter(BaseExecutionAdapter):
         if filter_obj:
             self._validate_content(filter_obj)
 
+        tool_name = self._actual_tool_mapping.get("query_database", "query_database")
         try:
             result = await self._call_tool(
-                "query_database",
+                tool_name,
                 {
                     "database_id": database_id,
                     "filter": filter_obj,

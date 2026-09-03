@@ -71,7 +71,7 @@ import threading
 import uuid
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any
+from typing import Any, Dict, List, Optional
 
 # Core Components (Tasks 1–8) — consumed, never re-implemented. Imports are
 # deferred to module import time (same pattern as the other Core Managers); these
@@ -84,6 +84,7 @@ from aios.events.core.bus import get_core_event_bus
 from aios.events.core.event import Event as CoreEvent
 from aios.events.core.identity import ComponentIdentity, ComponentType
 from aios.events.core.types import EventType, SemanticVersion
+from aios.core.mcp_capability import MCPCapability, MCPCapabilityConfig, MCPCapabilityManager
 
 __all__ = [
     "CapabilityManager",
@@ -386,6 +387,9 @@ class CapabilityManager:
         # M8-T5: Adapter factory and security manager for capability hardening
         self._adapter_factory: Any | None = adapter_factory
         self._security_manager: Any | None = security_manager
+
+        # MCP Capability Abstraction Layer integration
+        self._mcp_capability_manager: MCPCapabilityManager = MCPCapabilityManager()
 
         # M8-T5: Manifest configuration (populated in initialize)
         self._manifest_dir: str = "./config/capabilities"
@@ -942,6 +946,281 @@ class CapabilityManager:
             "initialized": initialized,
             "removed": removed,
         }
+
+    # ------------------------------------------------------------------
+    # MCP Capability Abstraction Layer Integration
+    # ------------------------------------------------------------------
+
+    def register_mcp_capability(
+        self,
+        capability_id: str,
+        name: str,
+        transport: str = "stdio",
+        command: Optional[List[str]] = None,
+        url: Optional[str] = None,
+        env: Optional[Dict[str, str]] = None,
+        headers: Optional[Dict[str, str]] = None,
+        timeout_seconds: int = 30,
+        auto_reconnect: bool = True,
+        max_retries: int = 3,
+        metadata: Optional[Dict[str, Any]] = None,
+        trust_level: str = TrustLevel.UNTRUSTED,
+        authority_classification: str = AuthorityClassification.ADVISORY,
+        discovered_from: str = "mcp_capability_layer",
+    ) -> CapabilityRegistryEntry:
+        """
+        Register an MCP capability using the MCP Capability Abstraction Layer.
+
+        This method creates an MCP capability that can be invoked via generic
+        tool discovery and invocation without requiring semantic mappings or
+        Claude Code dependencies.
+
+        Args:
+            capability_id: Unique identifier for the capability
+            name: Human-readable name for the capability
+            transport: MCP transport type (stdio, http, sse, websocket)
+            command: Command to execute for stdio transport
+            url: URL for HTTP/SSE/WebSocket transport
+            env: Environment variables for the MCP server process
+            headers: HTTP headers for HTTP/SSE/WebSocket transport
+            timeout_seconds: Connection timeout in seconds
+            auto_reconnect: Whether to automatically reconnect on failure
+            max_retries: Maximum number of connection retries
+            metadata: Additional metadata for the capability
+            trust_level: Trust level for the capability (default: untrusted)
+            authority_classification: Authority classification (default: advisory)
+            discovered_from: Source of discovery for provenance tracking
+
+        Returns:
+            CapabilityRegistryEntry for the registered MCP capability
+        """
+        # Create MCP capability config
+        mcp_config = MCPCapabilityConfig(
+            capability_id=capability_id,
+            name=name,
+            transport=MCPCapabilityTransport(transport),
+            command=command,
+            url=url,
+            env=env or {},
+            headers=headers or {},
+            timeout_seconds=timeout_seconds,
+            auto_reconnect=auto_reconnect,
+            max_retries=max_retries,
+            metadata=metadata or {},
+            trust_level=trust_level,
+            authority_classification=authority_classification,
+            discovered_from=discovered_from,
+        )
+
+        # Register with MCP capability manager
+        mcp_capability = self._mcp_capability_manager.register_capability(mcp_config)
+
+        # Convert to CapabilityRegistryEntry for CapabilityManager
+        entry = mcp_capability.to_capability_registry_entry()
+
+        # Register with CapabilityManager registry
+        with self._registry_lock:
+            self._registry[capability_id] = entry
+
+        # Emit registration event
+        self._emit_event(
+            _CAPABILITY_REGISTERED,
+            {
+                "capability_id": capability_id,
+                "facade": name,
+                "provider_id": capability_id,
+                "version": entry.version,
+                "trust_level": trust_level,
+                "authority_classification": authority_classification,
+                "discovered_from": discovered_from,
+            },
+        )
+
+        self._log_info(
+            f"Registered MCP capability: {capability_id} "
+            f"(name={name}, transport={transport}, trust={trust_level})"
+        )
+
+        return entry
+
+    async def initialize_mcp_capability(self, capability_id: str) -> bool:
+        """
+        Initialize an MCP capability by connecting to the MCP server
+        and discovering available tools.
+
+        Args:
+            capability_id: Identifier of the MCP capability to initialize
+
+        Returns:
+            True if initialized successfully, False otherwise
+        """
+        # Get the MCP capability
+        mcp_capability = self._mcp_capability_manager.get_capability(capability_id)
+        if not mcp_capability:
+            self._log_error(f"MCP capability not found: {capability_id}")
+            return False
+
+        # Initialize the MCP capability
+        success = await mcp_capability.initialize()
+
+        # Update availability in CapabilityManager registry
+        with self._registry_lock:
+            entry = self._registry.get(capability_id)
+            if entry:
+                if success:
+                    entry.availability = (
+                        CapabilityAvailability.AVAILABLE if entry.enabled else CapabilityAvailability.DISABLED
+                    )
+                    entry.state = CapabilityState.REGISTERED if entry.enabled else CapabilityState.DISABLED
+                    entry.health_status = "healthy" if entry.enabled else "unhealthy"
+                else:
+                    entry.availability = CapabilityAvailability.ERROR
+                    entry.state = CapabilityState.REGISTERED
+                    entry.health_status = "unhealthy"
+                    entry.last_error = mcp_capability.get_status().last_error
+
+        return success
+
+    async def shutdown_mcp_capability(self, capability_id: str) -> bool:
+        """
+        Shutdown an MCP capability by disconnecting from the MCP server.
+
+        Args:
+            capability_id: Identifier of the MCP capability to shutdown
+
+        Returns:
+            True if shutdown successfully, False otherwise
+        """
+        # Get the MCP capability
+        mcp_capability = self._mcp_capability_manager.get_capability(capability_id)
+        if not mcp_capability:
+            self._log_error(f"MCP capability not found: {capability_id}")
+            return False
+
+        # Shutdown the MCP capability
+        await mcp_capability.shutdown()
+
+        # Update availability in CapabilityManager registry
+        with self._registry_lock:
+            entry = self._registry.get(capability_id)
+            if entry:
+                entry.availability = CapabilityAvailability.UNAVAILABLE
+                entry.state = CapabilityState.REGISTERED
+                entry.health_status = "unhealthy"
+
+        return True
+
+    def invoke_mcp_tool(
+        self,
+        capability_id: str,
+        tool_name: str,
+        arguments: Dict[str, Any],
+        caller_context: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        """
+        Invoke an MCP tool by its actual name on an MCP capability.
+
+        This is the core generic invocation method that operates on the MCP protocol
+        level without requiring semantic mappings or Claude Code dependencies.
+
+        Args:
+            capability_id: Identifier of the MCP capability
+            tool_name: The actual tool name as discovered by tools/list
+            arguments: Tool arguments according to the tool's inputSchema
+            caller_context: Optional caller context for security validation
+
+        Returns:
+            Tool result dictionary with provenance
+
+        Raises:
+            CapabilityManagerError: If the capability is not found or not initialized
+            ValueError: If the tool is not found on the MCP server
+            RuntimeError: If the MCP server is not connected
+        """
+        # Get the MCP capability
+        mcp_capability = self._mcp_capability_manager.get_capability(capability_id)
+        if not mcp_capability:
+            raise CapabilityManagerError(
+                f"MCP capability not found: {capability_id}",
+                rule_id="CM-RES-001",
+            )
+
+        # Check if capability is available/initialized
+        with self._registry_lock:
+            entry = self._registry.get(capability_id)
+            if not entry:
+                raise CapabilityManagerError(
+                    f"Capability not found: {capability_id}",
+                    rule_id="CM-RES-001",
+                )
+            if entry.availability != CapabilityAvailability.AVAILABLE:
+                raise CapabilityManagerError(
+                    f"MCP capability {capability_id} is not available (status: {entry.availability})",
+                    rule_id="CM-RES-002",
+                )
+
+        # Enforce security context if provided
+        if caller_context:
+            self.enforce_security_context(capability_id, caller_context)
+
+        # Invoke the tool via the MCP capability
+        try:
+            result = mcp_capability.invoke_tool(tool_name, arguments)
+            return result
+        except Exception as e:
+            # Re-raise with appropriate context
+            if isinstance(e, (ValueError, RuntimeError)):
+                raise
+            else:
+                raise CapabilityManagerError(
+                    f"Failed to invoke MCP tool {tool_name} on capability {capability_id}: {str(e)}",
+                    rule_id="CM-INV-001",
+                ) from e
+
+    def get_mcp_capability_tools(self, capability_id: str) -> List[MCPTool]:
+        """
+        Get the list of available tools for an MCP capability.
+
+        Args:
+            capability_id: Identifier of the MCP capability
+
+        Returns:
+            List of MCPTool instances
+        """
+        mcp_capability = self._mcp_capability_manager.get_capability(capability_id)
+        if not mcp_capability:
+            return []
+        return mcp_capability.list_tools()
+
+    def get_mcp_capability_tool_names(self, capability_id: str) -> List[str]:
+        """
+        Get the names of available tools for an MCP capability.
+
+        Args:
+            capability_id: Identifier of the MCP capability
+
+        Returns:
+            List of tool name strings
+        """
+        mcp_capability = self._mcp_capability_manager.get_capability(capability_id)
+        if not mcp_capability:
+            return []
+        return mcp_capability.get_tool_names()
+
+    def get_mcp_capability_status(self, capability_id: str) -> Optional[MCPCapabilityStatus]:
+        """
+        Get the status of an MCP capability.
+
+        Args:
+            capability_id: Identifier of the MCP capability
+
+        Returns:
+            MCPCapabilityStatus instance if found, None otherwise
+        """
+        mcp_capability = self._mcp_capability_manager.get_capability(capability_id)
+        if not mcp_capability:
+            return None
+        return mcp_capability.get_status()
 
     def disable(self, capability_id: str) -> bool:
         """Disable a capability (M8-T5 lifecycle: AVAILABLE -> DISABLED)."""

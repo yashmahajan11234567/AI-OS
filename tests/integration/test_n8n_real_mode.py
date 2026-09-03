@@ -98,9 +98,9 @@ async def test_n8n_real_workflow_execution():
     )
     await adapter.connect()
 
-    # Use the actual published production n8n workflow ID established for M14-T2
+    # Use workflow ID from N8N_WORKFLOW_ID environment variable for real integration test
     result = await adapter.execute_workflow(
-        workflow_id="3y99peW4PfV7bOki",
+        workflow_id=os.environ.get("N8N_WORKFLOW_ID", "3y99peW4PfV7bOki"),
         parameters={"msg": "m14t2 test"},
         bounds={"timeout_seconds": 30},
     )
@@ -186,7 +186,7 @@ async def test_n8n_real_bounds_validation():
     await adapter.connect()
 
     result = await adapter.execute_workflow(
-        workflow_id="3y99peW4PfV7bOki",  # AIOS Echo Test workflow ID from user description
+        workflow_id=os.environ.get("N8N_WORKFLOW_ID", "3y99peW4PfV7bOki"),
         parameters={}, bounds={"timeout_seconds": -1}
     )
     assert result.status == ExecutionStatus.ERROR
@@ -215,7 +215,7 @@ async def test_n8n_real_idempotency_key():
 
     key = "idem_" + os.urandom(8).hex()
     result = await adapter.execute_workflow(
-        workflow_id="3y99peW4PfV7bOki",  # AIOS Echo Test workflow ID from user description
+        workflow_id=os.environ.get("N8N_WORKFLOW_ID", "3y99peW4PfV7bOki"),  # AIOS Echo Test workflow ID from user description
         parameters={"idempotency_test": True},
         bounds={"timeout_seconds": 15},
         idempotency_key=key,

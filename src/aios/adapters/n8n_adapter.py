@@ -232,6 +232,7 @@ class N8nAdapter(BaseExecutionAdapter):
         # we can prefer the user-intent path below.
         self._base_url = base_url or os.environ.get("N8N_BASE_URL")
         self._api_key = api_key or os.environ.get("N8N_API_KEY")
+        self._workflow_id = os.environ.get("N8N_WORKFLOW_ID")
         base_url_explicit = base_url is not None
 
         # Webhook URL is the production-webhook dispatch path (n8n-activated
@@ -412,10 +413,12 @@ class N8nAdapter(BaseExecutionAdapter):
     ) -> ExecutionResult:
         parameters = parameters or {}
         bounds = bounds or {}
+        # Use N8N_WORKFLOW_ID environment variable if set, otherwise use provided workflow_id
+        actual_workflow_id = self._workflow_id or workflow_id
         # Provenance before call so we can attach real-mode fields from reply.
         provenance = self._make_provenance(
             "execute_workflow",
-            workflow_id=workflow_id,
+            workflow_id=actual_workflow_id,
         )
 
         # Append AI-OS provenance_echo expectation into bounds context.
@@ -429,14 +432,14 @@ class N8nAdapter(BaseExecutionAdapter):
             if self._real_mode:
                 if self._webhook_url:
                     result = await self._call_webhook(
-                        workflow_id, parameters, bounds, idempotency_key
+                        actual_workflow_id, parameters, bounds, idempotency_key
                     )
                 else:
                     result = await self._call_rest(
-                        workflow_id, parameters, bounds, idempotency_key
+                        actual_workflow_id, parameters, bounds, idempotency_key
                     )
             else:
-                result = await self._engine.execute_workflow(workflow_id, parameters, bounds)
+                result = await self._engine.execute_workflow(actual_workflow_id, parameters, bounds)
         except N8nError as e:
             return self._error_result("execute_workflow", str(e))
 
@@ -459,13 +462,13 @@ class N8nAdapter(BaseExecutionAdapter):
                     {
                         "type": "workflow_failure",
                         "severity": "error" if status == "failure" else "warning",
-                        "description": f"n8n workflow '{workflow_id}' -> {status}",
+                        "description": f"n8n workflow '{actual_workflow_id}' -> {status}",
                         "provenance": provenance,
                     }
                 ]
             ),
             metrics={
-                "workflow_id": workflow_id,
+                "workflow_id": actual_workflow_id,
                 "status": status,
                 "execution_time_ms": result.get("metrics", {}).get("execution_time_ms"),
                 "idempotency_key": idempotency_key,
