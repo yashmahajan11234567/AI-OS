@@ -9,6 +9,9 @@ Bounded, non-authoritative localhost server that exposes the DashboardService
                           which re-runs the SecurityManager gate. The server itself
                           decides nothing.
   * GET  /             -> serves the static dashboard UI (index.html) if present.
+  * GET  /alive        -> liveness check (M10-T3)
+  * GET  /ready        -> readiness check (M10-T3)
+  * GET  /health       -> detailed health report (M10-T3)
 
 Stdlib only (http.server) — no new third-party dependency. Binds to localhost.
 This file is authored by Terminal 2 so Terminal 3 can operate the dashboard;
@@ -35,6 +38,7 @@ class _Handler(BaseHTTPRequestHandler):
 
     protocol_version = "HTTP/1.1"
     dashboard_service: Any = None
+    kernel: Any = None
     static_dir: str = _DEFAULT_STATIC_DIR
 
     # ---- boilerplate to silence default stderr logging ----
@@ -83,7 +87,69 @@ class _Handler(BaseHTTPRequestHandler):
             self._send_file(os.path.join(self.static_dir, "dashboard.html"))
             return
 
+        # M10-T3 Health & Readiness endpoints
+        if self.path == "/alive":
+            self._handle_alive()
+            return
+
+        if self.path == "/ready":
+            self._handle_ready()
+            return
+
+        if self.path == "/health":
+            self._handle_health()
+            return
+
         self.send_error(404, "Not found")
+
+    def _handle_alive(self) -> None:
+        """Liveness endpoint - returns 200 if kernel is responsive."""
+        if self.kernel is None:
+            self._send_json({"alive": False, "error": "kernel not available"}, 503)
+            return
+
+        try:
+            import asyncio
+            alive = asyncio.run(self.kernel.check_alive())
+            if alive:
+                self._send_json({"alive": True})
+            else:
+                self._send_json({"alive": False}, 503)
+        except Exception as exc:  # noqa: BLE001
+            self._send_json({"alive": False, "error": str(exc)}, 500)
+
+    def _handle_ready(self) -> None:
+        """Readiness endpoint - returns 200 if kernel is ready to accept work."""
+        if self.kernel is None:
+            self._send_json({"ready": False, "error": "kernel not available"}, 503)
+            return
+
+        try:
+            import asyncio
+            ready = asyncio.run(self.kernel.check_ready())
+            if ready:
+                self._send_json({"ready": True})
+            else:
+                self._send_json({"ready": False}, 503)
+        except Exception as exc:  # noqa: BLE001
+            self._send_json({"ready": False, "error": str(exc)}, 500)
+
+    def _handle_health(self) -> None:
+        """Detailed health endpoint - returns full health report."""
+        if self.kernel is None:
+            self._send_json({"error": "kernel not available"}, 503)
+            return
+
+        try:
+            import asyncio
+            health = asyncio.run(self.kernel.get_health())
+            status_code = 200
+            # Return 503 for terminal states
+            if health.get("status") in ("stopped", "error", "stopping"):
+                status_code = 503
+            self._send_json(health, status_code)
+        except Exception as exc:  # noqa: BLE001
+            self._send_json({"error": f"health check failed: {exc}"}, 500)
 
     def do_POST(self) -> None:  # noqa: N802
         if self.path != "/api/action":
@@ -126,11 +192,13 @@ class DashboardHTTPServer:
     def __init__(
         self,
         dashboard_service: Any,
+        kernel: Any = None,
         host: str = "127.0.0.1",
         port: int = 8787,
         static_dir: Optional[str] = None,
     ) -> None:
         self._dashboard_service = dashboard_service
+        self._kernel = kernel
         self._host = host
         self._port = port
         self._static_dir = static_dir or _DEFAULT_STATIC_DIR
@@ -146,6 +214,7 @@ class DashboardHTTPServer:
         if self._server is not None:
             return
         _Handler.dashboard_service = self._dashboard_service
+        _Handler.kernel = self._kernel
         _Handler.static_dir = self._static_dir
         self._server = ThreadingHTTPServer((self._host, self._port), _Handler)
         self._thread = threading.Thread(target=self._server.serve_forever, daemon=True)

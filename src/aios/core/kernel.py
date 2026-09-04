@@ -13,6 +13,7 @@ import os
 import signal
 from dataclasses import dataclass, field
 from datetime import datetime
+from enum import Enum
 from pathlib import Path
 from typing import Any
 
@@ -49,6 +50,7 @@ from aios.core.structured_logger import (
 # (§3.7.4) and does NOT delegate Core Component teardown to LifecycleManager.
 from aios.core.lifecycle_manager import (
     LifecycleManager,
+    LifecycleState,
     get_lifecycle_manager,
     set_lifecycle_manager,
     reset_lifecycle_manager_singleton,
@@ -78,6 +80,7 @@ from aios.core.resource_manager import (
 # ResourceManager; alphabetical ordering within Phase 3 is deterministic).
 from aios.core.health_manager import (
     HealthManager,
+    HealthStatus,
     get_health_manager,
     set_health_manager,
 )
@@ -150,6 +153,57 @@ from aios.services.base import BaseService
 from aios.events.core.types import EventType
 
 logger = logging.getLogger(__name__)
+
+
+class CanonicalHealthState(str, Enum):
+    """Canonical health state vocabulary for AI-OS kernel.
+
+    These 8 states provide distinct semantics for:
+    - Liveness: kernel responsive (not STOPPED/ERROR)
+    - Readiness: startup complete, required managers ready
+    - Health: aggregate operational condition
+    - Startup: initialization in progress
+    """
+
+    STARTING = "starting"        # Kernel initialization in progress
+    READY = "ready"              # Startup complete, LifecycleManager readiness gate passed
+    RUNNING = "running"          # Fully operational
+    DEGRADED = "degraded"        # Operational but with non-critical issues
+    UNHEALTHY = "unhealthy"      # Critical issues, not fit for work
+    STOPPING = "stopping"        # Graceful shutdown in progress
+    STOPPED = "stopped"          # Graceful shutdown complete
+    ERROR = "error"              # Unrecoverable error state
+
+
+def _map_lifecycle_to_canonical(lifecycle_state: LifecycleState | None) -> CanonicalHealthState:
+    """Map LifecycleManager state to canonical health state."""
+    if lifecycle_state is None:
+        return CanonicalHealthState.STARTING
+
+    from aios.core.lifecycle_manager import LifecycleState as LMState
+
+    mapping = {
+        LMState.UNINITIALIZED: CanonicalHealthState.STARTING,
+        LMState.INITIALIZING: CanonicalHealthState.STARTING,
+        LMState.OPERATIONAL: CanonicalHealthState.RUNNING,
+        LMState.DEGRADED: CanonicalHealthState.DEGRADED,
+        LMState.RECOVERY_IN_PROGRESS: CanonicalHealthState.DEGRADED,
+        LMState.TERMINATED: CanonicalHealthState.STOPPED,
+    }
+    return mapping.get(lifecycle_state, CanonicalHealthState.STARTING)
+
+
+def _map_health_status_to_canonical(health_status: HealthStatus | None) -> CanonicalHealthState:
+    """Map HealthManager HealthStatus to canonical health state."""
+    if health_status is None:
+        return CanonicalHealthState.STARTING
+
+    mapping = {
+        HealthStatus.HEALTHY: CanonicalHealthState.RUNNING,
+        HealthStatus.DEGRADED: CanonicalHealthState.DEGRADED,
+        HealthStatus.UNHEALTHY: CanonicalHealthState.UNHEALTHY,
+    }
+    return mapping.get(health_status, CanonicalHealthState.STARTING)
 
 
 @dataclass
@@ -265,6 +319,14 @@ class HermesKernel:
 
         # Service tracking
         self._services: dict[str, ServiceStatus] = {}
+
+        # M10-T3 Health & Readiness attributes
+        self._health_check_path: Path = self._config.data_dir / "kernel.health"
+        self._heartbeat_task: asyncio.Task | None = None
+        self._heartbeat_interval_seconds: int = 30
+        self._stale_threshold_multiplier: int = 2
+        self._shutdown_requested: bool = False
+        self._startup_complete: bool = False
 
         # Ensure data directory exists
         self._config.data_dir.mkdir(parents=True, exist_ok=True)
@@ -468,6 +530,77 @@ class HermesKernel:
         """Get the LifecycleManager Core Manager (Part 4 §4.3, Task 9)."""
         return self._lifecycle
 
+    @property
+    def health_state(self) -> CanonicalHealthState:
+        """Get the current canonical health state.
+
+        Returns the computed canonical health state based on:
+        - LifecycleManager state
+        - HealthManager aggregate status
+        - Readiness gate status
+        - Startup completion status
+        """
+        # Use synchronous computation based on current state
+        if self._running is False and getattr(self, '_shutdown_requested', False):
+            return CanonicalHealthState.STOPPING
+        if self._running is False:
+            return CanonicalHealthState.STOPPED
+
+        # If kernel is running but startup not complete, we're STARTING
+        if not getattr(self, '_startup_complete', False):
+            return CanonicalHealthState.STARTING
+
+        lifecycle_state = None
+        if self._lifecycle is not None:
+            lifecycle_state = self._lifecycle.state
+            canonical_from_lifecycle = _map_lifecycle_to_canonical(lifecycle_state)
+
+            if canonical_from_lifecycle in (CanonicalHealthState.STOPPED, CanonicalHealthState.ERROR):
+                return canonical_from_lifecycle
+
+        health_status = None
+        if self._health_manager is not None:
+            health_status = self._health_manager.overall_status
+            canonical_from_health = _map_health_status_to_canonical(health_status)
+
+            if canonical_from_health == CanonicalHealthState.UNHEALTHY:
+                return canonical_from_health
+
+        if lifecycle_state == LifecycleState.OPERATIONAL:
+            # We can't async here, so check basic readiness synchronously
+            if self._lifecycle.health_ready():
+                if canonical_from_health == CanonicalHealthState.DEGRADED:
+                    return CanonicalHealthState.DEGRADED
+                return CanonicalHealthState.RUNNING
+            else:
+                return CanonicalHealthState.STARTING
+
+        if lifecycle_state in (LifecycleState.UNINITIALIZED, LifecycleState.INITIALIZING):
+            return CanonicalHealthState.STARTING
+
+        if lifecycle_state == LifecycleState.RECOVERY_IN_PROGRESS:
+            return CanonicalHealthState.DEGRADED
+
+        return CanonicalHealthState.STARTING
+
+    @property
+    def is_alive(self) -> bool:
+        """Liveness check - kernel is responsive and not in terminal state."""
+        return self._check_liveness()
+
+    @property
+    def is_ready(self) -> bool:
+        """Readiness check - kernel is ready to accept work."""
+        # This is a synchronous approximation; full check requires async
+        if self._lifecycle is None:
+            return False
+        if not self._lifecycle.health_ready():
+            return False
+        if self._health_manager is not None:
+            if self._health_manager.overall_status == HealthStatus.UNHEALTHY:
+                return False
+        return True
+
     def register_service(self, service: BaseService) -> BaseService:
         """Register an Engineering Service with the kernel (canonical C2 registry).
 
@@ -538,6 +671,9 @@ class HermesKernel:
             return
 
         logger.info("Starting Hermes Kernel...")
+
+        # Write initial STARTING health state before any initialization
+        self._write_health_status(CanonicalHealthState.STARTING.value)
 
         # Initialize core components (canonical C1–C4)
         await self._init_core_components()
@@ -658,10 +794,14 @@ class HermesKernel:
         self._running = True
         self._start_time = datetime.utcnow()
 
-        # Health check file path (used by Docker healthcheck)
-        self._health_check_path = self._config.data_dir / "kernel.health"
-        # Write initial health status
-        self._write_health_status("healthy")
+        # Start heartbeat task for health state updates
+        self._start_heartbeat()
+
+        # Mark startup complete
+        self._startup_complete = True
+
+        # Perform initial health state computation and write
+        await self._update_health_state()
 
         # Set up signal handlers for graceful shutdown
         self._shutdown_event = asyncio.Event()
@@ -689,11 +829,192 @@ class HermesKernel:
                 "uptime_seconds": (
                     datetime.utcnow() - self._start_time
                 ).total_seconds() if self._start_time else 0,
+                "alive": self.is_alive,
+                "ready": self.is_ready,
+                "startup_complete": self._lifecycle is not None and self._lifecycle.state == LifecycleState.OPERATIONAL,
+                "dependencies": {},
+                "lifecycle_state": self._lifecycle.state.value if self._lifecycle else "unknown",
+                "health_manager_status": self._health_manager.overall_status.value if self._health_manager else "unknown",
             }
             self._health_check_path.parent.mkdir(parents=True, exist_ok=True)
             self._health_check_path.write_text(json.dumps(health_data))
         except Exception as e:
             logger.debug(f"Failed to write health status: {e}")
+
+    async def _update_health_state(self) -> None:
+        """Update canonical health state based on lifecycle and health managers."""
+        canonical_state = await self._compute_canonical_health_state()
+        self._write_health_status(canonical_state.value)
+
+    async def _compute_canonical_health_state(self) -> CanonicalHealthState:
+        """Compute the canonical health state from all sources."""
+        # Priority order: terminal states override
+        if self._running is False and hasattr(self, '_shutdown_requested') and self._shutdown_requested:
+            return CanonicalHealthState.STOPPING
+        if self._running is False:
+            return CanonicalHealthState.STOPPED
+
+        # Check lifecycle state
+        lifecycle_state = None
+        if self._lifecycle is not None:
+            lifecycle_state = self._lifecycle.state
+            canonical_from_lifecycle = _map_lifecycle_to_canonical(lifecycle_state)
+
+            # Terminal states from lifecycle
+            if canonical_from_lifecycle in (CanonicalHealthState.STOPPED, CanonicalHealthState.ERROR):
+                return canonical_from_lifecycle
+
+        # Check health manager aggregate status
+        health_status = None
+        if self._health_manager is not None:
+            health_status = self._health_manager.overall_status
+            canonical_from_health = _map_health_status_to_canonical(health_status)
+
+            # Unhealthy is terminal
+            if canonical_from_health == CanonicalHealthState.UNHEALTHY:
+                return canonical_from_health
+
+        # Check readiness gate
+        if lifecycle_state == LifecycleState.OPERATIONAL:
+            ready = await self._check_readiness()
+            if ready:
+                # Determine between RUNNING and DEGRADED based on health
+                if canonical_from_health == CanonicalHealthState.DEGRADED:
+                    return CanonicalHealthState.DEGRADED
+                return CanonicalHealthState.RUNNING
+            else:
+                return CanonicalHealthState.STARTING
+
+        # During initialization
+        if lifecycle_state in (LifecycleState.UNINITIALIZED, LifecycleState.INITIALIZING):
+            return CanonicalHealthState.STARTING
+
+        # During recovery
+        if lifecycle_state == LifecycleState.RECOVERY_IN_PROGRESS:
+            return CanonicalHealthState.DEGRADED
+
+        # Default
+        return CanonicalHealthState.STARTING
+
+    async def _check_readiness(self) -> bool:
+        """Check if kernel is ready for work (readiness gate).
+
+        True if:
+        - LifecycleManager readiness gate passed
+        - Required Phase 0-3 managers report health_ready()
+        - No required dependency is unhealthy
+        """
+        if self._lifecycle is None:
+            return False
+
+        # LifecycleManager readiness gate
+        if not self._lifecycle.health_ready():
+            return False
+
+        # Required Phase 0-3 managers (C1-C4 + Phase 1-3 core managers)
+        required_managers = [
+            ("EventBus", self._event_bus),
+            ("ServiceRegistry", self._service_registry),
+            ("ConfigurationManager", self._configuration),
+            ("StructuredLogger", self._structured_logger),
+            ("LifecycleManager", self._lifecycle),
+            ("StateManager", self._state_manager),
+            ("StorageManager", self._storage_manager),
+            ("HealthManager", self._health_manager),
+            ("ResourceManager", self._resource_manager),
+            ("SecurityManager", self._security_manager),
+        ]
+
+        for name, mgr in required_managers:
+            if mgr is None:
+                return False
+            if hasattr(mgr, 'health_ready'):
+                if not mgr.health_ready():
+                    logger.debug(f"Readiness check failed: {name}.health_ready() = False")
+                    return False
+
+        # Check HealthManager for any unhealthy required dependencies
+        if self._health_manager is not None:
+            overall = self._health_manager.overall_status
+            if overall == HealthStatus.UNHEALTHY:
+                logger.debug("Readiness check failed: HealthManager overall_status = UNHEALTHY")
+                return False
+
+        return True
+
+    def _check_liveness(self) -> bool:
+        """Check if kernel is alive (liveness check).
+
+        True if:
+        - Kernel object exists and is responsive
+        - Health state is not STOPPED or ERROR
+        - Health timestamp is fresh (not stale)
+        """
+        if self is None:
+            return False
+
+        # Check health file exists and has valid state
+        if not self._health_check_path.exists():
+            return False
+
+        try:
+            import json
+            health_data = json.loads(self._health_check_path.read_text())
+            status_str = health_data.get("status", "unknown")
+
+            # Not alive if stopped or error
+            if status_str in (CanonicalHealthState.STOPPED.value, CanonicalHealthState.ERROR.value):
+                return False
+
+            # Check timestamp freshness (stale detection)
+            timestamp_str = health_data.get("timestamp")
+            if timestamp_str:
+                from datetime import datetime
+                last_update = datetime.fromisoformat(timestamp_str)
+                now = datetime.utcnow()
+                age_seconds = (now - last_update).total_seconds()
+                stale_threshold = self._heartbeat_interval_seconds * self._stale_threshold_multiplier
+                if age_seconds > stale_threshold:
+                    logger.debug(f"Health timestamp stale: age={age_seconds}s, threshold={stale_threshold}s")
+                    return False
+
+            return True
+        except Exception:
+            return False
+
+    async def _heartbeat_loop(self) -> None:
+        """Background heartbeat task for stale-state detection.
+
+        Updates the health file timestamp periodically so external monitors
+        can detect if the kernel has become unresponsive.
+        """
+        try:
+            while self._running:
+                await asyncio.sleep(self._heartbeat_interval_seconds)
+                if not self._running:
+                    break
+                await self._update_health_state()
+        except asyncio.CancelledError:
+            # Normal shutdown
+            raise
+        except Exception as e:
+            logger.error(f"Heartbeat loop error: {e}")
+
+    def _start_heartbeat(self) -> None:
+        """Start the heartbeat background task."""
+        if self._heartbeat_task is None or self._heartbeat_task.done():
+            self._heartbeat_task = asyncio.create_task(self._heartbeat_loop())
+            logger.debug("Health heartbeat task started")
+
+    async def _stop_heartbeat(self) -> None:
+        """Stop the heartbeat background task."""
+        if self._heartbeat_task and not self._heartbeat_task.done():
+            self._heartbeat_task.cancel()
+            try:
+                await self._heartbeat_task
+            except asyncio.CancelledError:
+                pass
+            logger.debug("Health heartbeat task stopped")
 
     async def run_forever(self) -> None:
         """Run the kernel indefinitely until shutdown signal is received."""
@@ -711,10 +1032,16 @@ class HermesKernel:
             logger.warning("Kernel not running")
             return
 
-        # Update health status to shutting down
-        self._write_health_status("shutting_down")
+        # Mark shutdown requested for health state computation
+        self._shutdown_requested = True
+
+        # Update health status to stopping
+        self._write_health_status(CanonicalHealthState.STOPPING.value)
 
         logger.info("Stopping Hermes Kernel...")
+
+        # Stop heartbeat first
+        await self._stop_heartbeat()
 
         # Stop engineering services via LifecycleManager / canonical C2
         await self._stop_engineering_services()
@@ -764,9 +1091,14 @@ class HermesKernel:
 
         self._running = False
 
-        # Remove health check file
+        # Write final STOPPED state
+        self._write_health_status(CanonicalHealthState.STOPPED.value)
+
+        # Remove health check file after a brief delay (allows external monitors to see STOPPED)
         try:
             if self._health_check_path.exists():
+                # Wait a moment for external monitors to read the STOPPED state
+                await asyncio.sleep(0.5)
                 self._health_check_path.unlink()
         except Exception as e:
             logger.debug(f"Failed to remove health check file: {e}")
@@ -2280,8 +2612,9 @@ class HermesKernel:
                 DashboardService,
                 create_dashboard_service,
             )
+            from aios.services.dashboard_server import DashboardHTTPServer
         except ImportError:
-            logger.debug("DashboardService not available; skipping")
+            logger.debug("DashboardService/DashboardHTTPServer not available; skipping")
             return
 
         service = await create_dashboard_service(
@@ -2301,8 +2634,17 @@ class HermesKernel:
             metadata={"version": "1.0.0", "description": "Non-authoritative dashboard backend over AI-OS"},
         )
 
+        # Also start the HTTP server for health endpoints
+        http_server = DashboardHTTPServer(
+            dashboard_service=service,
+            kernel=self,  # Pass kernel for health endpoints
+            host="127.0.0.1",
+            port=8787,
+        )
+        http_server.start()
+
         self._dashboard_service = service
-        logger.debug("M13 Dashboard backend registered (engineering.dashboard_backend)")
+        logger.debug("M13 Dashboard backend registered (engineering.dashboard_backend) with HTTP server on port 8787")
 
     async def _init_project_service(self) -> None:
         """M14-T2 — register the bounded Project Workspace service.
@@ -2663,6 +3005,72 @@ class HermesKernel:
                 self._resource_manager.get_stats() if self._resource_manager else None
             ),
        }
+
+    async def get_health(self) -> dict[str, Any]:
+        """Get comprehensive health report.
+
+        Returns detailed health information including:
+        - Canonical health state
+        - Liveness status
+        - Readiness status
+        - Startup status
+        - Dependency health summary
+        - Timestamp for staleness detection
+        """
+        canonical_state = await self._compute_canonical_health_state()
+
+        # Build dependency health summary
+        dependencies = {}
+        if self._health_manager is not None:
+            all_health = self._health_manager.get_all_health()
+            dependencies = {
+                "components": all_health.get("components", {}),
+                "total_checks": all_health.get("total_checks", 0),
+                "healthy_checks": all_health.get("healthy_checks", 0),
+                "unhealthy_checks": all_health.get("unhealthy_checks", 0),
+                "degraded_checks": all_health.get("degraded_checks", 0),
+            }
+
+        # Liveness and readiness
+        alive = self._check_liveness()
+        ready = await self._check_readiness()
+
+        # Startup status
+        startup_complete = (
+            self._lifecycle is not None
+            and self._lifecycle.state == LifecycleState.OPERATIONAL
+        )
+
+        uptime = (
+            (datetime.utcnow() - self._start_time).total_seconds()
+            if self._start_time else 0
+        )
+
+        return {
+            "status": canonical_state.value,
+            "alive": alive,
+            "ready": ready,
+            "startup_complete": startup_complete,
+            "uptime_seconds": uptime,
+            "timestamp": datetime.utcnow().isoformat(),
+            "dependencies": dependencies,
+            "lifecycle_state": self._lifecycle.state.value if self._lifecycle else None,
+            "health_manager_status": self._health_manager.overall_status.value if self._health_manager else None,
+        }
+
+    async def check_alive(self) -> bool:
+        """Liveness check for external monitors (Docker, Kubernetes).
+
+        Returns True if kernel is responsive and not in terminal state.
+        """
+        return self._check_liveness()
+
+    async def check_ready(self) -> bool:
+        """Readiness check for external orchestrators (Kubernetes).
+
+        Returns True if kernel is ready to accept work.
+        """
+        return await self._check_readiness()
 
 
 def _run_sync(coro: Any) -> Any:
