@@ -187,7 +187,9 @@ class KernelConfigSchema:
             "kernel": PropertySchema(
                 type="object",
                 required=["name", "version", "logLevel"],
-                additional_properties=False,
+                # Allow snake_case keys from defaults.yaml (data_dir, log_level) alongside
+                # camelCase (dataDir, logLevel) for backwards compatibility.
+                additional_properties=True,
                 properties={
                     "name": PropertySchema(
                         type="string",
@@ -291,7 +293,10 @@ class KernelConfigSchema:
             ),
         }
     )
-    additional_properties: bool = False
+    # Allow additional top-level properties for application configuration.
+    # The schema validates kernel-relevant sections; application sections (event_bus,
+    # services, etc.) are passed through without schema validation.
+    additional_properties: bool = True
 
     def validate(self, config: dict[str, Any]) -> None:
         """Validate the full merged config; raise ConfigurationError on failure.
@@ -902,6 +907,96 @@ class ConfigurationManager:
             "configHash": self._config_hash,
         }
 
+    # --- Startup validation (§3.5.X - Deployment M10) ----------------------
+
+    def validate_startup(self) -> list[str]:
+        """Validate that required configuration is present for startup.
+
+        Checks that all required fields per KernelConfigSchema are present
+        and that critical deployment settings are configured.
+
+        Returns:
+            List of validation errors (empty if all required config is present).
+
+        Raises:
+            ConfigurationError: If frozen config is not available (not initialized).
+        """
+        if self._state not in (ConfigState.FROZEN, ConfigState.SHUTTING_DOWN, ConfigState.SHUTDOWN):
+            raise ConfigurationError(
+                "Startup validation requires initialized and frozen configuration",
+                path="<root>",
+            )
+
+        errors = []
+        config = self._config_snapshot()
+
+        # Validate required kernel fields
+        kernel = config.get("kernel", {})
+        if not kernel.get("name"):
+            errors.append("Required field 'kernel.name' is missing")
+        if not kernel.get("version"):
+            errors.append("Required field 'kernel.version' is missing")
+        if not kernel.get("logLevel"):
+            errors.append("Required field 'kernel.logLevel' is missing")
+
+        # Check if we're in production environment
+        is_production = kernel.get("environment") == "production"
+
+        # Validate critical deployment settings (production only)
+        if is_production and not config.get("configuration", {}).get("freeze_on_initialize", True):
+            errors.append("Configuration freeze_on_initialize should be true for production")
+
+        # Validate security settings (production only)
+        if is_production:
+            security = config.get("security") if hasattr(config, 'get') else None
+            if not isinstance(security, dict) and not (hasattr(security, 'items') and hasattr(security, 'get')):
+                security = {}
+            if security.get("strict_mode") is not True:
+                errors.append("Security strict_mode should be true for production")
+
+            # Validate capability settings (production only)
+            capabilities = config.get("capabilities") if hasattr(config, 'get') else None
+            if not isinstance(capabilities, dict) and not (hasattr(capabilities, 'items') and hasattr(capabilities, 'get')):
+                capabilities = {}
+            if not capabilities.get("enabled"):
+                errors.append("Capabilities should be enabled for production")
+
+        # Validate autonomy gate - should be disabled by default
+        services = config.get("services") if hasattr(config, 'get') else None
+        if not isinstance(services, dict) and not (hasattr(services, 'items') and hasattr(services, 'get')):
+            services = {}
+        autonomy = services.get("autonomy") if hasattr(services, 'get') else None
+        if not isinstance(autonomy, dict) and not (hasattr(autonomy, 'items') and hasattr(autonomy, 'get')):
+            autonomy = {}
+        if autonomy.get("enabled") is True:
+            # This is a warning, not error - autonomy can be enabled intentionally
+            logger.warning("Autonomy services enabled - ensure this is intentional for production")
+
+        # Validate external integration gate
+        real_integration = services.get("real_integration_enabled", False) if hasattr(services, 'get') else False
+        if real_integration and not self._check_real_integration_credentials(config):
+            errors.append("Real integration enabled but required credentials not configured")
+
+        # Validate data directory
+        data_dir = kernel.get("dataDir", kernel.get("data_dir"))
+        if data_dir and data_dir.startswith("./"):
+            logger.warning("Using relative data_dir '%s' - consider absolute path for production", data_dir)
+
+        return errors
+
+    def _check_real_integration_credentials(self, config: dict[str, Any]) -> bool:
+        """Check if required credentials for real integrations are present."""
+        services = config.get("services", {})
+        required = [
+            services.get("supabase", {}).get("url"),
+            services.get("supabase", {}).get("anon_key"),
+            services.get("n8n", {}).get("base_url"),
+            services.get("n8n", {}).get("api_key"),
+            services.get("obsidian_git", {}).get("vault_path"),
+        ]
+        # At least one real integration should have credentials if real_integration_enabled
+        return any(v for v in required if v)
+
     # --- Four-layer load + merge (§3.5.1-§3.5.3) --------------------------
 
     def _load_and_merge(self) -> dict[str, Any]:
@@ -1226,6 +1321,125 @@ class ConfigurationManager:
         with self._lock:
             self._merged = _deep_merge(self._merged, overrides)
 
+    # --- Configuration inspection / redaction (M10 Deployment) --------------
+
+    def inspect(self, include_secrets: bool = False, include_metadata: bool = True) -> dict[str, Any]:
+        """Return a comprehensive configuration inspection view.
+
+        Args:
+            include_secrets: If True, include raw secret values (requires authorization).
+            include_metadata: If True, include metadata about configuration layers.
+
+        Returns:
+            Dictionary with configuration view, layer information, and validation status.
+        """
+        config = self._config_snapshot()
+
+        result = {
+            "config": self.get_all() if not include_secrets else _immutable_view(config),
+            "state": self._state.value,
+            "frozen": self._state is ConfigState.FROZEN,
+            "config_hash": self._config_hash,
+            "secret_paths": list(self._secret_paths),
+        }
+
+        if include_metadata:
+            result["metadata"] = {
+                "layer_sources": self._get_layer_sources(),
+                "precedence_order": ["defaults", "app.yaml", "env.yaml", "AIOS_* env vars"],
+                "validation": {
+                    "schema_valid": self._validate_silently(config),
+                    "startup_errors": self.validate_startup() if self._state is ConfigState.FROZEN else ["Not frozen"],
+                },
+            }
+
+        return result
+
+    def _get_layer_sources(self) -> dict[str, Any]:
+        """Get information about which config layers were loaded."""
+        return {
+            "defaults": "embedded",
+            "app_yaml": str(self._config_path) if self._config_path else "not provided",
+            "env_yaml": self._get_env_yaml_path(),
+            "env_vars": self._get_aios_env_vars(),
+        }
+
+    def _get_env_yaml_path(self) -> str | None:
+        """Get the path of the environment-specific YAML file that was loaded."""
+        if self._config_path is None:
+            return None
+        from pathlib import Path
+        base = Path(self._config_path) if isinstance(self._config_path, str) else self._config_path
+        # This is an approximation - the actual path depends on the merged config
+        env = self._merged.get("kernel", {}).get("environment")
+        if env:
+            env_path = base.parent / f"app.{env}.yaml"
+            if env_path.exists():
+                return str(env_path)
+        return None
+
+    def _get_aios_env_vars(self) -> list[str]:
+        """Get list of AIOS_* environment variables that were applied."""
+        return [k for k in os.environ.keys() if k.startswith("AIOS_")]
+
+    def _validate_silently(self, config: dict[str, Any]) -> bool:
+        """Validate config without raising exceptions."""
+        try:
+            self._schema.validate(config)
+            return True
+        except Exception:
+            return False
+
+    def redacted_view(self, paths: list[str] | None = None) -> dict[str, Any]:
+        """Return a redacted configuration view for logging/debugging.
+
+        Args:
+            paths: Optional list of additional paths to redact beyond secrets.
+
+        Returns:
+            Configuration with all secrets and specified paths masked.
+        """
+        config = self._config_snapshot()
+        additional_paths = set(paths or [])
+
+        def redact(node: Any, prefix: str = "") -> Any:
+            if isinstance(node, (dict, FrozenMapping)):
+                out = {}
+                for k, v in node.items():
+                    full_path = f"{prefix}.{k}" if prefix else k
+                    if _match_secret(k) or full_path in additional_paths:
+                        out[k] = _MASK
+                    else:
+                        out[k] = redact(v, full_path)
+                return out
+            if isinstance(node, (list, tuple)):
+                return [redact(v, f"{prefix}[{i}]") for i, v in enumerate(node)]
+            return node
+
+        return redact(config)
+
+    def get_layer(self, layer: int) -> dict[str, Any] | None:
+        """Get a specific configuration layer (1-4) for debugging.
+
+        Note: This reconstructs the layer from current state and may not
+        exactly match the original input after deep merging.
+
+        Args:
+            layer: Layer number (1=defaults, 2=app, 3=env, 4=env vars)
+
+        Returns:
+            Approximate layer configuration or None if not available.
+        """
+        if layer == 1:
+            return _EMBEDDED_DEFAULTS.copy()
+        elif layer == 2:
+            return self._load_app_config()
+        elif layer == 3:
+            return self._load_env_config(self._merged)
+        elif layer == 4:
+            return self._parse_env_vars()
+        return None
+
     def set_test_override(self, path: str, value: Any) -> None:
         """Test-only override (§3.5.10). Prohibited after freeze / shutdown."""
         if self._state not in (ConfigState.UNINITIALIZED, ConfigState.INITIALIZING):
@@ -1391,4 +1605,9 @@ __all__ = [
     "get_configuration_manager",
     "set_configuration_manager",
     "reset_configuration_manager_singleton",
+    "_EMBEDDED_DEFAULTS",
+    "_deep_freeze",
+    "_deep_merge",
+    "_compute_config_hash",
+    "_masked_view",
 ]

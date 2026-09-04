@@ -151,6 +151,9 @@ def _dict_to_app_config(config_dict: dict[str, Any]) -> AppConfig:
     # Extract nested configurations
     workspace_value = config_dict.pop("workspace", {})
     logs_value = config_dict.pop("logs", {})
+    obsidian_value = config_dict.pop("obsidian", {})
+    notion_value = config_dict.pop("notion", {})
+    claude_mem_value = config_dict.pop("claude_mem", {})
 
     # Backwards-compat: allow bare strings (e.g. `workspace: ./workspace`)
     # by coercing them into the nested mapping the Pydantic models expect.
@@ -164,11 +167,17 @@ def _dict_to_app_config(config_dict: dict[str, Any]) -> AppConfig:
     # Create sub-configs with defaults
     workspace = WorkspaceConfig(**workspace_dict) if workspace_dict else WorkspaceConfig()
     logs = LogsConfig(**logs_dict) if logs_dict else LogsConfig()
+    obsidian = ObsidianConfig(**obsidian_value) if obsidian_value else ObsidianConfig()
+    notion = NotionConfig(**notion_value) if notion_value else NotionConfig()
+    claude_mem = ClaudeMemConfig(**claude_mem_value) if claude_mem_value else ClaudeMemConfig()
 
     # Create main config
     return AppConfig(
         workspace=workspace,
         logs=logs,
+        obsidian=obsidian,
+        notion=notion,
+        claude_mem=claude_mem,
         **config_dict,
     )
 

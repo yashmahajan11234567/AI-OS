@@ -37,10 +37,6 @@ def version():
     print(f"[bold cyan]{APP_NAME}[/bold cyan] v{__version__}")
 
 
-@app.command()
-def kernel():
-    """Start the Hermes Kernel (interactive mode)."""
-    print("[yellow]Use 'aios kernel start' to start the kernel[/yellow]")
 
 
 @app.command()

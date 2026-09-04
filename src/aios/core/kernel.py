@@ -33,6 +33,7 @@ from aios.core.service_registry import (
 )
 from aios.core.configuration_manager import (
     ConfigurationManager,
+    ConfigurationError,
     get_configuration_manager,
     set_configuration_manager,
 )
@@ -657,13 +658,61 @@ class HermesKernel:
         self._running = True
         self._start_time = datetime.utcnow()
 
+        # Health check file path (used by Docker healthcheck)
+        self._health_check_path = self._config.data_dir / "kernel.health"
+        # Write initial health status
+        self._write_health_status("healthy")
+
+        # Set up signal handlers for graceful shutdown
+        self._shutdown_event = asyncio.Event()
+        try:
+            loop = asyncio.get_running_loop()
+            for sig in (signal.SIGTERM, signal.SIGINT):
+                try:
+                    loop.add_signal_handler(sig, self._shutdown_event.set)
+                except NotImplementedError:
+                    # Windows doesn't support add_signal_handler
+                    pass
+        except RuntimeError:
+            # No running loop
+            pass
+
         logger.info("Hermes Kernel started successfully")
+
+    def _write_health_status(self, status: str) -> None:
+        """Write health status to file for external health checks."""
+        try:
+            import json
+            health_data = {
+                "status": status,
+                "timestamp": datetime.utcnow().isoformat(),
+                "uptime_seconds": (
+                    datetime.utcnow() - self._start_time
+                ).total_seconds() if self._start_time else 0,
+            }
+            self._health_check_path.parent.mkdir(parents=True, exist_ok=True)
+            self._health_check_path.write_text(json.dumps(health_data))
+        except Exception as e:
+            logger.debug(f"Failed to write health status: {e}")
+
+    async def run_forever(self) -> None:
+        """Run the kernel indefinitely until shutdown signal is received."""
+        if not self._running:
+            raise RuntimeError("Kernel not started. Call start() first.")
+
+        logger.info("Kernel running. Waiting for shutdown signal...")
+        await self._shutdown_event.wait()
+        logger.info("Shutdown signal received, stopping kernel...")
+        await self.stop()
 
     async def stop(self) -> None:
         """Stop the kernel and all services."""
         if not self._running:
             logger.warning("Kernel not running")
             return
+
+        # Update health status to shutting down
+        self._write_health_status("shutting_down")
 
         logger.info("Stopping Hermes Kernel...")
 
@@ -715,6 +764,13 @@ class HermesKernel:
 
         self._running = False
 
+        # Remove health check file
+        try:
+            if self._health_check_path.exists():
+                self._health_check_path.unlink()
+        except Exception as e:
+            logger.debug(f"Failed to remove health check file: {e}")
+
         logger.info("Hermes Kernel stopped")
 
     async def _init_core_components(self) -> None:
@@ -747,6 +803,14 @@ class HermesKernel:
         # Phase 2 -> 3 freeze boundary: freeze configuration before any Core
         # Manager (Phase 4+) or Service (Phase 9+) can read it.
         self._configuration.freeze()
+
+        # Validate startup configuration immediately after freeze.
+        startup_errors = self._configuration.validate_startup()
+        if startup_errors:
+            raise ConfigurationError(
+                "Startup configuration validation failed",
+                errors=startup_errors,
+            )
 
         # C4: StructuredLogger (Phase 3 — last Core Component, §3.6 / §3.7.3).
         # Depends on canonical EventBus, canonical ServiceRegistry (lazy via kernel),

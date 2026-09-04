@@ -59,7 +59,8 @@ class WorkspaceConfig(BaseModel):
         auto_create: Whether to automatically create the workspace directory if it doesn't exist.
     """
 
-    model_config = ConfigDict(extra="forbid")
+    # Allow extra fields for architecture config sections
+    model_config = ConfigDict(extra="allow")
 
     path: ConfigPath = Field(
         default=DEFAULT_WORKSPACE,
@@ -89,7 +90,8 @@ class LogsConfig(BaseModel):
         auto_create: Whether to automatically create the logs directory if it doesn't exist.
     """
 
-    model_config = ConfigDict(extra="forbid")
+    # Allow extra fields for architecture config sections
+    model_config = ConfigDict(extra="allow")
 
     path: ConfigPath = Field(
         default=DEFAULT_LOGS,
@@ -109,6 +111,47 @@ class LogsConfig(BaseModel):
     )
 
 
+class ObsidianConfig(BaseModel):
+    """Obsidian vault configuration."""
+
+    model_config = ConfigDict(extra="allow")
+
+    vault_path: ConfigPath = Field(
+        default="",
+        description="Path to Obsidian vault",
+    )
+
+
+class NotionConfig(BaseModel):
+    """Notion integration configuration."""
+
+    model_config = ConfigDict(extra="allow")
+
+    timeout_seconds: int = Field(
+        default=30,
+        description="Request timeout in seconds",
+    )
+    auto_reconnect: bool = Field(
+        default=True,
+        description="Auto-reconnect on connection loss",
+    )
+
+
+class ClaudeMemConfig(BaseModel):
+    """Claude Mem integration configuration."""
+
+    model_config = ConfigDict(extra="allow")
+
+    timeout_seconds: int = Field(
+        default=30,
+        description="Request timeout in seconds",
+    )
+    auto_reconnect: bool = Field(
+        default=True,
+        description="Auto-reconnect on connection loss",
+    )
+
+
 class AppConfig(BaseModel):
     """Main application configuration.
 
@@ -123,7 +166,9 @@ class AppConfig(BaseModel):
         config: Configuration directory path.
     """
 
-    model_config = ConfigDict(extra="forbid", validate_assignment=True)
+    # Allow extra fields for architecture config sections (event_bus, services, etc.)
+    # that are managed by ConfigurationManager (C3) rather than this legacy model.
+    model_config = ConfigDict(extra="allow", validate_assignment=True)
 
     name: Annotated[
         str,
@@ -154,6 +199,22 @@ class AppConfig(BaseModel):
         default=DEFAULT_CONFIG,
         description="Configuration directory path",
     )
+
+    # Integration configs (optional, loaded from defaults.yaml)
+    obsidian: Annotated[
+        ObsidianConfig,
+        Field(default_factory=ObsidianConfig, description="Obsidian vault configuration"),
+    ]
+
+    notion: Annotated[
+        NotionConfig,
+        Field(default_factory=NotionConfig, description="Notion integration configuration"),
+    ]
+
+    claude_mem: Annotated[
+        ClaudeMemConfig,
+        Field(default_factory=ClaudeMemConfig, description="Claude Mem integration configuration"),
+    ]
 
     @field_validator("name")
     @classmethod
