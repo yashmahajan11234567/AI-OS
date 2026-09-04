@@ -1,0 +1,218 @@
+# Production Environment Configuration
+# This file extends defaults.yaml with production-specific overrides.
+# Loaded as Layer 3 (env config) when kernel.environment = "production"
+
+kernel:
+  name: "Hermes"
+  version: "1.0.0"
+  log_level: "INFO"
+  environment: "production"
+  data_dir: "/opt/data"
+  health_check_interval_ms: 30000
+
+event_bus:
+  max_history: 100000
+  max_dispatch_depth: 64
+  auto_start_dispatch_worker: true
+
+service_registry: {}
+
+configuration:
+  config_path: "./config/defaults.yaml"
+  freeze_on_initialize: true
+
+structured_logger:
+  level: "INFO"
+  json_output: true
+
+lifecycle:
+  max_phase_initialization_time_ms: 30000
+  shutdown_timeout_ms: 5000
+
+state:
+  persistence_path: "/opt/data/state"
+  snapshot_interval_seconds: 300
+  max_snapshots: 10
+  consistency_class: "STRONG"
+  checkpoint_on_transition: true
+  shutdown_timeout_ms: 5000
+
+storage:
+  persistence_path: "/opt/data/storage"
+
+health:
+  check_interval_seconds: 60
+  warning_threshold: 0.8
+  critical_threshold: 0.95
+
+resource:
+  cleanup_interval_seconds: 60
+  warning_threshold: 0.8
+  critical_threshold: 0.95
+
+security:
+  strict_mode: true
+  allowed_services: []
+
+capability:
+  manifest_dir: "/opt/hermes/config/capabilities"
+  adapter_allowlist: []
+  trust_default: "untrusted"
+  hot_reload: false
+
+capabilities:
+  enabled: true
+  manifest_dir: "/opt/hermes/config/capabilities"
+  adapter_allowlist: [
+    "aios.adapters.graphify_adapter.GraphifyAdapter",
+    "aios.adapters.playwright_mcp_adapter.PlaywrightMCPAdapter",
+    "aios.adapters.notion_adapter.NotionAdapter",
+    "aios.adapters.obsidian_adapter.ObsidianAdapter",
+    "aios.adapters.claude_mem_adapter.ClaudeMemAdapter",
+    "aios.adapters.acp_adapter.ACPAdapter",
+    "aios.adapters.supabase_adapter.SupabaseAdapter",
+    "aios.adapters.n8n_adapter.N8nAdapter",
+    "aios.adapters.obsidian_git_adapter.ObsidianGitAdapter",
+  ]
+  trust_default: "untrusted"
+  hot_reload: false
+
+observability:
+  metrics_interval_seconds: 60
+
+memory:
+  base_path: "/opt/data/memory"
+
+mcp:
+  config_dir: "/opt/hermes/config/mcp"
+
+acp:
+  session_ttl_seconds: 3600
+  cwd: "/opt/hermes/hermes-agent"
+
+obsidian:
+  vault_path: "/opt/data/obsidian-vault"
+
+services:
+  enabled: [
+    "memory",
+    "planning",
+    "learning",
+    "self_prompting",
+    "model_router",
+    "root_cause",
+    "testing",
+    "accessibility",
+    "architecture",
+    "security_review",
+    "performance",
+    "code_quality",
+    "user_experience",
+    "documentation",
+    "compliance",
+  ]
+
+  autonomy:
+    enabled: false  # Disabled by default per spec
+
+  objective_generator:
+    enabled: false
+    min_interval_seconds: 3600
+    max_concurrent: 3
+
+  replan_detector:
+    enabled: true
+    sensitivity: 0.7
+    min_workflows: 3
+    max_depth: 3
+    window: 5
+
+  autonomous_judge:
+    mode: "advisory_only"
+    confidence_threshold: 0.75
+    require_learning_evidence: true
+    defer_to_council: true
+
+  self_prompting_autonomous:
+    enabled: true
+    convergence_action: "escalate"
+    max_cycles: 3
+    max_depth: 5
+
+  learning_apply:
+    enabled: false
+    auto_apply: true
+    confidence_threshold: 0.6
+
+  capability_provenance_ext:
+    enabled: true
+    require_signature: true
+
+  state_verification:
+    enabled: true
+    verify_on_action: true
+
+  security_abac_ext:
+    enabled: true
+    require_signature: true
+
+  resource_manager_quota:
+    enabled: true
+    og_pct: 0.05
+    rd_pct: 0.03
+    aj_pct: 0.02
+
+  autonomy_override:
+    allow_manual: true
+
+  audit_trail:
+    enabled: true
+    chain_hashes: true
+
+  autonomy_fallback:
+    enabled: true
+    on_security: true
+    on_bounds: true
+    on_instability: true
+    manual_recovery: true
+
+  self_loop:
+    enabled: true
+    max_cycles: 3
+    max_depth: 5
+    cycle_timeout_seconds: 3600
+    real_mode_enabled: false  # Gated by AIOS_REAL_INTEGRATION_ENABLED=1
+
+  self_prompting:
+    convergence_action: "escalate"
+    max_convergence_cycles: 3
+    max_depth: 5
+
+  supabase:
+    url: "${SUPABASE_URL}"
+    anon_key: "${SUPABASE_ANON_KEY}"
+    service_role_key: "${SUPABASE_SERVICE_ROLE_KEY}"
+
+  n8n:
+    base_url: "${N8N_BASE_URL}"
+    api_key: "${N8N_API_KEY}"
+
+  obsidian_git:
+    vault_path: "/opt/data/obsidian-vault"
+    git_remote_url: "${OBSIDIAN_GIT_REMOTE_URL}"
+
+  dashboard:
+    enabled: false  # Disabled by default; enable via AIOS_SERVICES_DASHBOARD_ENABLED=true
+    host: "0.0.0.0"
+    port: 3000
+    auth_enabled: true
+
+  real_integration_enabled: false  # Gated by AIOS_REAL_INTEGRATION_ENABLED=1
+
+# Production-specific overrides
+production:
+  graceful_shutdown_timeout: 30
+  health_check_endpoint: true
+  metrics_endpoint: true
+  audit_logging: true
+  secret_management: "external"  # Use external secret management (Vault, AWS Secrets Manager, etc.)

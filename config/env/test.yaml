@@ -1,0 +1,195 @@
+# Test Environment Configuration
+# This file extends defaults.yaml with test-specific overrides.
+# Loaded as Layer 3 (env config) when kernel.environment = "test"
+
+kernel:
+  name: "Hermes"
+  version: "1.0.0"
+  log_level: "WARNING"
+  environment: "test"
+  data_dir: "./data/test"
+  health_check_interval_ms: 5000
+
+event_bus:
+  max_history: 1000
+  max_dispatch_depth: 16
+  auto_start_dispatch_worker: false
+
+service_registry: {}
+
+configuration:
+  config_path: "./config/defaults.yaml"
+  freeze_on_initialize: true
+
+structured_logger:
+  level: "WARNING"
+  json_output: true
+
+lifecycle:
+  max_phase_initialization_time_ms: 30000
+  shutdown_timeout_ms: 5000
+
+state:
+  persistence_path: "./data/test/state"
+  snapshot_interval_seconds: 30
+  max_snapshots: 3
+  consistency_class: "EVENTUAL"
+  checkpoint_on_transition: true
+  shutdown_timeout_ms: 5000
+
+storage:
+  persistence_path: "./data/test/storage"
+
+health:
+  check_interval_seconds: 10
+  warning_threshold: 0.5
+  critical_threshold: 0.8
+
+resource:
+  cleanup_interval_seconds: 10
+  warning_threshold: 0.5
+  critical_threshold: 0.8
+
+security:
+  strict_mode: true
+  allowed_services: []
+
+capability:
+  manifest_dir: "./config/capabilities"
+  adapter_allowlist: []
+  trust_default: "untrusted"
+  hot_reload: false
+
+capabilities:
+  enabled: true
+  manifest_dir: "./config/capabilities"
+  adapter_allowlist: [
+    "aios.adapters.graphify_adapter.GraphifyAdapter",
+    "aios.adapters.playwright_mcp_adapter.PlaywrightMCPAdapter",
+    "aios.adapters.notion_adapter.NotionAdapter",
+    "aios.adapters.obsidian_adapter.ObsidianAdapter",
+    "aios.adapters.claude_mem_adapter.ClaudeMemAdapter",
+    "aios.adapters.acp_adapter.ACPAdapter",
+    "aios.adapters.supabase_adapter.SupabaseAdapter",
+    "aios.adapters.n8n_adapter.N8nAdapter",
+    "aios.adapters.obsidian_git_adapter.ObsidianGitAdapter",
+  ]
+  trust_default: "untrusted"
+  hot_reload: false
+
+observability:
+  metrics_interval_seconds: 10
+
+memory:
+  base_path: "./data/test/memory"
+
+mcp:
+  config_dir: "./config/mcp/test"
+
+acp:
+  session_ttl_seconds: 0
+  cwd: ""
+
+obsidian:
+  vault_path: ""
+
+services:
+  enabled: [
+    "memory",
+    "planning",
+    "learning",
+    "self_prompting",
+    "model_router",
+    "root_cause",
+    "testing",
+  ]
+
+  autonomy:
+    enabled: false  # Disabled by default for test isolation
+
+  objective_generator:
+    enabled: false
+
+  replan_detector:
+    enabled: false
+
+  autonomous_judge:
+    mode: "advisory_only"
+    confidence_threshold: 0.75
+    require_learning_evidence: true
+    defer_to_council: true
+
+  self_prompting_autonomous:
+    enabled: false
+
+  learning_apply:
+    enabled: false
+
+  capability_provenance_ext:
+    enabled: true
+    require_signature: true
+
+  state_verification:
+    enabled: true
+    verify_on_action: true
+
+  security_abac_ext:
+    enabled: true
+    require_signature: true
+
+  resource_manager_quota:
+    enabled: true
+    og_pct: 0.05
+    rd_pct: 0.03
+    aj_pct: 0.02
+
+  autonomy_override:
+    allow_manual: true
+
+  audit_trail:
+    enabled: true
+    chain_hashes: true
+
+  autonomy_fallback:
+    enabled: true
+    on_security: true
+    on_bounds: true
+    on_instability: true
+    manual_recovery: true
+
+  self_loop:
+    enabled: false
+    max_cycles: 1
+    max_depth: 2
+    cycle_timeout_seconds: 300
+    real_mode_enabled: false
+
+  self_prompting:
+    convergence_action: "escalate"
+    max_convergence_cycles: 1
+    max_depth: 2
+
+  supabase:
+    url: ""
+    anon_key: ""
+    service_role_key: ""
+
+  n8n:
+    base_url: ""
+    api_key: ""
+
+  obsidian_git:
+    vault_path: ""
+    git_remote_url: ""
+
+  dashboard:
+    enabled: false
+
+  real_integration_enabled: false
+
+# Test-specific overrides
+test:
+  isolation: true
+  mock_all_external: true
+  deterministic_timing: true
+  parallel_safe: true

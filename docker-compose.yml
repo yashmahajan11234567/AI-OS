@@ -1,0 +1,179 @@
+version: '3.8'
+
+# AI-OS Docker Compose
+# Defines the container topology for the AI-OS system (Python application)
+# AI-OS is the single deployable unit; external systems are bounded resources
+
+services:
+  # =========================================================================
+  # AI-OS Kernel (Single Deployable Unit)
+  # =========================================================================
+  ai-os:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: ai-os:latest
+    container_name: ai-os
+    hostname: ai-os
+    restart: unless-stopped
+    # Run as non-root user (UID 10000)
+    user: "10000:10000"
+    environment:
+      # Kernel configuration
+      - KERNEL_NAME=Hermes
+      - KERNEL_VERSION=1.0.0
+      - KERNEL_LOG_LEVEL=INFO
+      - KERNEL_ENVIRONMENT=production
+      - KERNEL_DATA_DIR=/opt/data
+
+      # Configuration
+      - AIOS_CONFIG_PATH=/opt/ai-os/config/defaults.yaml
+      - AIOS_KERNEL_ENVIRONMENT=production
+      - AIOS_KERNEL_LOG_LEVEL=INFO
+
+      # Runtime
+      - PYTHONUNBUFFERED=1
+      - PYTHONDONTWRITEBYTECODE=1
+
+      # External integrations (optional - require real credentials)
+      - SUPABASE_URL=${SUPABASE_URL:-}
+      - SUPABASE_ANON_KEY=${SUPABASE_ANON_KEY:-}
+      - SUPABASE_SERVICE_ROLE_KEY=${SUPABASE_SERVICE_ROLE_KEY:-}
+      - N8N_BASE_URL=${N8N_BASE_URL:-}
+      - N8N_API_KEY=${N8N_API_KEY:-}
+      - N8N_WEBHOOK_URL=${N8N_WEBHOOK_URL:-}
+      - OBSIDIAN_GIT_REMOTE_URL=${OBSIDIAN_GIT_REMOTE_URL:-}
+      - OBSIDIAN_VAULT_PATH=${OBSIDIAN_VAULT_PATH:-}
+
+      # Real integration gate (ADR-007)
+      - AIOS_REAL_INTEGRATION_ENABLED=${AIOS_REAL_INTEGRATION_ENABLED:-0}
+
+      # Autonomy (M10) - disabled by default per spec
+      - AIOS_SERVICES_AUTONOMY_ENABLED=false
+
+      # Dashboard (optional - enabled via env var)
+      - AIOS_SERVICES_DASHBOARD_ENABLED=${AIOS_SERVICES_DASHBOARD_ENABLED:-false}
+      - AIOS_SERVICES_DASHBOARD_HOST=0.0.0.0
+      - AIOS_SERVICES_DASHBOARD_PORT=3000
+      - AIOS_SERVICES_DASHBOARD_AUTH_ENABLED=${AIOS_SERVICES_DASHBOARD_AUTH_ENABLED:-true}
+
+      # UID/GID (already handled by user directive above)
+      - HERMES_UID=10000
+      - HERMES_GID=10000
+    volumes:
+      - ai-os-data:/opt/data
+      - ./config:/opt/ai-os/config:ro
+    ports:
+      - "3000:3000"   # Dashboard (if enabled)
+    healthcheck:
+      test: ["CMD", "/opt/ai-os/.venv/bin/aios", "kernel", "health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    networks:
+      - ai-os-network
+    deploy:
+      resources:
+        limits:
+          cpus: '4'
+          memory: 4G
+        reservations:
+          cpus: '1'
+          memory: 1G
+
+# =========================================================================
+# Supporting Infrastructure Services (OPTIONAL - uncomment if needed)
+# =========================================================================
+
+# Redis - only if AI-OS architecture requires it for caching/event bus clustering
+# redis:
+#   image: redis:7-alpine
+#   container_name: ai-os-redis
+#   hostname: redis
+#   restart: unless-stopped
+#   command: redis-server --appendonly yes --maxmemory 256mb --maxmemory-policy allkeys-lru
+#   volumes:
+#     - redis-data:/data
+#   ports:
+#     - "6379:6379"
+#   healthcheck:
+#     test: ["CMD", "redis-cli", "ping"]
+#     interval: 10s
+#     timeout: 5s
+#     retries: 3
+#   networks:
+#     - ai-os-network
+
+# PostgreSQL - only if AI-OS architecture requires it for state persistence
+# postgres:
+#   image: postgres:16-alpine
+#   container_name: ai-os-postgres
+#   hostname: postgres
+#   restart: unless-stopped
+#   environment:
+#     - POSTGRES_DB=aios
+#     - POSTGRES_USER=aios
+#     - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-aios-secure-password}
+#   volumes:
+#     - postgres-data:/var/lib/postgresql/data
+#   ports:
+#     - "5432:5432"
+#   healthcheck:
+#     test: ["CMD-SHELL", "pg_isready -U aios -d aios"]
+#     interval: 10s
+#     timeout: 5s
+#     retries: 5
+#     start_period: 30s
+#   networks:
+#     - ai-os-network
+
+# =========================================================================
+# Volumes
+# =========================================================================
+volumes:
+  ai-os-data:
+    driver: local
+  # redis-data:
+  #   driver: local
+  # postgres-data:
+  #   driver: local
+
+# =========================================================================
+# Networks
+# =========================================================================
+networks:
+  ai-os-network:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.28.0.0/16
+
+# =========================================================================
+# Configuration Notes
+# =========================================================================
+#
+# Deployment Model (per architecture/Part15/deployment.md):
+#   - AI-OS is the single deployable unit (Python application)
+#   - All Core Components, Core Managers, Engineering Services run in one process
+#   - External systems (Redis, PostgreSQL) are bounded resources, not deployed by AI-OS
+#   - Configuration uses four-layer merge: defaults.yaml -> app.yaml -> env.yaml -> AIOS_* env vars
+#   - Configuration freezes after Phase 3 (INV-DEP-04)
+#   - Autonomy services (M10) gated behind services.autonomy.enabled: false
+#   - Real integrations gated behind AIOS_REAL_INTEGRATION_ENABLED=1
+#
+# Health Probes:
+#   - Liveness: Process responds to health check
+#   - Readiness: All Phase 0-3 initialization complete, no CRITICAL failures
+#   - Startup: Initialization in progress
+#   - Architecture: healthCheck() polling (GAP-DEP-06: exposure mechanism UNSPECIFIED)
+#
+# Security:
+#   - Non-root user (UID 10000)
+#   - Read-only root filesystem (COPY --chmod=a+rX,go-w)
+#   - Secret references via environment variables, never hardcoded
+#   - SecurityManager gate-before-connect for all external resources
+#   - Trust boundary: AI-OS process only (Part 14 §14.9)
+#
+# Resource Requirements:
+#   - AI-OS Kernel: 1-4 CPUs, 1-4 GB RAM

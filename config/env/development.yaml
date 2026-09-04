@@ -1,0 +1,217 @@
+# Development Environment Configuration
+# This file extends defaults.yaml with development-specific overrides.
+# Loaded as Layer 3 (env config) when kernel.environment = "development"
+
+kernel:
+  name: "Hermes"
+  version: "1.0.0"
+  log_level: "DEBUG"
+  environment: "development"
+  data_dir: "./data/dev"
+  health_check_interval_ms: 10000
+
+event_bus:
+  max_history: 5000
+  max_dispatch_depth: 32
+  auto_start_dispatch_worker: false
+
+service_registry: {}
+
+configuration:
+  config_path: "./config/defaults.yaml"
+  freeze_on_initialize: true
+
+structured_logger:
+  level: "DEBUG"
+  json_output: false
+
+lifecycle:
+  max_phase_initialization_time_ms: 60000
+  shutdown_timeout_ms: 10000
+
+state:
+  persistence_path: "./data/dev/state"
+  snapshot_interval_seconds: 60
+  max_snapshots: 5
+  consistency_class: "EVENTUAL"
+  checkpoint_on_transition: true
+  shutdown_timeout_ms: 10000
+
+storage:
+  persistence_path: "./data/dev/storage"
+
+health:
+  check_interval_seconds: 30
+  warning_threshold: 0.7
+  critical_threshold: 0.9
+
+resource:
+  cleanup_interval_seconds: 30
+  warning_threshold: 0.7
+  critical_threshold: 0.9
+
+security:
+  strict_mode: true
+  allowed_services: []
+
+capability:
+  manifest_dir: "./config/capabilities"
+  adapter_allowlist: []
+  trust_default: "untrusted"
+  hot_reload: true  # Enable hot reload in development
+
+capabilities:
+  enabled: true
+  manifest_dir: "./config/capabilities"
+  adapter_allowlist: [
+    "aios.adapters.graphify_adapter.GraphifyAdapter",
+    "aios.adapters.playwright_mcp_adapter.PlaywrightMCPAdapter",
+    "aios.adapters.notion_adapter.NotionAdapter",
+    "aios.adapters.obsidian_adapter.ObsidianAdapter",
+    "aios.adapters.claude_mem_adapter.ClaudeMemAdapter",
+    "aios.adapters.acp_adapter.ACPAdapter",
+    "aios.adapters.supabase_adapter.SupabaseAdapter",
+    "aios.adapters.n8n_adapter.N8nAdapter",
+    "aios.adapters.obsidian_git_adapter.ObsidianGitAdapter",
+  ]
+  trust_default: "untrusted"
+  hot_reload: true
+
+observability:
+  metrics_interval_seconds: 30
+
+memory:
+  base_path: "./data/dev/memory"
+
+mcp:
+  config_dir: "./config/mcp"
+
+acp:
+  session_ttl_seconds: 0
+  cwd: "./hermes-agent"
+
+obsidian:
+  vault_path: ""
+
+services:
+  enabled: [
+    "memory",
+    "planning",
+    "learning",
+    "self_prompting",
+    "model_router",
+    "root_cause",
+    "testing",
+    "accessibility",
+    "architecture",
+    "security_review",
+    "performance",
+    "code_quality",
+    "user_experience",
+    "documentation",
+    "compliance",
+  ]
+
+  autonomy:
+    enabled: false  # Disabled by default per spec
+    # Development can enable for testing: enabled: true
+
+  objective_generator:
+    enabled: true  # Enable for development testing
+    min_interval_seconds: 60
+    max_concurrent: 3
+
+  replan_detector:
+    enabled: true
+    sensitivity: 0.5  # Lower sensitivity for development
+    min_workflows: 2
+    max_depth: 3
+    window: 3
+
+  autonomous_judge:
+    mode: "advisory_only"
+    confidence_threshold: 0.5  # Lower threshold for testing
+    require_learning_evidence: false
+    defer_to_council: true
+
+  self_prompting_autonomous:
+    enabled: true
+    convergence_action: "escalate"
+    max_cycles: 2
+    max_depth: 3
+
+  learning_apply:
+    enabled: true
+    auto_apply: true
+    confidence_threshold: 0.4
+
+  capability_provenance_ext:
+    enabled: true
+    require_signature: true
+
+  state_verification:
+    enabled: true
+    verify_on_action: true
+
+  security_abac_ext:
+    enabled: true
+    require_signature: true
+
+  resource_manager_quota:
+    enabled: true
+    og_pct: 0.05
+    rd_pct: 0.03
+    aj_pct: 0.02
+
+  autonomy_override:
+    allow_manual: true
+
+  audit_trail:
+    enabled: true
+    chain_hashes: true
+
+  autonomy_fallback:
+    enabled: true
+    on_security: true
+    on_bounds: true
+    on_instability: true
+    manual_recovery: true
+
+  self_loop:
+    enabled: true
+    max_cycles: 2
+    max_depth: 3
+    cycle_timeout_seconds: 1800
+    real_mode_enabled: false
+
+  self_prompting:
+    convergence_action: "escalate"
+    max_convergence_cycles: 2
+    max_depth: 3
+
+  supabase:
+    url: ""
+    anon_key: ""
+    service_role_key: ""
+
+  n8n:
+    base_url: ""
+    api_key: ""
+
+  obsidian_git:
+    vault_path: ""
+    git_remote_url: ""
+
+  dashboard:
+    enabled: true
+    host: "localhost"
+    port: 3000
+    auth_enabled: false
+
+  real_integration_enabled: false
+
+# Development-specific overrides
+debug:
+  enabled: true
+  verbose_logging: true
+  mock_external_services: true
