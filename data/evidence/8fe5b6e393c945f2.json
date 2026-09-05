@@ -1,0 +1,13 @@
+{
+  "evidence_id": "8fe5b6e393c945f2",
+  "evidence_type": "health_degradation",
+  "component": "health_manager",
+  "service_id": null,
+  "correlation_id": "multi-event-corr-456",
+  "timestamp": "2026-09-05T04:47:36.959676",
+  "payload": {
+    "service": "autonomous_judge",
+    "status": "DEGRADED"
+  },
+  "metadata": {}
+}

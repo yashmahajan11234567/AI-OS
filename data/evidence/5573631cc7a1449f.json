@@ -1,0 +1,12 @@
+{
+  "evidence_id": "5573631cc7a1449f",
+  "evidence_type": "root_cause_correlation",
+  "component": "root_cause_analyzer",
+  "service_id": null,
+  "correlation_id": "multi-event-corr-456",
+  "timestamp": "2026-09-05T04:47:36.959676",
+  "payload": {
+    "analysis": "timeout_cascade"
+  },
+  "metadata": {}
+}

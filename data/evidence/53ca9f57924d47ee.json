@@ -1,0 +1,15 @@
+{
+  "evidence_id": "53ca9f57924d47ee",
+  "evidence_type": "service_failure",
+  "component": "objective_generator",
+  "service_id": "engineering.objective_generator",
+  "correlation_id": "integration-test-corr-123",
+  "timestamp": "2026-09-05T04:47:33.751764",
+  "payload": {
+    "error": "connection timeout",
+    "attempt": 3
+  },
+  "metadata": {
+    "health_status": "UNHEALTHY"
+  }
+}

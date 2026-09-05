@@ -148,6 +148,19 @@ from aios.architecture.terminal_contract import (
 from aios.core.model_router import ModelRouter, get_model_router, set_model_router
 # M13 — bounded, AI-OS-authoritative failure-recovery coordinator
 from aios.core.failure_recovery import FailureRecoveryManager
+# M10-T4 — Evidence Engine & M10 Recovery Manager (Service Lifecycle & Recovery)
+from aios.core.evidence_engine import (
+    EvidenceEngine,
+    EvidenceType,
+    get_evidence_engine,
+    set_evidence_engine,
+)
+from aios.core.m10_recovery_manager import (
+    M10RecoveryManager,
+    get_m10_recovery_manager,
+    set_m10_recovery_manager,
+    RecoveryPriority,
+)
 # Engineering services use the canonical ServiceRegistry
 from aios.services.base import BaseService
 from aios.events.core.types import EventType
@@ -316,6 +329,10 @@ class HermesKernel:
         self._project_service: Any | None = None
         # M13 — bounded failure-recovery coordinator (AI-OS-authoritative)
         self._failure_recovery_manager: FailureRecoveryManager | None = None
+
+        # M10-T4 — Evidence Engine & M10 Recovery Manager
+        self._evidence_engine: EvidenceEngine | None = None
+        self._m10_recovery_manager: M10RecoveryManager | None = None
 
         # Service tracking
         self._services: dict[str, ServiceStatus] = {}
@@ -529,6 +546,16 @@ class HermesKernel:
     def lifecycle(self) -> LifecycleManager | None:
         """Get the LifecycleManager Core Manager (Part 4 §4.3, Task 9)."""
         return self._lifecycle
+
+    @property
+    def evidence_engine(self) -> EvidenceEngine | None:
+        """Get the M10-T4 Evidence Engine (core.evidence_engine)."""
+        return self._evidence_engine
+
+    @property
+    def m10_recovery_manager(self) -> M10RecoveryManager | None:
+        """Get the M10-T4 Recovery Manager (core.m10_recovery)."""
+        return self._m10_recovery_manager
 
     @property
     def health_state(self) -> CanonicalHealthState:
@@ -1052,6 +1079,19 @@ class HermesKernel:
         # so StructuredLogger can still log the transition.
         await self._shutdown_lifecycle_manager()
 
+        # M10-T4 — shut down M10RecoveryManager and EvidenceEngine after LifecycleManager
+        if self._m10_recovery_manager is not None:
+            try:
+                await self._m10_recovery_manager.shutdown()
+            except Exception as e:  # noqa: BLE001
+                logger.error(f"Error shutting down M10RecoveryManager: {e}")
+
+        if self._evidence_engine is not None:
+            try:
+                await self._evidence_engine.shutdown()
+            except Exception as e:  # noqa: BLE001
+                logger.error(f"Error shutting down EvidenceEngine: {e}")
+
         # StructuredLogger shutdown (Phase S3 — FIRST Core Component to shut
         # down, §3.7.4). Flushes remaining logs before other components (the
         # EventBus, which drains last in S0) are torn down.
@@ -1274,11 +1314,29 @@ class HermesKernel:
         )
         set_observability_manager(self._observability_manager)
 
+        # M10-T4 — Evidence Engine (Phase-3 Governance Core Manager, same phase as
+        # HealthManager/ResourceManager/SecurityManager; alphabetical ordering:
+        # EvidenceEngine, HealthManager, ResourceManager, SecurityManager).
+        # Constructed here so LifecycleManager can register and drive it.
+        self._evidence_engine = EvidenceEngine(
+            service_registry=self._service_registry,
+            configuration_manager=self._configuration,
+            logger=self._structured_logger,
+            base_path=self._config.data_dir,
+        )
+        set_evidence_engine(self._evidence_engine)
+
+        # Initialize EvidenceEngine (not managed by LifecycleManager per M10-T4 spec)
+        await self._evidence_engine.initialize()
+
         # MemoryManager — initialize with kernel data_dir for persistence
         # Pass MCPManager to enable GraphifyBackend wiring when available
         mcp_mgr = get_mcp_manager()
         memory_mgr = get_memory_manager(base_path=self._config.data_dir, mcp_manager=mcp_mgr)
         set_memory_manager(memory_mgr)
+
+        # M10-T4 — initialize M10RecoveryManager (sole recovery coordinator for M10 services)
+        await self._init_m10_recovery()
 
         logger.debug("Canonical core components initialized")
 
@@ -1384,6 +1442,10 @@ class HermesKernel:
         if self._storage_manager is not None:
             lm.register_manager(self._storage_manager)
             logger.debug("Registered StorageManager with LifecycleManager (Phase 2).")
+
+        # M10-T4 — EvidenceEngine exists as standalone core component
+        # Not registered with LifecycleManager per M10-T4 architecture
+        # (evidence storage only, no governance authority)
 
         # Task 12 — register the HealthManager Core Manager (Phase 3, "Governance")
         # for LifecycleManager orchestration. HealthManager was constructed in
@@ -2463,6 +2525,85 @@ class HermesKernel:
         set_autonomy_fallback(autonomy_fallback)
 
         logger.info("M10 autonomy services initialized and registered")
+
+    async def _init_m10_recovery(self) -> None:
+        """Initialize M10RecoveryManager (M10-T4 spec §3).
+
+        The M10RecoveryManager is the sole recovery coordinator for all M10
+        autonomy services (N1-N12). It integrates with:
+        - ServiceRegistry 3-consecutive-failure circuit breaker
+        - EvidenceEngine for evidence storage/retrieval
+        - RootCauseAnalyzer for causal analysis
+        - RetryManager infrastructure
+        - StateManager for critical/high-priority state persistence
+        - LifecycleManager kernel lifecycle state machine
+
+        Lifeboat services (N10: AutonomyOverride, N12: AutonomyFallback) are
+        registered with {"lifeboat": true} metadata and protected from
+        being disabled by recovery actions.
+        """
+        # Only proceed if M10 autonomy is enabled via config
+        if not self._read_config_bool("services.autonomy.enabled", False):
+            logger.debug("M10 autonomy disabled by config; skipping M10RecoveryManager")
+            return
+
+        from aios.core.root_cause import get_root_cause_analyzer
+        from aios.core.retry import get_retry_manager
+        from aios.core.state import get_state_manager
+
+        self._m10_recovery_manager = M10RecoveryManager(
+            service_registry=self._service_registry,
+            configuration_manager=self._configuration,
+            logger=self._structured_logger,
+            evidence_engine=self._evidence_engine,
+            root_cause_analyzer=get_root_cause_analyzer(),
+            retry_manager=get_retry_manager(),
+            state_manager=get_state_manager(),
+        )
+        set_m10_recovery_manager(self._m10_recovery_manager)
+
+        # Register N10 and N12 with lifeboat metadata in ServiceRegistry
+        await self._register_lifeboat_services()
+
+        logger.info("M10RecoveryManager initialized and lifeboat services registered")
+
+    async def _register_lifeboat_services(self) -> None:
+        """Register N10 (AutonomyOverride) and N12 (AutonomyFallback) with lifeboat metadata.
+
+        Per M10-T4 spec §7: Lifeboat services are registered with
+        {"lifeboat": true} metadata so the recovery path never disables them.
+        """
+        sr = self._service_registry
+        if sr is None:
+            logger.warning("ServiceRegistry unavailable; cannot register lifeboat metadata")
+            return
+
+        # Note: Services already registered via _init_m10_autonomy; we update their metadata
+        # by re-registering with lifeboat flag. The canonical ServiceRegistry upserts.
+        lifeboat_services = [
+            ("autonomy_override", "N10: Human Override Mechanism"),
+            ("autonomy_fallback", "N12: Fallback to Advisory Mode"),
+        ]
+
+        for svc_name, description in lifeboat_services:
+            try:
+                svc = sr.get_service(f"engineering.{svc_name}")
+                if svc is not None:
+                    await sr.register(
+                        svc,
+                        service_id=f"engineering.{svc_name}",
+                        service_type=ServiceType.ENGINEERING,
+                        metadata={
+                            "version": getattr(svc, 'version', '1.0.0'),
+                            "description": description,
+                            "lifeboat": True,  # KEY: marks as lifeboat per M10-T4 §7
+                        },
+                    )
+                    logger.debug(f"Registered lifeboat metadata for {svc_name}")
+                else:
+                    logger.warning(f"Lifeboat service {svc_name} not found in registry")
+            except Exception as exc:  # noqa: BLE001
+                logger.warning(f"Failed to register lifeboat metadata for {svc_name}: {exc}")
 
     async def _init_freellmapi(self) -> None:
         """Register FreeLLMAPI provider with ModelRouter (G1 — dev/test only).

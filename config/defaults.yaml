@@ -210,6 +210,12 @@ services:
     on_instability: true
     manual_recovery: true
 
+  # M10-T4 Recovery configuration
+  recovery:
+    failure_threshold: 3
+    recovery_timeout_ms: 30000
+    max_concurrent_recoveries: 3
+
   # M13 Self-Loop Engine settings
   self_loop:
     enabled: true

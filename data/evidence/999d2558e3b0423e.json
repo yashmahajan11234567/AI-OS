@@ -1,0 +1,12 @@
+{
+  "evidence_id": "999d2558e3b0423e",
+  "evidence_type": "service_failure",
+  "component": "autonomous_judge",
+  "service_id": "engineering.autonomous_judge",
+  "correlation_id": "multi-event-corr-456",
+  "timestamp": "2026-09-05T04:47:36.959676",
+  "payload": {
+    "error": "judgment timeout"
+  },
+  "metadata": {}
+}

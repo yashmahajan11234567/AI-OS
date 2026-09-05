@@ -231,7 +231,7 @@ class RootCauseAnalyzer:
                 error_type=payload.get("error_type", "UnknownError"),
                 service=payload.get("service", "unknown"),
                 task_id=payload.get("task_id", ""),
-                correlation_id=str(event.correlation_id) if event.correlation_id else "",
+                correlation_id=str(event.correlationId) if event.correlationId else "",
                 payload=payload,
             )
             await self.analyze(context, retry_budget_exhausted=payload.get("retryable", False) and payload.get("retry_count", 0) >= 3)
