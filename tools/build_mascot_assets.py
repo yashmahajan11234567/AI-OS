@@ -8,8 +8,8 @@ only - Pillow is NOT a runtime dependency.
 
 Semantic pixel codes:
     00 = transparent
-    01 = body (dark navy)
-    10 = accent (cyan/blue)
+    01 = body (dark green)
+    10 = accent (green)
     11 = reserved (rejects if found)
 
 Runtime format: deterministic bytes, packed 4 pixels per byte (2 bits each).
@@ -36,35 +36,33 @@ except ImportError:
 # =============================================================================
 
 # Palette mapping: RGB -> semantic code
-# Dark navy body colors -> 01 (body)
-# Cyan/blue accent colors -> 10 (accent)
+# Dark green body colors -> 01 (body)
+# Green accent colors -> 10 (accent)
 # Transparent -> 00
 # Anything else -> error
 
 BODY_COLORS = {
-    (0x0B, 0x10, 0x20),  # #0B1020 - dark navy / near-black
-    (0x1A, 0x1F, 0x3A),  # #1A1F3A - dark navy blue
-    (0x2A, 0x3F, 0x6E),  # #2A3F6E - medium blue
+    (0x0D, 0x28, 0x18),  # #0D2818 - dark green / near-black body
+    (0x1A, 0x3D, 0x24),  # #1A3D24 - medium dark green
+    (0x2E, 0x7D, 0x32),  # #2E7D32 - lighter green for body detail
 }
 
 ACCENT_COLORS = {
-    (0x00, 0xD4, 0xFF),  # #00D4FF - bright cyan
-    (0x00, 0x88, 0xFF),  # #0088FF - electric blue
-    (0x00, 0x66, 0xAA),  # #0066AA - deep blue
-    (0x00, 0xEE, 0xFF),  # #00EEFF - brighter cyan
-    (0x00, 0xBF, 0xA6),  # #00BFA6 - teal (legacy, but kept for compatibility)
-    (0x00, 0xAA, 0xFF),  # #00AAFF - blue
+    (0x4C, 0xAF, 0x50),  # #4CAF50 - bright green accent
+    (0x81, 0xC7, 0x84),  # #81C784 - highlight green
+    (0xA5, 0xD6, 0xA7),  # #A5D6A7 - pale green
+    (0xC8, 0xE6, 0xC9),  # #C8E6C9 - very light green (thought bubbles, etc.)
 }
 
 RESERVED_CODE = 0b11  # 11 = reserved, should never appear in valid source
 
-# Target dimensions (initial target: 17x11)
-TARGET_WIDTH = 17
-TARGET_HEIGHT = 11
+# Target dimensions (new: 21x13)
+TARGET_WIDTH = 21
+TARGET_HEIGHT = 13
 
 # Acceptable canonical sizes (in priority order)
 CANONICAL_SIZES = [
-    (17, 11),
+    (21, 13),
     (24, 16),
     (32, 20),
 ]
@@ -355,7 +353,7 @@ def generate_runtime_module(states: Dict[str, StateData]) -> str:
         'DO NOT EDIT MANUALLY.',
         '',
         'Packed 2-bit raster data for deterministic pixel-art turtle rendering.',
-        'Semantic codes: 00=transparent, 01=body, 10=accent, 11=reserved',
+        'Semantic codes: 00=transparent, 01=body (green), 10=accent (green), 11=reserved',
         '"""',
         '',
         '# flake8: noqa',

@@ -57,8 +57,8 @@ class TestGetColorForPixel:
         """Accent pixel returns accent fg/bg."""
         palette = PaletteColors()
         fg, bg = get_color_for_pixel(2, palette)
-        assert fg == palette.accent_cyan_fg
-        assert bg == palette.accent_cyan_bg
+        assert fg == palette.accent_bright_fg
+        assert bg == palette.accent_bright_bg
 
     def test_reserved_returns_empty(self):
         """Reserved pixel returns empty strings."""
@@ -161,7 +161,7 @@ class TestRenderJson:
         data = json.loads(result)
         assert data["state"] == "IDLE"
         assert data["frame"] == 0
-        assert data["dimensions"] == {"width": 17, "height": 11}
+        assert data["dimensions"] == {"width": 21, "height": 13}
 
     def test_render_json_without_frame_data(self):
         """JSON output without frame data should have null dimensions."""
@@ -215,27 +215,27 @@ class TestPaletteColors:
         """FULL mode should have all colors."""
         palette = PaletteColors.for_mode(RenderMode.FULL)
         assert palette.body_fg != ""
-        assert palette.accent_cyan_fg != ""
+        assert palette.accent_bright_fg != ""
         assert palette.reset == "\x1b[0m"
 
     def test_for_mode_monochrome(self):
         """MONOCHROME mode should have empty colors."""
         palette = PaletteColors.for_mode(RenderMode.MONOCHROME)
         assert palette.body_fg == ""
-        assert palette.accent_cyan_fg == ""
+        assert palette.accent_bright_fg == ""
         assert palette.reset == ""
 
     def test_for_mode_fallback(self):
         """FALLBACK mode should have empty colors."""
         palette = PaletteColors.for_mode(RenderMode.FALLBACK)
         assert palette.body_fg == ""
-        assert palette.accent_cyan_fg == ""
+        assert palette.accent_bright_fg == ""
 
     def test_for_mode_json(self):
         """JSON mode should have empty colors."""
         palette = PaletteColors.for_mode(RenderMode.JSON)
         assert palette.body_fg == ""
-        assert palette.accent_cyan_fg == ""
+        assert palette.accent_bright_fg == ""
 
 
 if __name__ == "__main__":

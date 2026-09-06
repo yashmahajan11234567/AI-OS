@@ -6,8 +6,8 @@ characters (▀, ▄, █, ░). Each terminal character represents two vertical
 
 Semantic pixel codes:
     00 = transparent
-    01 = body (dark navy)
-    10 = accent (cyan/blue)
+    01 = body (dark green)
+    10 = accent (green)
     11 = reserved (invalid)
 
 Handles all 9 semantic combinations for upper/lower pixel pairs:
@@ -44,28 +44,28 @@ class RenderMode(str, Enum):
 @dataclass(frozen=True)
 class PaletteColors:
     """ANSI color codes for rendering."""
-    # Dark navy body colors
-    body_fg: str = "\x1b[38;2;11;16;32m"      # #0B1020 - dark navy
-    body_bg: str = "\x1b[48;2;11;16;32m"
+    # Dark green body colors
+    body_fg: str = "\x1b[38;2;13;40;24m"       # #0D2818 - dark green
+    body_bg: str = "\x1b[48;2;13;40;24m"
 
-    body_mid_fg: str = "\x1b[38;2;26;31;58m"  # #1A1F3A - dark navy blue
-    body_mid_bg: str = "\x1b[48;2;26;31;58m"
+    body_mid_fg: str = "\x1b[38;2;26;61;36m"   # #1A3D24 - medium dark green
+    body_mid_bg: str = "\x1b[48;2;26;61;36m"
 
-    body_light_fg: str = "\x1b[38;2;42;63;110m"  # #2A3F6E - medium blue
-    body_light_bg: str = "\x1b[48;2;42;63;110m"
+    body_light_fg: str = "\x1b[38;2;46;125;50m"  # #2E7D32 - lighter green
+    body_light_bg: str = "\x1b[48;2;46;125;50m"
 
-    # Cyan/blue accent colors (ONLY blue/cyan)
-    accent_cyan_fg: str = "\x1b[38;2;0;212;255m"   # #00D4FF
-    accent_cyan_bg: str = "\x1b[48;2;0;212;255m"
+    # Green accent colors (ONLY green)
+    accent_bright_fg: str = "\x1b[38;2;76;175;80m"   # #4CAF50 - bright green
+    accent_bright_bg: str = "\x1b[48;2;76;175;80m"
 
-    accent_blue_fg: str = "\x1b[38;2;0;136;255m"   # #0088FF
-    accent_blue_bg: str = "\x1b[48;2;0;136;255m"
+    accent_highlight_fg: str = "\x1b[38;2;129;199;132m"  # #81C784 - highlight green
+    accent_highlight_bg: str = "\x1b[48;2;129;199;132m"
 
-    accent_deep_fg: str = "\x1b[38;2;0;102;170m"   # #0066AA
-    accent_deep_bg: str = "\x1b[48;2;0;102;170m"
+    accent_pale_fg: str = "\x1b[38;2;165;214;167m"   # #A5D6A7 - pale green
+    accent_pale_bg: str = "\x1b[48;2;165;214;167m"
 
-    accent_bright_fg: str = "\x1b[38;2;0;238;255m"  # #00EEFF
-    accent_bright_bg: str = "\x1b[48;2;0;238;255m"
+    accent_very_light_fg: str = "\x1b[38;2;200;230;201m"  # #C8E6C9 - very light green
+    accent_very_light_bg: str = "\x1b[48;2;200;230;201m"
 
     # Reset
     reset: str = "\x1b[0m"
@@ -82,10 +82,10 @@ class PaletteColors:
                 body_fg="", body_bg="",
                 body_mid_fg="", body_mid_bg="",
                 body_light_fg="", body_light_bg="",
-                accent_cyan_fg="", accent_cyan_bg="",
-                accent_blue_fg="", accent_blue_bg="",
-                accent_deep_fg="", accent_deep_bg="",
                 accent_bright_fg="", accent_bright_bg="",
+                accent_highlight_fg="", accent_highlight_bg="",
+                accent_pale_fg="", accent_pale_bg="",
+                accent_very_light_fg="", accent_very_light_bg="",
                 reset="",
                 mono_fg="", mono_bg="",
             )
@@ -133,7 +133,7 @@ def get_color_for_pixel(code: int, palette: PaletteColors, prefer_fg: bool = Tru
         # Use mid-tone body color for good visibility
         return (palette.body_mid_fg, palette.body_mid_bg)
     elif code == 2:  # accent
-        return (palette.accent_cyan_fg, palette.accent_cyan_bg)
+        return (palette.accent_bright_fg, palette.accent_bright_bg)
     else:
         return ("", "")  # reserved - should not happen
 

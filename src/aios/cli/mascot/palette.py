@@ -1,8 +1,8 @@
 """
-AI-OS Cyber Turtle Color Palette.
+AI-OS Cyber Turtle Color Palette - GREEN EDITION.
 
-Dark navy / near-black body with blue/cyan accent palette ONLY.
-No red, green, yellow, gold, orange, gray, white, purple, pink, or brown.
+Dark green body with green accent palette ONLY.
+No red, yellow, gold, orange, gray, white, purple, pink, blue, cyan, brown, or teal.
 Minimal colors, crisp terminal aesthetic.
 """
 
@@ -14,32 +14,32 @@ from typing import Optional
 class MascotPalette:
     """Color palette for AI-OS cyber turtle rendering."""
 
-    # Primary turtle body colors (dark navy family)
-    body_dark: str = "#0B1020"       # Near-black / dark navy
-    body_mid: str = "#1A1F3A"        # Dark navy blue
-    body_light: str = "#2A3F6E"      # Medium blue
+    # Primary turtle body colors (dark green family)
+    body_dark: str = "#0D2818"       # Near-black / dark green
+    body_mid: str = "#1A3D24"        # Medium dark green
+    body_light: str = "#2E7D32"      # Lighter green for body detail
 
-    # Accent colors (blue/cyan palette ONLY)
-    accent_cyan: str = "#00D4FF"     # Bright cyan
-    accent_blue: str = "#0088FF"     # Electric blue
-    accent_deep: str = "#0066AA"     # Deep blue
-    accent_bright: str = "#00EEFF"   # Brighter cyan
+    # Accent colors (green palette ONLY)
+    accent_bright: str = "#4CAF50"   # Bright green accent
+    accent_highlight: str = "#81C784"  # Highlight green
+    accent_pale: str = "#A5D6A7"     # Pale green
+    accent_very_light: str = "#C8E6C9"  # Very light green (thought bubbles, etc.)
 
-    # Eye colors (blue/cyan only)
-    eye_bright: str = "#00FFFF"      # Bright cyan for active eyes
-    eye_dim: str = "#006688"         # Dim blue for inactive eyes
+    # Eye colors (green only)
+    eye_bright: str = "#A5D6A7"      # Pale green for active eyes
+    eye_dim: str = "#2E7D32"         # Green for inactive eyes
 
-    # Special states - ALL blue/cyan only
-    thought_indicator: str = "#00EEFF"   # Bright cyan for planning thought
-    motion_indicator: str = "#00AAFF"    # Blue for executing motion
-    inspect_marker: str = "#00D4FF"      # Cyan for reviewing inspection
-    magnifier: str = "#00D4FF"           # Cyan for verifying magnifier
-    book_glow: str = "#00AAFF"           # Blue for learning glow
-    escalation_mark: str = "#00EEFF"     # Bright cyan for escalation ?
-    scroll_accent: str = "#00D4FF"       # Cyan for completion scroll
+    # Special states - ALL green only
+    thought_indicator: str = "#C8E6C9"   # Very light green for planning thought
+    motion_indicator: str = "#81C784"    # Highlight green for executing motion
+    inspect_marker: str = "#4CAF50"      # Bright green for reviewing inspection
+    magnifier: str = "#4CAF50"           # Bright green for verifying magnifier
+    book_glow: str = "#81C784"           # Highlight green for learning glow
+    escalation_mark: str = "#C8E6C9"     # Very light green for escalation ?
+    scroll_accent: str = "#4CAF50"       # Bright green for completion scroll
 
     # Background/fallback
-    background: str = "#0B1020"      # Same as body_dark
+    background: str = "#0D2818"      # Same as body_dark
     monochrome_fg: str = "#CCCCCC"   # Light gray for monochrome mode
     monochrome_bg: str = "#000000"   # Black for monochrome mode
 
@@ -71,10 +71,10 @@ MONOCHROME_PALETTE = MascotPalette(
     body_dark="#FFFFFF",
     body_mid="#CCCCCC",
     body_light="#999999",
-    accent_cyan="#FFFFFF",
-    accent_blue="#CCCCCC",
-    accent_deep="#999999",
     accent_bright="#FFFFFF",
+    accent_highlight="#CCCCCC",
+    accent_pale="#999999",
+    accent_very_light="#FFFFFF",
     eye_bright="#FFFFFF",
     eye_dim="#999999",
     thought_indicator="#FFFFFF",

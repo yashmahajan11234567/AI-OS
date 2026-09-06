@@ -92,19 +92,19 @@ class TestBuildMascotAssets:
             actual = len(manifest[state]["frames"])
             assert actual == expected, f"{state}: expected {expected} frames, got {actual}"
 
-    def test_dimensions_17x11(self):
-        """All frames should be 17x11 pixels."""
+    def test_dimensions_21x13(self):
+        """All frames should be 21x13 pixels."""
         manifest_path = Path("assets/mascot/generated/manifest.json")
         with open(manifest_path) as f:
             manifest = json.load(f)
 
         for state, data in manifest.items():
             for frame in data["frames"]:
-                assert frame["width"] == 17, f"{state}: width {frame['width']} != 17"
-                assert frame["height"] == 11, f"{state}: height {frame['height']} != 11"
+                assert frame["width"] == 21, f"{state}: width {frame['width']} != 21"
+                assert frame["height"] == 13, f"{state}: height {frame['height']} != 13"
 
-    def test_bytes_per_frame_47(self):
-        """Each frame should be 47 bytes (17*11*2 bits / 8 = 374 bits = 47 bytes)."""
+    def test_bytes_per_frame_69(self):
+        """Each frame should be 69 bytes (21*13*2 bits / 8 = 546 bits = 69 bytes, rounded up)."""
         manifest_path = Path("assets/mascot/generated/manifest.json")
         with open(manifest_path) as f:
             manifest = json.load(f)
@@ -113,7 +113,7 @@ class TestBuildMascotAssets:
             for frame in data["frames"]:
                 # data is hex string, so bytes = len(hex) / 2
                 actual_bytes = len(frame["data"]) // 2
-                assert actual_bytes == 47, f"{state}: {actual_bytes} bytes != 47"
+                assert actual_bytes == 69, f"{state}: {actual_bytes} bytes != 69"
 
     def test_checksums_valid(self):
         """All frames should have valid checksums."""

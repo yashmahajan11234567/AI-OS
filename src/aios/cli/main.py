@@ -135,7 +135,8 @@ def show_startup_screen() -> None:
     if renderer.render_mode != RenderMode.JSON:
         # Print without Rich markup processing since we already have ANSI
         console = Console(force_terminal=True, legacy_windows=False)
-        console.print(startup_output, markup=False)
+        from rich.text import Text
+        console.print(Text.from_ansi(startup_output))
 
 
 if __name__ == "__main__":

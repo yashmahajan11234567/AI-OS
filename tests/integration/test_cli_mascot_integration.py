@@ -373,5 +373,121 @@ class TestTerminalCapabilityDetection:
         assert "status" in data
 
 
+class TestANSIRendering:
+    """Test ANSI escape sequence rendering through Rich."""
+
+    def test_full_mode_ansi_parses_correctly(self):
+        """FULL mode output contains valid ANSI sequences parseable by Rich Text.from_ansi."""
+        from aios.cli.mascot.renderer import MascotRenderer, RenderMode
+        from aios.cli.mascot.animator import SyncMascotAnimator
+        from aios.core.version import __version__
+        from rich.text import Text
+
+        # Force FULL mode to get ANSI output
+        renderer = MascotRenderer(force_mode=RenderMode.FULL)
+        animator = SyncMascotAnimator(renderer)
+
+        startup_output = animator.render_startup(
+            version=__version__,
+            status="RUNNING",
+            health="HEALTHY",
+            mode="OPERATIONAL",
+            autonomy="OFF",
+        )
+
+        # Verify ANSI sequences present
+        assert "\x1b[" in startup_output
+        assert "38;2;" in startup_output or "48;2;" in startup_output
+
+        # Verify Rich can parse the ANSI without error
+        # This is the regression test for the ANSI rendering fix
+        text = Text.from_ansi(startup_output)
+        assert text.plain != ""  # Should have parsed content
+
+    def test_monochrome_mode_no_ansi(self):
+        """MONOCHROME mode output has no ANSI sequences."""
+        from aios.cli.mascot.renderer import MascotRenderer, RenderMode
+        from aios.cli.mascot.animator import SyncMascotAnimator
+        from aios.core.version import __version__
+
+        renderer = MascotRenderer(force_mode=RenderMode.MONOCHROME)
+        animator = SyncMascotAnimator(renderer)
+
+        startup_output = animator.render_startup(
+            version=__version__,
+            status="RUNNING",
+            health="HEALTHY",
+            mode="OPERATIONAL",
+            autonomy="OFF",
+        )
+
+        # No ANSI escape sequences
+        assert "\x1b[" not in startup_output
+
+    def test_fallback_mode_no_ansi(self):
+        """FALLBACK mode output has no ANSI sequences."""
+        from aios.cli.mascot.renderer import MascotRenderer, RenderMode
+        from aios.cli.mascot.animator import SyncMascotAnimator
+        from aios.core.version import __version__
+
+        renderer = MascotRenderer(force_mode=RenderMode.FALLBACK)
+        animator = SyncMascotAnimator(renderer)
+
+        startup_output = animator.render_startup(
+            version=__version__,
+            status="RUNNING",
+            health="HEALTHY",
+            mode="OPERATIONAL",
+            autonomy="OFF",
+        )
+
+        # No ANSI escape sequences
+        assert "\x1b[" not in startup_output
+
+    def test_json_mode_no_ansi(self):
+        """JSON mode output has no ANSI sequences."""
+        from aios.cli.mascot.renderer import MascotRenderer, RenderMode
+        from aios.cli.mascot.animator import SyncMascotAnimator
+        from aios.core.version import __version__
+
+        renderer = MascotRenderer(force_mode=RenderMode.JSON)
+        animator = SyncMascotAnimator(renderer)
+
+        startup_output = animator.render_startup(
+            version=__version__,
+            status="RUNNING",
+            health="HEALTHY",
+            mode="OPERATIONAL",
+            autonomy="OFF",
+        )
+
+        # JSON mode returns empty string for startup
+        assert startup_output == ""
+
+    def test_narrow_mode_has_ansi(self):
+        """NARROW mode output contains ANSI sequences (uses half-block with color)."""
+        from aios.cli.mascot.renderer import MascotRenderer, RenderMode
+        from aios.cli.mascot.animator import SyncMascotAnimator
+        from aios.core.version import __version__
+        from rich.text import Text
+
+        renderer = MascotRenderer(force_mode=RenderMode.NARROW)
+        animator = SyncMascotAnimator(renderer)
+
+        startup_output = animator.render_startup(
+            version=__version__,
+            status="RUNNING",
+            health="HEALTHY",
+            mode="OPERATIONAL",
+            autonomy="OFF",
+        )
+
+        # NARROW mode uses half-block rasterizer with color, has ANSI
+        assert "\x1b[" in startup_output
+        # Verify Rich can parse it
+        text = Text.from_ansi(startup_output)
+        assert text.plain != ""
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

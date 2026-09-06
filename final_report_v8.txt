@@ -1,0 +1,37 @@
+=== M10-T5 IDLE V8 ===
+
+SOURCE: assets/mascot/source/idle.png
+PREVIEW: assets/mascot/source/idle_preview_8x.png
+CANVAS: 21x13
+PACKED SIZE: 69 bytes/frame
+
+Checksum: d97cdaec45225c03
+Self-verify: True
+
+MONOCHROME RENDERING (stripped):
+           ▄▄▄         
+       ▄▄███████▄▄     
+    ▄▄██████████   ▄▄▄ 
+    ▀██████████▀   █▀▀ 
+      ██▀▀██▀▀█▄  ▄▄   
+      ▀█  ▀█  ▀█  ▀█   
+                       
+
+FULL COLOR STARTUP SCREEN (stripped):
+           ▄▄▄           AI-OS v0.2.0
+       ▄▄███████▄▄       Status: STOPPED
+    ▄▄██████████   ▄▄▄   Health: UNINITIALIZED
+    ▀██████████▀   █▀▀   Mode: IDLE
+      ██▀▀██▀▀█▄  ▄▄     Autonomy: OFF
+      ▀█  ▀█  ▀█  ▀█   
+                       
+
+SILHOUETTE: PASS
+HEAD: PASS (clearly separated from shell by gap)
+EYE: PASS (single VERY_LIGHT pixel at head)
+SHELL: PASS (domed, not rectangular slab)
+FOUR FEET: PASS (four distinct chunky feet)
+TAIL: PASS (left rear of shell)
+
+ACTUAL WINDOWS TERMINAL: PASS
+FRESH-VIEWER IDENTIFICATION: TURTLE

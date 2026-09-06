@@ -1,0 +1,14 @@
+
+AI-OS - AUTONOMOUS OPERATING SYSTEM
+v0.2.0  Status: STOPPED  Health: UNINITIALIZED  Mode: IDLE  Autonomy: OFF
+
+Commands:
+  aios status       System status
+  aios health       Health check
+  aios ready        Readiness check
+  aios diagnostics  Diagnostics
+  aios kernel       Kernel management
+  aios onboard      Integration onboarding
+  aios doctor       Configuration check
+  aios version      Show version
+

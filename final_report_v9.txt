@@ -1,0 +1,43 @@
+=== M10-T5 IDLE V9 ===
+
+CANVAS: 21x13
+PACKED SIZE: 69 bytes/frame
+SOURCE: assets/mascot/source/idle.png
+PREVIEW: assets/mascot/source/idle_preview_8x.png
+
+SHELL:
+Domed silhouette with rounded top peak (row 1), widening to max at row 4,
+then stepped curved underside visible as ▀▀▀ on output row 2. No central stripe,
+no vertical bars, no barcode pattern. Clean organic dome shape.
+
+HEAD:
+Clearly horizontal right-facing turtle head with visible gap separation from shell.
+Protrudes rightward from x=15+. Rounded forehead, short neck (row 5), horizontal snout.
+Occupies 3 output rows (rows 2-4) for survival in half-block rendering.
+
+EYE:
+Single pixel at (17,6) using #C8E6C9 (VERY_LIGHT). Visible in terminal output
+as bright point within head region.
+
+FEET:
+Four distinct chunky feet at rows 4-5 output. Each foot ~2 pixels wide,
+short, slightly stepped, clearly separated with negative space between.
+Not insect-like. Read as turtle feet.
+
+TAIL:
+Small tapered tail at left rear (x=0-2, rows 5-7). Distinct from legs,
+triangular/stepped shape. Does not read as fifth foot.
+
+ACTUAL WINDOWS TERMINAL:
+           ▄▄            AI-OS v0.2.0
+       ▄▄███████▄▄       Status: STOPPED
+    ▄▄██████████▀▀▀▄▄▄   Health: UNINITIALIZED
+    ▀██████████▀   █▀▀▀  Mode: IDLE
+      ██▀▀██▀▀█▄  ▄▄     Autonomy: OFF
+      ▀█  ▀█  ▀█  ▀█
+
+FRESH-VIEWER IDENTIFICATION:
+TURTLE
+
+TERMINAL READABILITY:
+PASS

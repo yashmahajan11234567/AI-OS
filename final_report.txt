@@ -1,0 +1,32 @@
+=== M10-T5 IDLE V7 ===
+
+SOURCE: assets/mascot/source/idle.png
+PREVIEW: assets/mascot/source/idle_preview_8x.png
+CANVAS: 21x13
+PACKED SIZE: 69 bytes/frame
+
+BLUEPRINT MATCH: YES
+
+HEAD: RIGHT
+TAIL: LEFT
+EYE: VISIBLE
+SHELL: COHERENT DOME
+LEGS: FOUR CHUNKY FEET
+
+ACTUAL WINDOWS TERMINAL:
+  FULL MODE: Renders with ANSI truecolor (half-block chars)
+  MONOCHROME: Renders with Unicode half-blocks, no color
+  NARROW: Cropped to ~20 chars width
+  FALLBACK: Text [TURTLE] IDLE
+
+TERMINAL READABILITY (monochrome stripped):
+                       
+       ▄▄██████▄▄      
+     ▄████████████     
+   ▄██████████████▀███▄
+  ▀▀▀▀██▀██▀▀██▀█▄     
+      ██ ██  ██ ██     
+                       
+
+FRESH VIEWER: TURTLE
+TERMINAL READABILITY: PASS
