@@ -280,16 +280,33 @@ class MascotRenderer:
         # Get IDLE mascot frame
         mascot_text = self.render_static(MascotState.IDLE)
 
-        # Build status lines with aligned labels
-        status_lines = [
-            f"{APP_NAME} v{version}",
-            "",
-            f"  Status:    {status}",
-            f"  Health:    {health}",
-            f"  Mode:      {mode}",
-            f"  Autonomy:  {autonomy}",
-            "",
-        ]
+        # Common ANSI helpers
+        import re
+        ansi_escape = re.compile(r'\x1b\[[0-9;]*m')
+        green_fg = "\x1b[38;2;76;175;80m"
+        reset = "\x1b[0m"
+
+        # Build status lines with optional green labels
+        if mode_type == RenderMode.MONOCHROME:
+            status_lines = [
+                f"{APP_NAME} v{version}",
+                "",
+                f"  Status:    {status}",
+                f"  Health:    {health}",
+                f"  Mode:      {mode}",
+                f"  Autonomy:  {autonomy}",
+                "",
+            ]
+        else:
+            status_lines = [
+                f"{green_fg}{APP_NAME} v{version}{reset}",
+                "",
+                f"  {green_fg}Status:{reset}    {status}",
+                f"  {green_fg}Health:{reset}    {health}",
+                f"  {green_fg}Mode:{reset}      {mode}",
+                f"  {green_fg}Autonomy:{reset}  {autonomy}",
+                "",
+            ]
 
         mascot_lines = mascot_text.split('\n')
         max_mascot_lines = len(mascot_lines)
@@ -300,63 +317,73 @@ class MascotRenderer:
         bottom_padding = status_padding - top_padding
         padded_status = ([""] * top_padding) + status_lines + ([""] * bottom_padding)
 
-        # Measure visible width (strip ANSI sequences from mascot lines)
-        import re
-        ansi_escape = re.compile(r'\x1b\[[0-9;]*m')
+        # Measure visible width (strip ANSI sequences)
         mascot_visible_width = max(
             (len(ansi_escape.sub("", line)) for line in mascot_lines),
             default=0,
         )
         status_visible_width = max(
-            (len(line) for line in padded_status),
+            (len(ansi_escape.sub("", line)) for line in padded_status),
             default=0,
         )
 
-        # Compute visible widths
-        mascot_visible_width = max(
-            (len(ansi_escape.sub("", line)) for line in mascot_lines),
-            default=0,
-        )
-        status_visible_width = max(
-            (len(line) for line in padded_status),
-            default=0,
-        )
-
-        # Layout: [left_border][mascot][pad][divider][status_gap][status][right_border]
-        left_pad = 1
+        # Layout: [left_border][mascot][between_gap][divider][status_gap][status][right_padding][right_border]
         between_gap = 1
         status_gap = 2
-        right_pad = 1
-        content_width = mascot_visible_width + between_gap + 1 + status_gap + status_visible_width
-        box_width = left_pad + content_width + right_pad
+        right_padding = 8
+        content_width = mascot_visible_width + between_gap + 1 + status_gap + status_visible_width + right_padding
+        box_width = content_width
 
-        # Green ANSI styles - foreground only for thin lines
-        green_fg = "\x1b[38;2;76;175;80m"
-        reset = "\x1b[0m"
-
-        # Box borders - thin single-character lines
-        top_border = f"{green_fg}┌{'─' * box_width}┐{reset}"
-        bottom_border = f"{green_fg}└{'─' * box_width}┘{reset}"
-        left_border = f"{green_fg}│{reset}"
-        right_border = f"{green_fg}│{reset}"
-        divider = f"{green_fg}│{reset}"
+        # Box borders
+        if mode_type == RenderMode.MONOCHROME:
+            top_border = f"┌{'─' * box_width}┐"
+            bottom_border = f"└{'─' * box_width}┘"
+            left_border = "│"
+            right_border = "│"
+            divider = "│"
+        else:
+            top_border = f"{green_fg}┌{'─' * box_width}┐{reset}"
+            bottom_border = f"{green_fg}└{'─' * box_width}┘{reset}"
+            left_border = f"{green_fg}│{reset}"
+            right_border = f"{green_fg}│{reset}"
+            divider = f"{green_fg}│{reset}"
 
         result = [top_border]
         for i in range(max_mascot_lines):
             mascot_line = mascot_lines[i] if i < len(mascot_lines) else ""
             status_line = padded_status[i] if i < len(padded_status) else ""
 
-            # Build row: keep colored mascot intact, append divider + status
-            mascot_visible = ansi_escape.sub("", mascot_line)
-            right_content = (
-                " " * between_gap
+            # Build plain layout for correct width
+            plain_mascot = ansi_escape.sub("", mascot_line)
+            plain_status = ansi_escape.sub("", status_line)
+            plain_content = (
+                plain_mascot
+                + " " * between_gap
                 + "│"
                 + " " * status_gap
-                + status_line
+                + plain_status
             )
-            right_content = right_content.ljust(content_width - len(mascot_visible))
+            plain_content = plain_content.ljust(content_width)
 
-            row = left_border + mascot_line + right_content + right_border
+            if mode_type == RenderMode.MONOCHROME:
+                row_content = plain_content
+            else:
+                # Overlay colored mascot onto plain layout
+                if plain_mascot and plain_content.startswith(plain_mascot):
+                    row_content = mascot_line + plain_content[len(plain_mascot):]
+                else:
+                    row_content = plain_content
+
+                # Overlay colored status labels
+                if plain_status:
+                    status_str_start = len(mascot_line) + between_gap + 1 + status_gap
+                    row_content = (
+                        row_content[:status_str_start]
+                        + status_line
+                        + row_content[status_str_start + len(plain_status):]
+                    )
+
+            row = left_border + row_content + right_border
             result.append(row)
         result.append(bottom_border)
 

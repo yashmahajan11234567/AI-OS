@@ -90,7 +90,7 @@ def onboard(ctx: typer.Context):
 def show_startup_screen() -> None:
     """Show AI-OS startup screen with cyber turtle mascot and status."""
     # Create renderer and animator
-    renderer = MascotRenderer()
+    renderer = MascotRenderer(force_mode=RenderMode.FULL)
     animator = SyncMascotAnimator(renderer)
     formatter = create_formatter()
 
