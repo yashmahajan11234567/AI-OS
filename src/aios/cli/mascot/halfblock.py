@@ -67,6 +67,10 @@ class PaletteColors:
     accent_very_light_fg: str = "\x1b[38;2;200;230;201m"  # #C8E6C9 - very light green
     accent_very_light_bg: str = "\x1b[48;2;200;230;201m"
 
+    # Plastron colors - yellow
+    plastron_fg: str = "\x1b[38;2;184;176;72m"  # #B8B048 - yellow plastron
+    plastron_bg: str = "\x1b[48;2;184;176;72m"
+
     # Reset
     reset: str = "\x1b[0m"
 
@@ -86,6 +90,7 @@ class PaletteColors:
                 accent_highlight_fg="", accent_highlight_bg="",
                 accent_pale_fg="", accent_pale_bg="",
                 accent_very_light_fg="", accent_very_light_bg="",
+                plastron_fg="", plastron_bg="",
                 reset="",
                 mono_fg="", mono_bg="",
             )
@@ -129,13 +134,15 @@ def get_color_for_pixel(code: int, palette: PaletteColors, prefer_fg: bool = Tru
     """
     if code == 0:  # transparent
         return ("", "")
-    elif code == 1:  # body
+    elif code == 1:  # body/shell
         # Use mid-tone body color for good visibility
         return (palette.body_mid_fg, palette.body_mid_bg)
-    elif code == 2:  # accent
+    elif code == 2:  # accent (head/legs/tail)
         return (palette.accent_bright_fg, palette.accent_bright_bg)
+    elif code == 3:  # plastron (yellow)
+        return (palette.plastron_fg, palette.plastron_bg)
     else:
-        return ("", "")  # reserved - should not happen
+        return ("", "")  # invalid
 
 
 # =============================================================================

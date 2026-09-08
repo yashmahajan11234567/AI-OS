@@ -35,26 +35,50 @@ except ImportError:
 # CONFIGURATION
 # =============================================================================
 
+# Semantic pixel codes
+SEMANTIC_BODY = 0b01       # 01 = shell/body
+SEMANTIC_ACCENT = 0b10     # 10 = head/legs/tail
+SEMANTIC_PLASTRON = 0b11  # 11 = yellow plastron
+SEMANTIC_TRANSPARENT = 0b00  # 00 = transparent
+
 # Palette mapping: RGB -> semantic code
-# Dark green body colors -> 01 (body)
-# Green accent colors -> 10 (accent)
+# Shell colors -> 01 (body)
+# Head/legs/tail green -> 10 (accent)
+# Yellow plastron -> 11
 # Transparent -> 00
-# Anything else -> error
 
 BODY_COLORS = {
-    (0x0D, 0x28, 0x18),  # #0D2818 - dark green / near-black body
-    (0x1A, 0x3D, 0x24),  # #1A3D24 - medium dark green
-    (0x2E, 0x7D, 0x32),  # #2E7D32 - lighter green for body detail
+    (0x23, 0x5D, 0x2D),  # #235D2D - reference shell dark
+    (0x0D, 0x28, 0x18),  # #0D2818 - dark shell
+    (0x1A, 0x3D, 0x24),  # #1A3D24 - medium shell
+    (0x2E, 0x7D, 0x32),  # #2E7D32 - light shell
+    (0x69, 0x6B, 0x3A),  # #696B3A - reference shell
+    (0x6A, 0x6B, 0x41),  # #6A6B41 - reference shell light
+    (0x6D, 0xAF, 0x4B),  # #6DAF4B - reference leg
+    (0x8C, 0xC2, 0x68),  # #8CC268 - reference tail
+}
+
+PLASTRON_COLORS = {
+    (0xB8, 0xB0, 0x48),  # #B8B048 - yellow plastron
+    (0xB9, 0xB4, 0x4E),  # #B9B44E - reference plastron
 }
 
 ACCENT_COLORS = {
+    (0x8C, 0xC2, 0x4A),  # #8CC24A - reference head/feet light green
+    (0x75, 0xBE, 0x52),  # #75BE52 - very bright green
     (0x4C, 0xAF, 0x50),  # #4CAF50 - bright green accent
     (0x81, 0xC7, 0x84),  # #81C784 - highlight green
     (0xA5, 0xD6, 0xA7),  # #A5D6A7 - pale green
-    (0xC8, 0xE6, 0xC9),  # #C8E6C9 - very light green (thought bubbles, etc.)
+    (0xC8, 0xE6, 0xC9),  # #C8E6C9 - very light green
 }
 
-RESERVED_CODE = 0b11  # 11 = reserved, should never appear in valid source
+# Eye/outline colors map to transparent (shows background as eye)
+EYE_COLORS = {
+    (0x18, 0x10, 0x28),  # #181028 - dark eye
+    (0, 0, 0),           # pure black -> transparent
+}
+
+RESERVED_CODE = None  # All codes used
 
 # Target dimensions (new: 21x13)
 TARGET_WIDTH = 21
@@ -154,20 +178,24 @@ def classify_pixel(r: int, g: int, b: int, a: int) -> int:
 
     Returns:
         0 = transparent
-        1 = body
-        2 = accent
-        3 = reserved (error)
+        1 = body (shell)
+        2 = accent (head/legs/tail)
+        3 = plastron (yellow)
     """
     if a == 0:
         return 0  # transparent
 
     rgb = (r, g, b)
+    if rgb in EYE_COLORS:
+        return 0  # eye/outline -> transparent
     if rgb in BODY_COLORS:
         return 1  # body
+    if rgb in PLASTRON_COLORS:
+        return 3  # plastron
     if rgb in ACCENT_COLORS:
         return 2  # accent
 
-    # Unknown color - check if close to body or accent
+    # Unknown color - check closest palette color
     closest = None
     min_dist = float('inf')
 
@@ -177,14 +205,21 @@ def classify_pixel(r: int, g: int, b: int, a: int) -> int:
             min_dist = dist
             closest = 1
 
+    for plastron_rgb in PLASTRON_COLORS:
+        dist = (r - plastron_rgb[0])**2 + (g - plastron_rgb[1])**2 + (b - plastron_rgb[2])**2
+        if dist < min_dist:
+            min_dist = dist
+            closest = 3
+
     for accent_rgb in ACCENT_COLORS:
         dist = (r - accent_rgb[0])**2 + (g - accent_rgb[1])**2 + (b - accent_rgb[2])**2
         if dist < min_dist:
             min_dist = dist
             closest = 2
 
-    if min_dist < 1000:  # Tolerance threshold
-        print(f"WARNING: Pixel ({r},{g},{b}) not in exact palette, classified as {'body' if closest==1 else 'accent'} (dist={min_dist})", file=sys.stderr)
+    if closest is not None and min_dist < 1000:
+        name = {1: 'body', 3: 'plastron', 2: 'accent'}[closest]
+        print(f"WARNING: Pixel ({r},{g},{b}) not in exact palette, classified as {name} (dist={min_dist})", file=sys.stderr)
         return closest
 
     raise ValueError(f"Unknown pixel color: RGB=({r},{g},{b}), alpha={a}. Not in allowed palette.")
@@ -290,8 +325,6 @@ def process_png(png_path: Path, target_width: int, target_height: int) -> List[L
         for x in range(cw):
             r, g, b, a = canvas.getpixel((x, y))
             code = classify_pixel(r, g, b, a)
-            if code == RESERVED_CODE:
-                raise ValueError(f"Reserved pixel code (11) found at ({x},{y})")
             row.append(code)
         pixels.append(row)
 

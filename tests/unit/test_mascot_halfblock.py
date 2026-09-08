@@ -60,12 +60,12 @@ class TestGetColorForPixel:
         assert fg == palette.accent_bright_fg
         assert bg == palette.accent_bright_bg
 
-    def test_reserved_returns_empty(self):
-        """Reserved pixel returns empty strings."""
+    def test_plastron_returns_yellow(self):
+        """Plastron pixel returns yellow fg/bg."""
         palette = PaletteColors()
         fg, bg = get_color_for_pixel(3, palette)
-        assert fg == ""
-        assert bg == ""
+        assert fg == palette.plastron_fg
+        assert bg == palette.plastron_bg
 
     def test_monochrome_mode_returns_empty(self):
         """Monochrome palette returns empty color codes."""
@@ -161,7 +161,7 @@ class TestRenderJson:
         data = json.loads(result)
         assert data["state"] == "IDLE"
         assert data["frame"] == 0
-        assert data["dimensions"] == {"width": 21, "height": 13}
+        assert data["dimensions"] == {"width": frame.width, "height": frame.height}
 
     def test_render_json_without_frame_data(self):
         """JSON output without frame data should have null dimensions."""

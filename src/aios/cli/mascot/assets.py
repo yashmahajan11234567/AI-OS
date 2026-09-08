@@ -51,10 +51,10 @@ class MascotAssets:
     _FRAMES: Dict[str, List[_FrameData]] = {
         "IDLE": [
             _FrameData(
-                width=21,
-                height=13,
-                data=bytes.fromhex("00000000000000054000000015550000005555540000555555400015555550000555555a000555555a6800555555400028282828000a0a0a0a000080808080000000000000"),
-                checksum="5dfe428e93fe0e3d",
+                width=32,
+                height=20,
+                data=bytes.fromhex("000000000000000000000000000000000000000000000000000000550000000000000055000000000000055550aa00000000055550aa00000000555555a0a0000000555555a0a0000000555555a0a0000000555555a0a000000af5555faa0000000af5555faa00000000affffa0000000000affffa0000000000aa00aa0000000000aa00aa000000000040000400000000000000000000000000000000000000"),
+                checksum="b2e9f4f090b6911b",
             ),
         ],
         "PLANNING": [
@@ -219,7 +219,7 @@ class MascotAssets:
 
     # Canonical dimensions (all frames same per state)
     _DIMENSIONS = {
-        "IDLE": (21, 13),
+        "IDLE": (32, 20),
         "PLANNING": (21, 13),
         "EXECUTING": (21, 13),
         "REVIEWING": (21, 13),

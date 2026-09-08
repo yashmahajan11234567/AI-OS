@@ -59,15 +59,15 @@ class TestMascotAssets:
                 assert len(frame.data) == expected_bytes, \
                     f"Frame data length mismatch for {state}: got {len(frame.data)}, expected {expected_bytes}"
 
-    def test_reserved_pixel_code_rejected(self):
-        """Reserved pixel code (11) should not appear in any frame."""
+    def test_pixel_codes_valid(self):
+        """Pixel codes must be valid semantic codes (0-3)."""
         for state in self.STATES:
             frames = MascotAssets.get_frames(state)
             for frame in frames:
                 pixels = frame.unpack()
                 for row in pixels:
                     for pixel in row:
-                        assert pixel != 3, f"Reserved pixel code (11) found in {state}"
+                        assert pixel in (0, 1, 2, 3), f"Invalid pixel code {pixel} found in {state}"
 
     def test_checksum_deterministic(self):
         """Checksum must be deterministic for each frame."""
@@ -155,12 +155,12 @@ class TestFrameDataInternals:
             assert len(row) == frame.width
 
     def test_unpack_values_valid(self):
-        """Unpacked pixel values must be valid semantic codes (0, 1, 2)."""
+        """Unpacked pixel values must be valid semantic codes (0, 1, 2, 3)."""
         frame = MascotAssets.get_frame("IDLE", 0)
         pixels = frame.unpack()
         for row in pixels:
             for pixel in row:
-                assert pixel in (0, 1, 2), f"Invalid pixel code: {pixel}"
+                assert pixel in (0, 1, 2, 3), f"Invalid pixel code: {pixel}"
 
     def test_verify_method(self):
         """verify() method should validate checksum."""

@@ -92,28 +92,51 @@ class TestBuildMascotAssets:
             actual = len(manifest[state]["frames"])
             assert actual == expected, f"{state}: expected {expected} frames, got {actual}"
 
-    def test_dimensions_21x13(self):
-        """All frames should be 21x13 pixels."""
+    def test_dimensions_correct(self):
+        """Frames should have correct dimensions per state."""
         manifest_path = Path("assets/mascot/generated/manifest.json")
         with open(manifest_path) as f:
             manifest = json.load(f)
 
-        for state, data in manifest.items():
-            for frame in data["frames"]:
-                assert frame["width"] == 21, f"{state}: width {frame['width']} != 21"
-                assert frame["height"] == 13, f"{state}: height {frame['height']} != 13"
+        expected_dims = {
+            "IDLE": (32, 20),
+            "PLANNING": (21, 13),
+            "EXECUTING": (21, 13),
+            "REVIEWING": (21, 13),
+            "VERIFYING": (21, 13),
+            "LEARNING": (21, 13),
+            "ESCALATING": (21, 13),
+            "COMPLETE": (21, 13),
+        }
 
-    def test_bytes_per_frame_69(self):
-        """Each frame should be 69 bytes (21*13*2 bits / 8 = 546 bits = 69 bytes, rounded up)."""
+        for state, data in manifest.items():
+            expected_w, expected_h = expected_dims[state]
+            for frame in data["frames"]:
+                assert frame["width"] == expected_w, f"{state}: width {frame['width']} != {expected_w}"
+                assert frame["height"] == expected_h, f"{state}: height {frame['height']} != {expected_h}"
+
+    def test_bytes_per_frame_correct(self):
+        """Each frame should have correct byte count for its dimensions."""
         manifest_path = Path("assets/mascot/generated/manifest.json")
         with open(manifest_path) as f:
             manifest = json.load(f)
 
+        expected_bytes = {
+            "IDLE": 160,   # 32*20*2/8 = 160
+            "PLANNING": 69,  # 21*13*2/8 = 68.25 -> 69
+            "EXECUTING": 69,
+            "REVIEWING": 69,
+            "VERIFYING": 69,
+            "LEARNING": 69,
+            "ESCALATING": 69,
+            "COMPLETE": 69,
+        }
+
         for state, data in manifest.items():
+            expected = expected_bytes[state]
             for frame in data["frames"]:
-                # data is hex string, so bytes = len(hex) / 2
                 actual_bytes = len(frame["data"]) // 2
-                assert actual_bytes == 69, f"{state}: {actual_bytes} bytes != 69"
+                assert actual_bytes == expected, f"{state}: {actual_bytes} bytes != {expected}"
 
     def test_checksums_valid(self):
         """All frames should have valid checksums."""
