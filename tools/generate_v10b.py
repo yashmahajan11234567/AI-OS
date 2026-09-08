@@ -1,3 +1,6 @@
+
+
+
 #!/usr/bin/env python3
 """
 M10-T5 V10b - Half-block separation focus

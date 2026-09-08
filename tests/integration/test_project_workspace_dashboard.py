@@ -446,12 +446,13 @@ def test_integrations_local_endpoint_integrations_present(kernel):
 def test_existing_dashboard_pages_still_present(kernel, project_service):
     svc = _make_dashboard(kernel, None, project_service)
     pages = svc.get_all_pages()["pages"]
-    # All prior M13 pages remain; the two new pages are additive.
+    # All prior M13 pages remain; the two new pages + observability are additive.
     for p in ("planning_chat", "resource_onboarding", "project_execution", "knowledge_history", "system_health"):
         assert p in pages
     assert "project_workspace" in pages
     assert "integrations_credentials" in pages
-    assert len(pages) == 7
+    assert "system_observability" in pages
+    assert len(pages) == 8
 
 
 def test_all_pages_declare_aios_sole_authority(kernel, project_service):

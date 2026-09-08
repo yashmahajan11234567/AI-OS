@@ -51,6 +51,7 @@
   <button data-page="knowledge_history">5 · Knowledge / History</button>
   <button data-page="integrations_credentials">6 · Integrations &amp; Credentials</button>
   <button data-page="system_health">7 · System / Health</button>
+  <button data-page="system_observability">8 · System / Observability</button>
 </nav>
 <main>
   <div class="note" id="meta"></div>
@@ -62,6 +63,7 @@
   <section class="page" id="page-knowledge_history"></section>
   <section class="page" id="page-integrations_credentials"></section>
   <section class="page" id="page-system_health"></section>
+  <section class="page" id="page-system_observability"></section>
 </main>
 <div id="toast"></div>
 
@@ -93,6 +95,7 @@ function render() {
   renderKnowledge();
   renderIntegrations();
   renderHealth();
+  renderObservability();
 }
 
 function renderPlanning() {
@@ -260,6 +263,73 @@ function renderHealth() {
   const viol = (p.terminal_contract_violations||[]).map(v => `<div class="row"><span class="k">violation</span><span class="v bad">${escapeHtml(v||'')}</span></div>`).join('');
   html += card("Terminal-Contract Violations", viol || "<div class='note'>none</div>");
   document.getElementById('page-system_health').innerHTML = html;
+}
+
+function renderObservability() {
+  const p = DATA.pages.system_observability;
+  if (!p) {
+    document.getElementById('page-system_observability').innerHTML =
+      card("System Observability", "<div class='note'>Observability data unavailable</div>");
+    return;
+  }
+
+  let html = "";
+
+  // A. Metrics
+  const metrics = (p.metrics || []).map(m =>
+    card(m.name,
+      kv("type", m.metric_type) +
+      kv("value", m.value) +
+      kv("unit", m.unit || "—") +
+      kv("labels", JSON.stringify(m.labels || {}))
+    )
+  ).join('');
+  html += card("Metrics (" + (p.metrics?.length || 0) + ")", metrics || "<div class='note'>No metrics recorded</div>");
+
+  // B. Trace Spans
+  const spans = (p.spans || []).map(s =>
+    card(s.name,
+      kv("span_id", s.span_id) +
+      kv("trace_id", s.trace_id) +
+      kv("parent_span_id", s.parent_span_id || "—") +
+      kv("attributes", JSON.stringify(s.attributes || {}))
+    )
+  ).join('');
+  html += card("Trace Spans (" + (p.spans?.length || 0) + ")", spans || "<div class='note'>No active spans</div>");
+
+  // C. Health
+  const h = p.health || {};
+  let healthHtml = card("Overall Health",
+    kv("status", h.overall || "UNKNOWN") +
+    kv("total_checks", h.total_checks || 0) +
+    kv("healthy", h.healthy_checks || 0) +
+    kv("degraded", h.degraded_checks || 0) +
+    kv("unhealthy", h.unhealthy_checks || 0) +
+    kv("unknown", h.unknown_checks || 0)
+  );
+  const components = Object.entries(h.components || {}).map(([name, status]) =>
+    `<div class="row"><span class="k">${escapeHtml(name)}</span><span class="v ${status==='HEALTHY'?'ok':status==='DEGRADED'?'warn':status==='UNHEALTHY'?'bad':''}">${escapeHtml(status)}</span></div>`
+  ).join('');
+  healthHtml += card("Component Health (" + Object.keys(h.components || {}).length + ")",
+    components || "<div class='note'>No component health data</div>");
+  if (h.note) {
+    healthHtml += `<div class="note">${escapeHtml(h.note)}</div>`;
+  }
+  html += healthHtml;
+
+  // D. Recent Events
+  const events = (p.recent_events || []).slice(0, 50).map(e =>
+    card(e.event_type,
+      kv("timestamp", e.timestamp) +
+      kv("source", e.source) +
+      kv("correlation_id", e.correlation_id || "—") +
+      kv("causation_id", e.causation_id || "—") +
+      kv("payload", JSON.stringify(e.payload_summary || {}))
+    )
+  ).join('');
+  html += card("Recent Events (" + (p.recent_events?.length || 0) + ")", events || "<div class='note'>No recent events</div>");
+
+  document.getElementById('page-system_observability').innerHTML = html;
 }
 
 async function act(action, params) {

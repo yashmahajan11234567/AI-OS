@@ -99,7 +99,7 @@ def _make_service(kernel=None, security=None, event_bus=None, security_manager=N
 
 
 def _all_page_names() -> list[str]:
-    # M13 base pages + M14-T2 additions (Project Workspace, Integrations & Credentials).
+    # M13 base pages + M14-T2 additions (Project Workspace, Integrations & Credentials) + M10-T6 Observability.
     return [
         "planning_chat",
         "resource_onboarding",
@@ -108,6 +108,7 @@ def _all_page_names() -> list[str]:
         "system_health",
         "project_workspace",
         "integrations_credentials",
+        "system_observability",
     ]
 
 

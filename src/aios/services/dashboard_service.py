@@ -34,6 +34,8 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any, Optional
 
+from aios.core.observability_manager import MetricRecord, MetricType, SpanRecord, get_observability_manager
+from aios.core.health_manager import HealthStatus, get_health_manager
 from aios.core.security_manager import SecurityDecision
 from aios.events.core.bus import EventBus, EventType
 from aios.events.core.event import Event
@@ -523,11 +525,98 @@ class DashboardService(BaseService):
         }
 
     # ============================================================
+    # PAGE 8 — System / Observability
+    # ============================================================
+
+    def get_system_observability(self) -> dict[str, Any]:
+        """Read-only view of AI-OS internal observability data.
+
+        Surfaces existing telemetry collected by ObservabilityManager (metrics,
+        trace spans), HealthManager (component health), and EventBus (recent events).
+        This page is purely observational — it never mutates state.
+        """
+        metrics: list[dict[str, Any]] = []
+        spans: list[dict[str, Any]] = []
+        health: dict[str, Any] = {}
+        events: list[dict[str, Any]] = []
+
+        # A. Metrics from ObservabilityManager
+        try:
+            om = get_observability_manager()
+            if om.is_initialized:
+                for rec in om.get_metrics():
+                    metrics.append({
+                        "name": rec.name,
+                        "metric_type": rec.metric_type.value,
+                        "value": rec.value,
+                        "unit": rec.unit,
+                        "labels": dict(rec.labels),
+                        # timestamp not directly available on MetricRecord; could be derived from event if needed
+                    })
+        except Exception:  # noqa: BLE001 — defensive read; ObservabilityManager may not be initialized
+            metrics = []
+
+        # B. Trace spans from ObservabilityManager
+        try:
+            om = get_observability_manager()
+            if om.is_initialized:
+                for span in om.get_spans():
+                    spans.append({
+                        "span_id": span.span_id,
+                        "name": span.name,
+                        "trace_id": span.trace_id,
+                        "parent_span_id": span.parent_span_id,
+                        "attributes": dict(span.attributes),
+                        # start_time/end_time/duration not on SpanRecord; end_span removes the span
+                    })
+        except Exception:  # noqa: BLE001
+            spans = []
+
+        # C. Health from HealthManager
+        try:
+            hm = get_health_manager()
+            if hm.is_initialized:
+                health = hm.get_all_health()
+            else:
+                health = {"overall": "UNKNOWN", "components": {}, "note": "HealthManager not initialized"}
+        except Exception:  # noqa: BLE001
+            health = {"overall": "UNKNOWN", "components": {}, "note": "HealthManager unavailable"}
+
+        # D. Recent events from EventBus
+        try:
+            if self._event_bus is not None:
+                recent_events = self._event_bus.getRecentEvents(limit=100)
+                for ev in recent_events:
+                    # Skip sensitive event types that may contain credentials/secrets
+                    if ev.eventType.name.startswith("SECURITY_") or ev.eventType.name.startswith("CREDENTIAL_"):
+                        continue
+                    events.append({
+                        "event_type": ev.eventType.name,
+                        "timestamp": ev.timestamp.isoformat() if hasattr(ev, "timestamp") and ev.timestamp else "unknown",
+                        "source": getattr(ev.source, "component_name", "unknown") if ev.source else "unknown",
+                        "correlation_id": str(ev.correlationId) if ev.correlationId else None,
+                        "causation_id": str(ev.causationId) if ev.causationId else None,
+                        "payload_summary": _summarize_payload(ev.payload.to_dict() if hasattr(ev.payload, "to_dict") else ev.payload),
+                    })
+        except Exception:  # noqa: BLE001
+            events = []
+
+        return {
+            "page": "system_observability",
+            "authority": "aios_sole",
+            "metrics": metrics,
+            "spans": spans,
+            "health": health,
+            "recent_events": events,
+            "read_only": True,
+        }
+
+    # ============================================================
     # Aggregated snapshot for frontend
     # ============================================================
 
     def get_all_pages(self) -> dict[str, Any]:
-        """All seven read-only page bundles in one call."""
+        """All eight read-only page bundles in one call."""
         return {
             "generated_at": self._now(),
             "authority_model": "aios_sole_authority",
@@ -539,6 +628,7 @@ class DashboardService(BaseService):
                 "system_health": self.get_system_health(),
                 "project_workspace": self.get_project_workspace(),
                 "integrations_credentials": self.get_integrations_credentials(),
+                "system_observability": self.get_system_observability(),
             },
         }
 
@@ -928,6 +1018,38 @@ _INTEGRATION_INVENTORY: dict[str, dict[str, Any]] = {
         "requires_local_endpoint": False,
     },
 }
+
+
+def _summarize_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    """Create a safe summary of an event payload, excluding sensitive fields.
+
+    Never exposes secrets, tokens, credentials, or internal security material.
+    """
+    if not isinstance(payload, dict):
+        return {"type": type(payload).__name__}
+
+    # Fields that may contain sensitive data and should be excluded
+    sensitive_keys = {
+        "token", "secret", "password", "key", "credential", "auth",
+        "api_key", "access_token", "refresh_token", "client_secret",
+        "private_key", "certificate", "signature", "hash"
+    }
+
+    summary = {}
+    for k, v in payload.items():
+        kl = k.lower()
+        if any(s in kl for s in sensitive_keys):
+            summary[k] = "[REDACTED]"
+        elif isinstance(v, dict):
+            summary[k] = _summarize_payload(v)
+        elif isinstance(v, list):
+            summary[k] = f"[list:{len(v)}]"
+        elif isinstance(v, str) and len(v) > 100:
+            summary[k] = v[:100] + "..."
+        else:
+            summary[k] = v
+
+    return summary
 
 
 def _infer_credential_configured(
