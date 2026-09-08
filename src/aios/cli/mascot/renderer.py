@@ -277,31 +277,90 @@ class MascotRenderer:
         if mode_type == RenderMode.FALLBACK:
             return self._render_startup_fallback(version, status, health, mode, autonomy)
 
-        # Build startup screen using half-block rasterizer
         # Get IDLE mascot frame
         mascot_text = self.render_static(MascotState.IDLE)
 
-        # Build status lines
-        lines = mascot_text.split('\n')
-
-        # Add status panel to the right of mascot
+        # Build status lines with aligned labels
         status_lines = [
-            f"  {APP_NAME} v{version}",
-            f"  Status: {status}",
-            f"  Health: {health}",
-            f"  Mode: {mode}",
-            f"  Autonomy: {autonomy}",
+            f"{APP_NAME} v{version}",
+            "",
+            f"  Status:    {status}",
+            f"  Health:    {health}",
+            f"  Mode:      {mode}",
+            f"  Autonomy:  {autonomy}",
+            "",
         ]
 
-        # Combine mascot with status
-        max_mascot_lines = len(lines)
-        result_lines = []
-        for i in range(max(max_mascot_lines, len(status_lines))):
-            mascot_line = lines[i] if i < max_mascot_lines else ""
-            status_line = status_lines[i] if i < len(status_lines) else ""
-            result_lines.append(f"{mascot_line}{status_line}")
+        mascot_lines = mascot_text.split('\n')
+        max_mascot_lines = len(mascot_lines)
 
-        return '\n'.join(result_lines)
+        # Vertically center status relative to mascot
+        status_padding = max(0, max_mascot_lines - len(status_lines))
+        top_padding = status_padding // 2
+        bottom_padding = status_padding - top_padding
+        padded_status = ([""] * top_padding) + status_lines + ([""] * bottom_padding)
+
+        # Measure visible width (strip ANSI sequences from mascot lines)
+        import re
+        ansi_escape = re.compile(r'\x1b\[[0-9;]*m')
+        mascot_visible_width = max(
+            (len(ansi_escape.sub("", line)) for line in mascot_lines),
+            default=0,
+        )
+        status_visible_width = max(
+            (len(line) for line in padded_status),
+            default=0,
+        )
+
+        # Compute visible widths
+        mascot_visible_width = max(
+            (len(ansi_escape.sub("", line)) for line in mascot_lines),
+            default=0,
+        )
+        status_visible_width = max(
+            (len(line) for line in padded_status),
+            default=0,
+        )
+
+        # Layout: [left_border][mascot][pad][divider][status_gap][status][right_border]
+        left_pad = 1
+        between_gap = 1
+        status_gap = 2
+        right_pad = 1
+        content_width = mascot_visible_width + between_gap + 1 + status_gap + status_visible_width
+        box_width = left_pad + content_width + right_pad
+
+        # Green ANSI styles - foreground only for thin lines
+        green_fg = "\x1b[38;2;76;175;80m"
+        reset = "\x1b[0m"
+
+        # Box borders - thin single-character lines
+        top_border = f"{green_fg}┌{'─' * box_width}┐{reset}"
+        bottom_border = f"{green_fg}└{'─' * box_width}┘{reset}"
+        left_border = f"{green_fg}│{reset}"
+        right_border = f"{green_fg}│{reset}"
+        divider = f"{green_fg}│{reset}"
+
+        result = [top_border]
+        for i in range(max_mascot_lines):
+            mascot_line = mascot_lines[i] if i < len(mascot_lines) else ""
+            status_line = padded_status[i] if i < len(padded_status) else ""
+
+            # Build row: keep colored mascot intact, append divider + status
+            mascot_visible = ansi_escape.sub("", mascot_line)
+            right_content = (
+                " " * between_gap
+                + "│"
+                + " " * status_gap
+                + status_line
+            )
+            right_content = right_content.ljust(content_width - len(mascot_visible))
+
+            row = left_border + mascot_line + right_content + right_border
+            result.append(row)
+        result.append(bottom_border)
+
+        return "\n".join(result)
 
     def _render_startup_fallback(
         self,
