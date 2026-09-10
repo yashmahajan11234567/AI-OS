@@ -592,7 +592,7 @@ class DashboardService(BaseService):
                         continue
                     events.append({
                         "event_type": ev.eventType.name,
-                        "timestamp": ev.timestamp.isoformat() if hasattr(ev, "timestamp") and ev.timestamp else "unknown",
+                        "timestamp": ev.timestamp if ev.timestamp else "unknown",
                         "source": getattr(ev.source, "component_name", "unknown") if ev.source else "unknown",
                         "correlation_id": str(ev.correlationId) if ev.correlationId else None,
                         "causation_id": str(ev.causationId) if ev.causationId else None,
@@ -1024,23 +1024,22 @@ def _summarize_payload(payload: dict[str, Any]) -> dict[str, Any]:
     """Create a safe summary of an event payload, excluding sensitive fields.
 
     Never exposes secrets, tokens, credentials, or internal security material.
+    Uses the canonical aios.security.secrets.redact_secrets for defense-in-depth
+    secret-shaped content detection inside string values.
     """
     if not isinstance(payload, dict):
         return {"type": type(payload).__name__}
 
-    # Fields that may contain sensitive data and should be excluded
-    sensitive_keys = {
-        "token", "secret", "password", "key", "credential", "auth",
-        "api_key", "access_token", "refresh_token", "client_secret",
-        "private_key", "certificate", "signature", "hash"
-    }
+    # First, apply canonical secret redaction (handles sensitive keys AND secret-shaped
+    # content inside string values, e.g., "password=abc123")
+    from aios.security.secrets import redact_secrets
 
+    redacted_payload = redact_secrets(payload)
+
+    # Then apply summarization (truncate long strings, abbreviate lists, etc.)
     summary = {}
-    for k, v in payload.items():
-        kl = k.lower()
-        if any(s in kl for s in sensitive_keys):
-            summary[k] = "[REDACTED]"
-        elif isinstance(v, dict):
+    for k, v in redacted_payload.items():
+        if isinstance(v, dict):
             summary[k] = _summarize_payload(v)
         elif isinstance(v, list):
             summary[k] = f"[list:{len(v)}]"

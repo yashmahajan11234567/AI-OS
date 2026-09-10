@@ -294,10 +294,41 @@ def test_observability_page_surfaces_recent_events(kernel_mock):
     asyncio.run(bus.initialize())
 
     svc = _make_service(kernel_mock, None, event_bus=bus)
-    # The EventBus history is populated by publish; we can't easily inject without publishing
-    # But we can verify the structure exists and doesn't crash
+
+    # Publish a real canonical event using the wired EventBus
+    from aios.events.core.event import Event
+    from aios.events.core.identity import ComponentIdentity, ComponentType
+    from aios.events.core.types import SemanticVersion, EventType
+
+    identity = ComponentIdentity(
+        component_type=ComponentType.ENGINEERING_SERVICE,
+        component_name="test_service",
+        version=SemanticVersion(1, 0, 0),
+    )
+    event = Event(
+        eventType=EventType.KERNEL_READY,
+        source=identity,
+        payload={"test": "data"},
+    )
+    asyncio.run(bus.publish(event))
+
     page = svc.get_system_observability()
-    assert isinstance(page["recent_events"], list)
+
+    # Should have at least one event
+    assert len(page["recent_events"]) >= 1
+
+    # Verify the event contains expected canonical fields
+    ev = page["recent_events"][0]
+    assert ev["event_type"] == "KERNEL_READY"
+    assert ev["timestamp"] != "unknown"
+    assert ev["source"] == "test_service"
+    assert ev["correlation_id"] is not None
+    assert "payload_summary" in ev
+    assert ev["payload_summary"]["test"] == "data"
+
+    # Verify timestamp is correctly serialized (string, no exception)
+    assert isinstance(ev["timestamp"], str)
+    assert "T" in ev["timestamp"] and "Z" in ev["timestamp"]  # ISO8601 format
 
 
 def test_observability_page_filters_sensitive_events(kernel_mock):
@@ -307,10 +338,132 @@ def test_observability_page_filters_sensitive_events(kernel_mock):
     asyncio.run(bus.initialize())
 
     svc = _make_service(kernel_mock, None, event_bus=bus)
-    # The page should not crash even if sensitive events exist (filtering is defensive)
+
+    from aios.events.core.event import Event
+    from aios.events.core.identity import ComponentIdentity, ComponentType
+    from aios.events.core.types import SemanticVersion, EventType
+
+    identity = ComponentIdentity(
+        component_type=ComponentType.ENGINEERING_SERVICE,
+        component_name="test_service",
+        version=SemanticVersion(1, 0, 0),
+    )
+
+    # Publish a normal event
+    normal_event = Event(
+        eventType=EventType.KERNEL_READY,
+        source=identity,
+        payload={"test": "normal"},
+    )
+    asyncio.run(bus.publish(normal_event))
+
+    # Publish a SECURITY_ISSUE_FOUND event
+    security_event = Event(
+        eventType=EventType.SECURITY_ISSUE_FOUND,
+        source=identity,
+        payload={"violation": "test violation", "severity": "HIGH"},
+    )
+    asyncio.run(bus.publish(security_event))
+
     page = svc.get_system_observability()
-    # Just verify it returns a valid structure
-    assert "recent_events" in page
-    for ev in page["recent_events"]:
-        assert not ev["event_type"].startswith("SECURITY_")
-        assert not ev["event_type"].startswith("CREDENTIAL_")
+
+    # Normal event should appear
+    normal_events = [e for e in page["recent_events"] if e["event_type"] == "KERNEL_READY"]
+    assert len(normal_events) >= 1
+
+    # SECURITY_ISSUE_FOUND should be filtered out
+    security_events = [e for e in page["recent_events"] if e["event_type"] == "SECURITY_ISSUE_FOUND"]
+    assert len(security_events) == 0, "SECURITY_ISSUE_FOUND events must be filtered from dashboard"
+
+    # Verify filtering happens before reaching the returned dashboard structure
+    # (i.e., the security event was published but doesn't appear in recent_events)
+    all_published_types = [e.eventType.name for e in bus.getRecentEvents()]
+    assert "KERNEL_READY" in all_published_types
+    assert "SECURITY_ISSUE_FOUND" in all_published_types
+    returned_types = [e["event_type"] for e in page["recent_events"]]
+    assert "KERNEL_READY" in returned_types
+    assert "SECURITY_ISSUE_FOUND" not in returned_types
+
+
+def test_observability_page_payload_redaction(kernel_mock):
+    """Observability page redacts sensitive keys and secret-shaped content in payloads."""
+    reset_event_bus_singleton()
+    bus = EventBus(config=EventBusConfig(auto_start_dispatch_worker=False))
+    asyncio.run(bus.initialize())
+
+    svc = _make_service(kernel_mock, None, event_bus=bus)
+
+    from aios.events.core.event import Event
+    from aios.events.core.identity import ComponentIdentity, ComponentType
+    from aios.events.core.types import SemanticVersion, EventType
+
+    identity = ComponentIdentity(
+        component_type=ComponentType.ENGINEERING_SERVICE,
+        component_name="test_service",
+        version=SemanticVersion(1, 0, 0),
+    )
+
+    # Publish event with sensitive key names (should be redacted)
+    event1 = Event(
+        eventType=EventType.KERNEL_READY,
+        source=identity,
+        payload={
+            "api_key": "sk-1234567890abcdef",
+            "password": "secret123",
+            "normal_field": "visible",
+        },
+    )
+    asyncio.run(bus.publish(event1))
+
+    # Publish event with secret-shaped content inside string values (should be redacted)
+    event2 = Event(
+        eventType=EventType.TASK_CREATED,
+        source=identity,
+        payload={
+            "config": "password=abc123",
+            "content": "api_key=sk-abcdef123456",
+            "normal_field": "visible",
+        },
+    )
+    asyncio.run(bus.publish(event2))
+
+    # Publish event with nested sensitive keys (should be redacted)
+    event3 = Event(
+        eventType=EventType.WORKFLOW_STARTED,
+        source=identity,
+        payload={
+            "nested": {
+                "client_secret": "super-secret",
+                "inner_normal": "visible",
+            },
+        },
+    )
+    asyncio.run(bus.publish(event3))
+
+    page = svc.get_system_observability()
+
+    # Find events by their types
+    kernel_ready_events = [e for e in page["recent_events"] if e["event_type"] == "KERNEL_READY"]
+    task_created_events = [e for e in page["recent_events"] if e["event_type"] == "TASK_CREATED"]
+    workflow_started_events = [e for e in page["recent_events"] if e["event_type"] == "WORKFLOW_STARTED"]
+
+    assert len(kernel_ready_events) >= 1
+    assert len(task_created_events) >= 1
+    assert len(workflow_started_events) >= 1
+
+    # Check sensitive key redaction (api_key, password)
+    kr_summary = kernel_ready_events[0]["payload_summary"]
+    assert kr_summary["api_key"] == "***REDACTED***"
+    assert kr_summary["password"] == "***REDACTED***"
+    assert kr_summary["normal_field"] == "visible"
+
+    # Check secret-shaped content in string values
+    tc_summary = task_created_events[0]["payload_summary"]
+    # The canonical redact_secrets should redact secret-shaped patterns in strings
+    assert "abc123" not in str(tc_summary["config"])
+    assert "sk-abcdef123456" not in str(tc_summary["content"])
+
+    # Check nested sensitive key redaction
+    ws_summary = workflow_started_events[0]["payload_summary"]
+    assert ws_summary["nested"]["client_secret"] == "***REDACTED***"
+    assert ws_summary["nested"]["inner_normal"] == "visible"

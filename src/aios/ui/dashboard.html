@@ -319,7 +319,7 @@ function renderObservability() {
 
   // D. Recent Events
   const events = (p.recent_events || []).slice(0, 50).map(e =>
-    card(e.event_type,
+    card(escapeHtml(e.event_type),
       kv("timestamp", e.timestamp) +
       kv("source", e.source) +
       kv("correlation_id", e.correlation_id || "—") +
