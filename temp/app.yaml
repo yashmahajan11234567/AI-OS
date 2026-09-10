@@ -1,0 +1,12 @@
+name: TestApp
+version: 1.0.0
+environment: development
+workspace:
+  path: ./workspace
+  auto_create: true
+logs:
+  path: ./logs
+  level: INFO
+  format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+  auto_create: true
+config: ./config
