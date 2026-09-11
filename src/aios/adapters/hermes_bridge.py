@@ -519,7 +519,7 @@ class HermesBridge:
                 timestamp=datetime.now(timezone.utc),
                 session_id=task.session_id,
                 provenance=self._create_provenance(
-                    task, actual_protocol, adapter_name, execution_id, correlation_id,
+                    task, provenance_protocol, adapter_name, execution_id, correlation_id,
                     "error", ["malformed_response"]
                 ),
             )
@@ -533,7 +533,7 @@ class HermesBridge:
                 timestamp=datetime.now(timezone.utc),
                 session_id=task.session_id,
                 provenance=self._create_provenance(
-                    task, actual_protocol, adapter_name, execution_id, correlation_id,
+                    task, provenance_protocol, adapter_name, execution_id, correlation_id,
                     "error", [type(e).__name__]
                 ),
             )

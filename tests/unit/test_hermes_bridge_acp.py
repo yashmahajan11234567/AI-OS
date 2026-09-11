@@ -558,3 +558,108 @@ async def test_hash_parameters_deterministic():
 
     assert hash1 == hash2
     assert len(hash1) == 16
+
+
+# Regression tests for M8-T1 HermesBridge actual_protocol NameError fix
+async def test_malformed_response_error_through_execute_task(mock_mcp_manager):
+    """Regression test: MalformedResponseError through real HermesBridge.execute_task() does not crash with NameError."""
+    bridge = HermesBridge(
+        mcp_manager=mock_mcp_manager,
+        protocol="mcp",
+        server_id="hermes_agent_ext",
+    )
+
+    session_id = await bridge.create_worker_session()
+
+    # Create a task that will trigger a MalformedResponseError by causing
+    # the _normalize_mcp_response method to raise it
+    # We can do this by patching the method temporarily
+    original_normalize = bridge._normalize_mcp_response
+
+    def mock_normalize_that_raises_malformed(*args, **kwargs):
+        from aios.adapters.hermes_bridge import MalformedResponseError
+        raise MalformedResponseError("Test malformed response")
+
+    bridge._normalize_mcp_response = mock_normalize_that_raises_malformed
+
+    task = HermesTask(
+        task_id="test-malformed",
+        task_type="navigation",
+        description="Test malformed response handling",
+        parameters={"url": "https://example.com"},
+        session_id=session_id,
+    )
+
+    # Execute the task - this should not raise a NameError about actual_protocol
+    obs = await bridge.execute_task(task)
+
+    # Restore the original method
+    bridge._normalize_mcp_response = original_normalize
+
+    # Verify we get a proper HermesObservation back (not a crash)
+    assert isinstance(obs, HermesObservation)
+    assert obs.task_id == "test-malformed"
+    assert obs.session_id == session_id
+    # The observation should indicate failure due to the MalformedResponseError
+    assert obs.success is False
+    assert obs.error is not None
+    assert "Malformed response" in obs.error
+    # Verify provenance contract is preserved - this is the key fix
+    assert obs.provenance["protocol"] == "mcp"
+    assert obs.provenance["adapter"] == "mcp_manager"
+    assert obs.provenance["session_id"] == session_id
+    assert obs.provenance["task_id"] == "test-malformed"
+    assert obs.trust_level == "untrusted"
+
+    await bridge.close_worker_session(session_id)
+
+
+async def test_generic_exception_through_execute_task(mock_mcp_manager):
+    """Regression test: Generic exception through real HermesBridge.execute_task() does not crash with NameError."""
+    bridge = HermesBridge(
+        mcp_manager=mock_mcp_manager,
+        protocol="mcp",
+        server_id="hermes_agent_ext",
+    )
+
+    session_id = await bridge.create_worker_session()
+
+    # Create a task that will trigger a generic Exception by causing
+    # the _normalize_mcp_response method to raise it
+    original_normalize = bridge._normalize_mcp_response
+
+    def mock_normalize_that_raises_generic(*args, **kwargs):
+        raise RuntimeError("Test generic exception")
+
+    bridge._normalize_mcp_response = mock_normalize_that_raises_generic
+
+    task = HermesTask(
+        task_id="test-generic-exception",
+        task_type="navigation",
+        description="Test generic exception handling",
+        parameters={"url": "https://example.com"},
+        session_id=session_id,
+    )
+
+    # Execute the task - this should not raise a NameError about actual_protocol
+    obs = await bridge.execute_task(task)
+
+    # Restore the original method
+    bridge._normalize_mcp_response = original_normalize
+
+    # Verify we get a proper HermesObservation back (not a crash)
+    assert isinstance(obs, HermesObservation)
+    assert obs.task_id == "test-generic-exception"
+    assert obs.session_id == session_id
+    # The observation should indicate failure due to the generic exception
+    assert obs.success is False
+    assert obs.error is not None
+    assert "Test generic exception" in obs.error
+    # Verify provenance contract is preserved - this is the key fix
+    assert obs.provenance["protocol"] == "mcp"
+    assert obs.provenance["adapter"] == "mcp_manager"
+    assert obs.provenance["session_id"] == session_id
+    assert obs.provenance["task_id"] == "test-generic-exception"
+    assert obs.trust_level == "untrusted"
+
+    await bridge.close_worker_session(session_id)
