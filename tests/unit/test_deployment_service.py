@@ -11,6 +11,7 @@ Tests for:
 
 from __future__ import annotations
 
+import os
 import tempfile
 from pathlib import Path
 from unittest.mock import patch, mock_open
@@ -141,6 +142,102 @@ class TestDeploymentServiceReproducibleDeployment:
 
         assert result["success"] is False
         assert "Docker build validation failed" in result["error"]
+
+
+class TestDeploymentServiceReproducibleDeploymentRealPaths:
+    """Deterministic unit tests exercising the real production code paths
+    (no Docker daemon required). These verify the non-docker deterministic
+    deployment record is reproducible and that real-mode clearly fails
+    when Docker is unavailable.
+    """
+
+    def setup_method(self):
+        self.deployment_service = DeploymentService()
+
+    def test_configuration_hash_is_reproducible_across_instances(self):
+        """Identical on-disk config yields the same hash across instances."""
+        h1 = self.deployment_service._calculate_configuration_hash()
+        ds2 = DeploymentService()
+        h2 = ds2._calculate_configuration_hash()
+        assert h1 == h2
+        assert len(h1) == 16
+
+    def test_deployment_id_is_deterministic_across_calls(self):
+        """Same config hash + version + env => same deployment ID."""
+        config_hash = self.deployment_service._calculate_configuration_hash()
+        id1 = self.deployment_service._generate_deterministic_deployment_id(
+            config_hash, "1.2.3", "production"
+        )
+        id2 = self.deployment_service._generate_deterministic_deployment_id(
+            config_hash, "1.2.3", "production"
+        )
+        assert id1 == id2
+        assert id1.startswith("dep_")
+
+    def test_deploy_in_local_mode_produces_deterministic_id(self):
+        """Non-real-mode deploy records deterministic ID + hash, no Docker."""
+        request = {"environment": "staging", "version": "2.0.0"}
+        result = self.deployment_service.deploy(request)
+        assert result["success"] is True
+        config_hash = self.deployment_service._calculate_configuration_hash()
+        expected_id = self.deployment_service._generate_deterministic_deployment_id(
+            config_hash, "2.0.0", "staging"
+        )
+        assert result["deployment_id"] == expected_id
+        assert result["configuration_hash"] == config_hash
+        # Second identical call yields the same ID (reproducible).
+        result2 = self.deployment_service.deploy(request)
+        assert result2["deployment_id"] == result["deployment_id"]
+
+    def test_deploy_in_real_mode_fails_clearly_without_docker(self):
+        """Real-mode deploy without docker raises DockerRuntimeUnavailableError."""
+        from aios.services.deployment import DockerRuntimeUnavailableError
+
+        request = {"environment": "production", "version": "1.0.0"}
+        with patch.dict(os.environ, {DeploymentService._REAL_MODE_ENV: "1"}), \
+             patch.object(self.deployment_service, "_is_docker_available", return_value=False):
+            with pytest.raises(DockerRuntimeUnavailableError):
+                self.deployment_service.deploy(request)
+
+    def test_validate_docker_artifacts_detects_missing_files(self, tmp_path):
+        """_validate_docker_artifacts returns False when artifacts are absent."""
+        with patch.object(self.deployment_service, "_project_root", tmp_path):
+            result = self.deployment_service._validate_docker_artifacts()
+        assert result["valid"] is False
+        assert any("Dockerfile" in e for e in result["errors"])
+
+    def test_rollback_emits_rollback_event_in_history(self):
+        """Rollback records an audit entry in the rollback log and returns prior ID."""
+        dep1 = {
+            "deployment_id": "dep_old123456",
+            "timestamp": "2026-01-01T00:00:00Z",
+            "environment": "production",
+            "version": "1.0.0",
+            "success": True,
+            "configuration_hash": "oldhash",
+        }
+        dep2 = {
+            "deployment_id": "dep_new789012",
+            "timestamp": "2026-01-02T00:00:00Z",
+            "environment": "production",
+            "version": "2.0.0",
+            "success": True,
+            "configuration_hash": "newhash",
+        }
+        self.deployment_service._deployment_history.clear()
+        self.deployment_service._deployment_history.extend([dep1, dep2])
+
+        result = self.deployment_service.rollback("dep_new789012", "revert")
+
+        assert result == "dep_old123456"
+        # History sequence is preserved (rollback does not append to it).
+        assert len(self.deployment_service._deployment_history) == 2
+        # Rollback is recorded in the separate audit log.
+        assert len(self.deployment_service.get_rollback_history()) == 1
+        audit = self.deployment_service.get_rollback_history()[0]
+        assert audit["rolled_back_from"] == "dep_new789012"
+        assert audit["rolled_back_to"] == "dep_old123456"
+        assert audit["reason"] == "revert"
 
     def test_rollback_successful_when_previous_deployment_exists(self):
         """Test that rollback works when previous deployment exists."""

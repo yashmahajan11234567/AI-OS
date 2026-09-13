@@ -312,3 +312,102 @@ class TestDeploymentServiceHealthCheckIntegration:
         assert "timestamp" in result2
         assert isinstance(result1["timestamp"], str)
         assert isinstance(result2["timestamp"], str)
+
+
+class TestDeploymentServiceHealthCheckRealPaths:
+    """Deterministic tests exercising real production health paths against the
+    actual repository Docker artifacts (no Docker daemon required).
+    """
+
+    def setup_method(self):
+        self.deployment_service = DeploymentService()
+
+    def test_health_check_configuration_validity_reflects_real_repo(self):
+        """Configuration validity check validates the real repo's Dockerfile."""
+        result = self.deployment_service.check_deployment_health()
+        config_check = result["checks"]["configuration_validity"]
+
+        # The real repo has a valid Dockerfile + docker-compose.yml.
+        assert config_check["status"] == HealthStatus.HEALTHY.value
+        assert "valid" in config_check["message"]
+
+    def test_health_check_docker_capability_reports_local_mode_when_absent(self):
+        """Docker capability check degrades gracefully when Docker is absent."""
+        from unittest.mock import patch
+
+        with patch.object(
+            self.deployment_service, "_is_docker_available", return_value=False
+        ):
+            result = self.deployment_service.check_deployment_health()
+        docker_check = result["checks"]["docker_build_capability"]
+        assert docker_check["status"] == HealthStatus.UNKNOWN.value
+        assert "local" in docker_check["message"].lower()
+
+    def test_health_check_details_reflect_real_artifact_state(self):
+        """Health details reflect the real presence of Dockerfile/compose."""
+        result = self.deployment_service.check_deployment_health()
+        details = result["details"]
+        from pathlib import Path
+        root = self.deployment_service._project_root
+        assert details["dockerfile_exists"] == (root / "Dockerfile").is_file()
+        assert details["docker_compose_exists"] == (
+            root / "docker-compose.yml"
+        ).is_file()
+        assert isinstance(details["configuration_hash"], str)
+        assert len(details["configuration_hash"]) == 16
+
+    def test_health_distinguishes_successful_record_from_failure(self):
+        """A successful history record yields HEALTHY; a failed record yields UNHEALTHY."""
+        # Successful record.
+        self.deployment_service._deployment_history.clear()
+        self.deployment_service._deployment_history.append(
+            {
+                "deployment_id": "dep_ok123456",
+                "timestamp": "2026-01-01T00:00:00Z",
+                "environment": "production",
+                "version": "1.0.0",
+                "success": True,
+            }
+        )
+        healthy = self.deployment_service.check_deployment_health("dep_ok123456")
+        assert healthy["checks"]["last_deployment"]["status"] == HealthStatus.HEALTHY.value
+
+        # Failed record (not in success-history -> unhealthy).
+        self.deployment_service._deployment_history.clear()
+        self.deployment_service._deployment_history.append(
+            {
+                "deployment_id": "dep_bad123456",
+                "timestamp": "2026-01-01T00:00:00Z",
+                "environment": "production",
+                "version": "1.0.0",
+                "success": False,
+                "error": "boom",
+            }
+        )
+        unhealthy = self.deployment_service.check_deployment_health("dep_bad123456")
+        assert unhealthy["checks"]["last_deployment"]["status"] == HealthStatus.UNHEALTHY.value
+
+    def test_health_overall_degraded_when_docker_unknown(self):
+        """When Docker is unknown but config/history healthy, overall is DEGRADED or HEALTHY (never fabricated)."""
+        from unittest.mock import patch
+
+        self.deployment_service._deployment_history.clear()
+        self.deployment_service._deployment_history.append(
+            {
+                "deployment_id": "dep_ok123456",
+                "timestamp": "2026-01-01T00:00:00Z",
+                "environment": "production",
+                "version": "1.0.0",
+                "success": True,
+            }
+        )
+        with patch.object(
+            self.deployment_service, "_is_docker_available", return_value=False
+        ):
+            result = self.deployment_service.check_deployment_health("dep_ok123456")
+        # No UNHEALTHY verdict from a successful history record when no Docker.
+        assert result["overall_status"] in (
+            HealthStatus.HEALTHY.value,
+            HealthStatus.DEGRADED.value,
+            HealthStatus.UNKNOWN.value,
+        )

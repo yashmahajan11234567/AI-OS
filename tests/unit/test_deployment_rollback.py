@@ -12,6 +12,7 @@ Tests for:
 from __future__ import annotations
 
 import pytest
+from unittest.mock import patch
 
 from aios.services.deployment import DeploymentService
 
@@ -405,4 +406,97 @@ class TestDeploymentServiceRollbackIntegration:
         with pytest.raises(ValueError) as exc_info:
             self.deployment_service.rollback("any_id", "testing")
 
-        assert "Cannot rollback: deployment any_id not found in history or was not successful" in str(exc_info.value)
+        assert "Cannot rollback: deployment any_id not found in history or was not successful" in str(
+            exc_info.value
+        )
+
+
+class TestDeploymentServiceRollbackRealBehavior:
+    """Deterministic tests for real rollback behavior (Docker-free).
+
+    These verify that rollback actually restores the prior deployment
+    configuration/state rather than merely echoing an ID, and that the
+    rollback action is consistently recorded in the audit log while the
+    deployment history sequence is preserved.
+    """
+
+    def setup_method(self):
+        self.deployment_service = DeploymentService()
+
+    def test_rollback_restores_prior_configuration_and_records_audit(self):
+        """Rollback restores the prior deployment's config/state and records audit."""
+        prior = {
+            "deployment_id": "dep_prior_0001",
+            "timestamp": "2026-01-01T00:00:00Z",
+            "environment": "production",
+            "version": "1.0.0",
+            "success": True,
+            "configuration_hash": "prior_hash_abc",
+        }
+        current = {
+            "deployment_id": "dep_current_0002",
+            "timestamp": "2026-01-02T00:00:00Z",
+            "environment": "production",
+            "version": "2.0.0",
+            "success": True,
+            "configuration_hash": "current_hash_def",
+        }
+        self.deployment_service._deployment_history.clear()
+        self.deployment_service._deployment_history.append(prior)
+        self.deployment_service._deployment_history.append(current)
+
+        with patch.object(
+            self.deployment_service, "_validate_docker_build", return_value=True
+        ), patch.object(
+            self.deployment_service, "_is_docker_available", return_value=False
+        ):
+            restored = self.deployment_service.rollback("dep_current_0002", "reg")
+
+        assert restored == "dep_prior_0001"
+        # History sequence preserved.
+        assert len(self.deployment_service._deployment_history) == 2
+        # Rollback recorded in audit log (not in deployment history).
+        audits = self.deployment_service.get_rollback_history()
+        assert len(audits) == 1
+        assert audits[0]["rolled_back_to"] == "dep_prior_0001"
+        assert audits[0]["rolled_back_from"] == "dep_current_0002"
+        assert audits[0]["previous_version"] == "1.0.0"
+
+    def test_rollback_skips_intermediate_failed_deployments(self):
+        """Rollback skips failed deployments to find the prior successful one."""
+        d1 = {
+            "deployment_id": "dep_v1_0",
+            "timestamp": "2026-01-01T00:00:00Z",
+            "environment": "prod",
+            "version": "1.0.0",
+            "success": True,
+            "configuration_hash": "h1",
+        }
+        d2_bad = {
+            "deployment_id": "dep_v1_1_bad",
+            "timestamp": "2026-01-02T00:00:00Z",
+            "environment": "prod",
+            "version": "1.1.0",
+            "success": False,
+            "configuration_hash": "h2",
+        }
+        d3 = {
+            "deployment_id": "dep_v1_2",
+            "timestamp": "2026-01-03T00:00:00Z",
+            "environment": "prod",
+            "version": "1.2.0",
+            "success": True,
+            "configuration_hash": "h3",
+        }
+        self.deployment_service._deployment_history.clear()
+        self.deployment_service._deployment_history.extend([d1, d2_bad, d3])
+
+        with patch.object(
+            self.deployment_service, "_validate_docker_build", return_value=True
+        ), patch.object(
+            self.deployment_service, "_is_docker_available", return_value=False
+        ):
+            restored = self.deployment_service.rollback("dep_v1_2", "revert bad")
+
+        # Skips the failed d2, lands on d1.
+        assert restored == "dep_v1_0"

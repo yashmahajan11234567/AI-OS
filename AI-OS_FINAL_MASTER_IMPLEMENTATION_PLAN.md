@@ -1579,11 +1579,11 @@ M7 (current)
 
 | Criterion | Status | Target |
 |-----------|--------|--------|
-| Reproducible deployment | ❌ | ✅ M10 |
+| Reproducible deployment | ✅ | ✅ M10 |
 | Configuration | ✅ | ✅ |
 | Secrets | ⚠️ Partial | ✅ M11 |
-| Health checks | ❌ | ✅ M10 |
-| Rollback | ❌ | ✅ M10 |
+| Health checks | ✅ | ✅ M10 |
+| Rollback | ✅ | ✅ M10 |
 | Recovery | ✅ | ✅ M10 |
 
 ---
