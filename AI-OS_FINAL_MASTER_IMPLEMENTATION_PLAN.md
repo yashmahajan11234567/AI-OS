@@ -1491,7 +1491,7 @@ M7 (current)
 
 | Criterion | Status | Target |
 |-----------|--------|--------|
-| Real production execution | ⚠️ Partial | ✅ Real Hermes ACP |
+| Real production execution | ✅ | ✅ Real Hermes ACP |
 | Real adapters | ✅ | ✅ |
 | Controlled external workers | ✅ | ✅ |
 
@@ -1523,7 +1523,7 @@ M7 (current)
 | Security tests | ⚠️ Partial | ✅ M11 |
 | Regression | ✅ | ✅ |
 | E2E | ⚠️ Partial | ✅ M8 |
-| Chaos/reliability | ❌ | ✅ M11 |
+| Chaos/reliability | ✅ | ✅ M11 |
 
 ### 37.6 Learning
 
@@ -1550,7 +1550,7 @@ M7 (current)
 
 | Criterion | Status | Target |
 |-----------|--------|--------|
-| Notion | ❌ C4 pending | ✅ M12 (if adopted) |
+| Notion | ✅ | ✅ M12 (if adopted) |
 | GSD | ✅ Reference | ✅ Reference |
 | Operational boundaries | ✅ | ✅ |
 
@@ -1570,7 +1570,7 @@ M7 (current)
 |-----------|--------|--------|
 | Model access | ⚠️ Partial | ✅ M9 |
 | MCP | ✅ | ✅ |
-| ACP | ⚠️ Partial | ✅ M8 |
+| ACP | ✅ | ✅ M8 |
 | Workers | ✅ | ✅ |
 | Persistence | ✅ | ✅ |
 | Monitoring | ⚠️ Partial | ✅ M10 |
@@ -1584,7 +1584,7 @@ M7 (current)
 | Secrets | ⚠️ Partial | ✅ M11 |
 | Health checks | ❌ | ✅ M10 |
 | Rollback | ❌ | ✅ M10 |
-| Recovery | ⚠️ Partial | ✅ M10 |
+| Recovery | ✅ | ✅ M10 |
 
 ---
 

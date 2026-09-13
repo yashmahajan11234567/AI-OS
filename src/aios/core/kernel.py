@@ -608,6 +608,11 @@ class HermesKernel:
         if lifecycle_state == LifecycleState.RECOVERY_IN_PROGRESS:
             return CanonicalHealthState.DEGRADED
 
+        # During degraded (M12-T6 #53): an explicitly degraded kernel must
+        # never read as STARTING — same reasoning as the async computation.
+        if lifecycle_state == LifecycleState.DEGRADED:
+            return CanonicalHealthState.DEGRADED
+
         return CanonicalHealthState.STARTING
 
     @property
@@ -627,6 +632,31 @@ class HermesKernel:
             if self._health_manager.overall_status == HealthStatus.UNHEALTHY:
                 return False
         return True
+
+    async def trigger_recovery(self, affected: list[str] | None = None) -> dict[str, Any]:
+        """M12-T6 #53 — trigger kernel lifecycle recovery (production path).
+
+        The kernel is the runtime authority entry point: production callers ask
+        the KERNEL to recover; the kernel delegates the recovery strategy to the
+        HealthManager (the recovery coordinator, Part 4 §4.6), which drives the
+        authoritative LifecycleManager state machine:
+
+            DEGRADED --begin_recovery--> RECOVERY_IN_PROGRESS
+                     --(restart+verify affected engineering services)-->
+                     --complete_recovery(success)--> OPERATIONAL | DEGRADED
+
+        If ``affected`` is omitted, the currently DEGRADED components tracked by
+        the HealthManager are used. Raises RuntimeError when the recovery
+        coordinator is not available (never silently fakes recovery).
+        """
+        hm = self._health_manager
+        if hm is None or not hm.is_initialized:
+            raise RuntimeError(
+                "HealthManager recovery coordinator not available. Start the kernel first."
+            )
+        if affected is None and hm is not None:
+            affected = hm.degraded_components()
+        return await hm.trigger_recovery(affected=affected)
 
     def register_service(self, service: BaseService) -> BaseService:
         """Register an Engineering Service with the kernel (canonical C2 registry).
@@ -918,6 +948,14 @@ class HermesKernel:
 
         # During recovery
         if lifecycle_state == LifecycleState.RECOVERY_IN_PROGRESS:
+            return CanonicalHealthState.DEGRADED
+
+        # During degraded (M12-T6 #53): an explicitly degraded kernel must
+        # never read as STARTING — that would hide a production degradation
+        # behind an innocuous "still starting" status. The lifecycle state is
+        # authoritative here (HealthManager degradation already fed it via the
+        # production mark_degraded trigger).
+        if lifecycle_state == LifecycleState.DEGRADED:
             return CanonicalHealthState.DEGRADED
 
         # Default
@@ -1456,6 +1494,16 @@ class HermesKernel:
         if self._health_manager is not None:
             lm.register_manager(self._health_manager)
             logger.debug("Registered HealthManager with LifecycleManager (Phase 3).")
+            # M12-T6 #53 — production recovery wiring: give the HealthManager
+            # (the recovery-strategy coordinator) a reference to the authoritative
+            # LifecycleManager. This is what makes begin_recovery() /
+            # complete_recovery() reachable from production kernel execution
+            # (HealthManager.record_health -> mark_degraded; kernel.trigger_recovery
+            # -> begin_recovery/complete_recovery). The LifecycleManager remains
+            # the sole lifecycle state machine; HealthManager only calls its
+            # published recovery API.
+            self._health_manager.set_lifecycle_manager_ref(lm)
+            logger.debug("Wired HealthManager recovery coordination to LifecycleManager (M12-T6).")
 
         # Task 13 — register the ResourceManager Core Manager (Phase 3,
         # "Governance") for LifecycleManager orchestration. ResourceManager was

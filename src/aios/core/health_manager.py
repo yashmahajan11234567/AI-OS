@@ -311,6 +311,14 @@ class HealthManager:
         self._failure_threshold = 3
         self._shutdown_timeout_ms = 5000
 
+        # M12-T6 #53 — kernel lifecycle recovery integration. The kernel wires
+        # the authoritative LifecycleManager here (see
+        # ``HermesKernel._init_lifecycle_manager``); HealthManager never
+        # constructs or imports a second one (single-lifecycle-authority
+        # invariant). Kept ``None``-able so the Task-12 constructor contract
+        # (C1 raise-on-missing only) is unchanged for pre-boot/test callers.
+        self._lifecycle_manager: Any | None = None
+
     # ------------------------------------------------------------------
     # ICoreManager surface (Task 12 / Part 4 §4.2)
     # ------------------------------------------------------------------
@@ -461,6 +469,227 @@ class HealthManager:
         # 3. Clear initialized/ready flag.
         self._initialized = False
         self._log_info("HealthManager shut down.")
+
+    # ------------------------------------------------------------------
+    # M12-T6 #53 — kernel lifecycle recovery integration
+    # ------------------------------------------------------------------
+
+    def set_lifecycle_manager_ref(self, lifecycle_manager: Any) -> None:
+        """Wire the authoritative LifecycleManager for recovery coordination.
+
+        Called by the kernel (production) in ``_init_lifecycle_manager`` once both
+        the LifecycleManager (Phase 1) and HealthManager (Phase 3) exist.
+        HealthManager only *calls into* the LifecycleManager's published recovery
+        API (``mark_degraded`` / ``begin_recovery`` / ``complete_recovery``) —
+        it never mutates lifecycle state itself, so the sole-lifecycle-authority
+        invariant (Part 4 §4.3.3) is preserved. This is the same
+        kernel-owned-construction DI pattern the other Core Managers use.
+        """
+        if self._lifecycle_manager is not None and self._lifecycle_manager is not lifecycle_manager:
+            self._log_debug(
+                "set_lifecycle_manager_ref: replacing previously wired LifecycleManager."
+            )
+        self._lifecycle_manager = lifecycle_manager
+
+    def _trigger_lifecycle_degraded(self, affected_components: list[str]) -> None:
+        """M12-T6 #53 — production degraded trigger (OPERATIONAL -> DEGRADED).
+
+        When the health aggregate is DEGRADED and the kernel lifecycle is still
+        OPERATIONAL, drive the authoritative LifecycleManager into DEGRADED via
+        its async ``mark_degraded`` API. This is the sync business-API bridge:
+
+        * A running loop exists -> the coroutine is scheduled deterministically
+          (same ``_pending_tasks`` strong-reference pattern as ``_emit_health_event``).
+        * No running loop -> the trigger cannot run; log (debug) and return
+          (HealthManager has no thread of its own; the caller owns the loop).
+
+        Guarded: no-op unless the lifecycle is currently OPERATIONAL, so repeated
+        DEGRADED health records never attempt an invalid lifecycle transition
+        (DEGRADED -> DEGRADED) and never re-enter while DEGRADED/RECOVERY (the
+        LifecycleManager remains the transition validator of record).
+        """
+        lm = self._lifecycle_manager
+        if lm is None:
+            return
+        try:
+            # Import locally: read-only state inspection only (no authority transfer).
+            from aios.core.lifecycle_manager import LifecycleState
+
+            if lm.state is not LifecycleState.OPERATIONAL:
+                return
+            coro = lm.mark_degraded(affected=affected_components)
+            try:
+                loop = asyncio.get_running_loop()
+            except RuntimeError:
+                self._log_debug(
+                    "DEGRADED health recorded but no running loop; lifecycle "
+                    "degraded trigger deferred to the next call site with a loop."
+                )
+                return
+            if not loop.is_running():
+                return
+            task = asyncio.ensure_future(coro, loop=loop)
+            self._pending_tasks.add(task)
+            task.add_done_callback(self._pending_tasks.discard)
+            self._log_info(
+                "DEGRADED health aggregate triggered lifecycle mark_degraded "
+                f"(affected={affected_components})."
+            )
+        except Exception as exc:  # noqa: BLE001
+            # The degraded signal itself must never take the health path down.
+            self._log_warning(f"Lifecycle mark_degraded trigger failed: {exc}")
+
+    async def trigger_recovery(
+        self, affected: list[str] | None = None
+    ) -> dict[str, Any]:
+        """M12-T6 #53 — coordinate kernel lifecycle recovery (production path).
+
+        This is the HealthManager-coordinated recovery strategy that
+        ``LifecycleManager.begin_recovery``'s docstring deferred to ("later
+        task"). Flow (all transitions still owned by LifecycleManager):
+
+        1. Verify the HealthManager is initialized and a lifecycle ref is wired
+           (fail loud — never silently claim recovery).
+        2. ``begin_recovery(affected)`` — DEGRADED -> RECOVERY_IN_PROGRESS.
+        3. Attempt a real recovery action using existing AI-OS mechanisms only:
+           for every affected engineering service discoverable in the canonical
+           ServiceRegistry, re-probe ``on_health_check()`` and restart
+           (``stop()`` then ``start()`` — the same BaseService primitives
+           ``_start_services`` uses) when the probe fails.
+        4. Verify recovery by re-probing every affected service after restart.
+        5. ``complete_recovery(success=verified)`` — OPERATIONAL on verified
+           success, DEGRADED otherwise (explicit, never falsely operational).
+
+        Returns a diagnostic record (component names probed/restarted, verdict).
+
+        Scope guards:
+        * Recursion guard: no-op record if the lifecycle is already
+          RECOVERY_IN_PROGRESS (recovery is never re-entered recursively).
+        * The recovery action targets ONLY engineering services registered in
+          the canonical ServiceRegistry; it does not touch Core Managers
+          (LifecycleManager owns their phases), M10 autonomy services
+          (M10RecoveryManager's scope), or M13 bounded external resources
+          (FailureRecoveryManager's scope).
+        * No security boundary is crossed: restarting the kernel's own already-
+          authorized engineering services is kernel-internal runtime authority
+          (the same authority ``_start_services`` exercises at boot).
+        """
+        lm = self._lifecycle_manager
+        if lm is None or not self._initialized:
+            raise HealthManagerError(
+                "trigger_recovery requires an initialized HealthManager with a "
+                "kernel-wired LifecycleManager (start the kernel first).",
+                rule_id="HM-REC-001",
+            )
+
+        # Read-only state inspection (lifecycle transition validation stays in LM).
+        from aios.core.lifecycle_manager import LifecycleState
+
+        cur = lm.state
+        if cur is LifecycleState.RECOVERY_IN_PROGRESS:
+            self._log_debug("Recovery already in progress; no re-entry.")
+            return {"status": "already_in_progress", "affected": list(affected or [])}
+        if cur is not LifecycleState.DEGRADED:
+            # Same rule the LifecycleManager enforces (LM-REC-001); surfaced as
+            # an explicit no-op record rather than an exception so periodic
+            # health loops never crash on a healthy kernel.
+            self._log_info(
+                f"trigger_recovery no-op: lifecycle state is {cur.value}, "
+                "not DEGRADED."
+            )
+            return {"status": "not_degraded", "affected": list(affected or [])}
+
+        affected_list = list(affected or [])
+
+        # 2. DEGRADED -> RECOVERY_IN_PROGRESS (LifecycleManager authority).
+        await lm.begin_recovery(affected=affected_list)
+        self._log_info(
+            f"Kernel lifecycle recovery started (affected={affected_list})."
+        )
+
+        record: dict[str, Any] = {
+            "status": "attempted",
+            "affected": affected_list,
+            "probed": [],
+            "restarted": [],
+            "verified": [],
+            "failed": [],
+        }
+
+        # 3. Attempt the recovery action using existing AI-OS mechanisms: for
+        #    each affected engineering service visible in the canonical C2, stop
+        #    and restart it via its own BaseService lifecycle primitives.
+        sr = self._service_registry
+        for component in affected_list:
+            service_id = f"engineering.{component}"
+            svc = sr.get_service(service_id) if sr is not None else None
+            if svc is None:
+                # Not an engineering service in C2 (Core Manager, external
+                # resource, or unknown): out of this recovery action's scope —
+                # recorded, not faked.
+                record["failed"].append(component)
+                self._log_debug(
+                    f"Recovery action skipped for '{component}': no engineering "
+                    "service in the canonical ServiceRegistry (out of kernel "
+                    "lifecycle recovery scope)."
+                )
+                continue
+            record["probed"].append(component)
+            try:
+                try:
+                    healthy = await svc.on_health_check()
+                except Exception:  # noqa: BLE001
+                    healthy = False
+                if healthy:
+                    # Service self-recovered; no restart needed.
+                    record["verified"].append(component)
+                    continue
+                await svc.stop()
+                await svc.start()
+                record["restarted"].append(component)
+            except Exception as exc:  # noqa: BLE001
+                record["failed"].append(component)
+                self._log_warning(
+                    f"Recovery restart failed for '{component}': {exc}"
+                )
+
+        # 4. Verify recovery: re-probe every affected service that has a probe.
+        verified_all = True
+        for component in [c for c in record["probed"] if c not in record["failed"]]:
+            svc = sr.get_service(f"engineering.{component}") if sr is not None else None
+            if svc is None:
+                # Service no longer discoverable after restart — cannot verify.
+                verified_all = False
+                record["failed"].append(component)
+                continue
+            try:
+                if await svc.on_health_check():
+                    record["verified"].append(component)
+                else:
+                    verified_all = False
+                    record["failed"].append(component)
+            except Exception:  # noqa: BLE001
+                verified_all = False
+                record["failed"].append(component)
+
+        # Any affected component with no actionable in-scope service and no
+        # verification cannot be counted as recovered — the kernel stays honest.
+        verified = (
+            verified_all
+            and len(record["failed"]) == 0
+            and len(record["verified"]) == len(affected_list)
+        )
+
+        # 5. RECOVERY_IN_PROGRESS -> OPERATIONAL | DEGRADED (LM authority).
+        await lm.complete_recovery(success=verified)
+        record["status"] = "recovered" if verified else "recovery_failed"
+        self._log_info(
+            f"Kernel lifecycle recovery "
+            f"{'verified' if verified else 'FAILED'} "
+            f"(restarted={record['restarted']}, verified={record['verified']}, "
+            f"failed={record['failed']})."
+        )
+        return record
 
     # ------------------------------------------------------------------
     # ServiceRegistry integration (mirror StateManager / StorageManager pattern)
@@ -661,6 +890,23 @@ class HealthManager:
         # Update aggregate status (deterministic: UNHEALTHY > DEGRADED > HEALTHY > UNKNOWN).
         self._recompute_overall()
 
+        # M12-T6 #53 — production degraded trigger: when the health aggregate
+        # is DEGRADED and the kernel lifecycle is still OPERATIONAL, drive the
+        # authoritative LifecycleManager into DEGRADED (guarded no-op otherwise,
+        # including when the aggregate is UNHEALTHY — UNHEALTHY is a terminal
+        # canonical-health condition, not a recoverable degraded state).
+        if status is HealthStatus.DEGRADED and self.overall_status is HealthStatus.DEGRADED:
+            with self._checks_lock:
+                degraded_components = sorted(
+                    {
+                        hc.component
+                        for hc in self._checks.values()
+                        if hc.last_result is not None
+                        and hc.last_result.status is HealthStatus.DEGRADED
+                    }
+                )
+            self._trigger_lifecycle_degraded(degraded_components)
+
         # Emit canonical health event (CONFLICT E.1: only canonical EventTypes).
         if status is HealthStatus.HEALTHY:
             self._emit_health_event(_HEALTH_CHECK_PASSED, result)
@@ -676,6 +922,38 @@ class HealthManager:
             status=status.value,
         )
         return result
+
+    def degraded_components(self) -> list[str]:
+        """Components whose latest recorded result is DEGRADED (M12-T6 #53).
+
+        Snapshot accessor used by the kernel's recovery entry point to determine
+        the default ``affected`` set for a recovery attempt. Read-only.
+        """
+        with self._checks_lock:
+            return sorted(
+                {
+                    hc.component
+                    for hc in self._checks.values()
+                    if hc.last_result is not None
+                    and hc.last_result.status is HealthStatus.DEGRADED
+                }
+            )
+
+    async def drain_pending_tasks(self) -> None:
+        """Await all in-flight sync-bridge tasks (event emissions, M12-T6
+        lifecycle triggers) scheduled from synchronous business API calls.
+
+        Callers of ``record_health`` that need to observe the triggered lifecycle
+        transition deterministically await this. No-op when nothing is pending.
+        """
+        pending = [t for t in list(self._pending_tasks) if not t.done()]
+        for t in pending:
+            try:
+                await t
+            except Exception:  # noqa: BLE001
+                # Bridge tasks are fire-and-forget by design; a failed emission
+                # or trigger is logged at its call site. Never re-raise here.
+                pass
 
     def _recompute_overall(self) -> None:
         """Recompute the aggregate health status from all check results.
