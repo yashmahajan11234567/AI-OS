@@ -1573,7 +1573,7 @@ M7 (current)
 | ACP | ✅ | ✅ M8 |
 | Workers | ✅ | ✅ |
 | Persistence | ✅ | ✅ |
-| Monitoring | ⚠️ Partial | ✅ M10 |
+| Monitoring | ✅ | ✅ M10 |
 
 ### 37.11 Deployment
 
