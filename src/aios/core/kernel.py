@@ -294,6 +294,8 @@ class HermesKernel:
         self._security_manager: SecurityManager | None = None
         # Task 15 — CapabilityManager (Phase-4 Execution Core Manager)
         self._capability_manager: CapabilityManager | None = None
+        # M12-T6 #47 — Health monitoring HTTP server
+        self._health_http_server: Any | None = None
         # M9-N6: manifest loader retained for explicit hot-reload (None until
         # _init_capability_manifests runs).
         self._capability_loader: Any | None = None
@@ -750,6 +752,19 @@ class HermesKernel:
         # The kernel retains ownership of Core Component shutdown order.
         await self._init_lifecycle_manager()
 
+        # M12-T6 #47 — Start HealthManager HTTP monitoring server
+        # Start after LifecycleManager initialization so HealthManager has
+        # its lifecycle manager reference for recovery coordination
+        if self._health_manager is not None:
+            self._health_http_server = self._health_manager.serve_health_http()
+            if self._health_http_server is not None:
+                logger.info(
+                    f"HealthManager HTTP monitoring server started on "
+                    f"{self._health_manager._http_host()}:{self._health_manager._http_port()}"
+                )
+            else:
+                logger.warning("Failed to start HealthManager HTTP monitoring server")
+
         # M7 — register the multi-perspective testing components, reusing the
         # canonical CouncilManager / EventBus / SecurityManager / ModelRouter
         # singletons (no duplicates). Safe to run after the Core Managers exist.
@@ -1107,6 +1122,17 @@ class HermesKernel:
 
         # Stop heartbeat first
         await self._stop_heartbeat()
+
+        # M12-T6 #47 — Stop HealthManager HTTP monitoring server
+        if self._health_http_server is not None:
+            try:
+                self._health_http_server.shutdown()
+                self._health_http_server = None
+                logger.info("HealthManager HTTP monitoring server stopped")
+            except Exception as e:
+                logger.error(f"Error stopping HealthManager HTTP monitoring server: {e}")
+                # Ensure we clear the reference even on error to prevent retry attempts
+                self._health_http_server = None
 
         # Stop engineering services via LifecycleManager / canonical C2
         await self._stop_engineering_services()
