@@ -1520,7 +1520,7 @@ M7 (current)
 | Deterministic tests | ✅ | ✅ |
 | AI-driven tests | ✅ | ✅ |
 | User simulation | ✅ | ✅ |
-| Security tests | ⚠️ Partial | ✅ M11 |
+| Security tests | ✅ | ✅ M11 |
 | Regression | ✅ | ✅ |
 | E2E | ⚠️ Partial | ✅ M8 |
 | Chaos/reliability | ✅ | ✅ M11 |

@@ -26,7 +26,7 @@ categories = {
     },
     "37.5 Testing": {
         "criteria": ["Deterministic tests", "AI-driven tests", "User simulation", "Security tests", "Regression", "E2E", "Chaos/reliability"],
-        "statuses": ["[OK]", "[OK]", "[OK]", "[OK]", "[OK]", "[PARTIAL]", "[OK]"],
+        "statuses": ["[OK]", "[OK]", "[OK]", "[PARTIAL]", "[OK]", "[PARTIAL]", "[OK]"],
     },
     "37.6 Learning": {
         "criteria": ["RCA", "Learning", "Simplification", "Replanning", "Regression protection", "Safe re-execution"],
