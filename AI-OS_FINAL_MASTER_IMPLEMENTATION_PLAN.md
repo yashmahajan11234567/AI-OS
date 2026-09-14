@@ -1568,7 +1568,7 @@ M7 (current)
 
 | Criterion | Status | Target |
 |-----------|--------|--------|
-| Model access | ⚠️ Partial | ✅ M9 |
+| Model access | ✅ | ✅ M9 |
 | MCP | ✅ | ✅ |
 | ACP | ✅ | ✅ M8 |
 | Workers | ✅ | ✅ |
