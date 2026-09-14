@@ -1559,7 +1559,7 @@ M7 (current)
 | Criterion | Status | Target |
 |-----------|--------|--------|
 | Sandboxing | ✅ | ✅ |
-| Secrets | ⚠️ Partial | ✅ M11 |
+| Secrets | ✅ | ✅ M11 |
 | External trust | ✅ | ✅ |
 | Malicious content | ✅ | ✅ |
 | Least privilege | ✅ | ✅ |
@@ -1581,7 +1581,7 @@ M7 (current)
 |-----------|--------|--------|
 | Reproducible deployment | ✅ | ✅ M10 |
 | Configuration | ✅ | ✅ |
-| Secrets | ⚠️ Partial | ✅ M11 |
+| Secrets | ✅ | ✅ M11 |
 | Health checks | ✅ | ✅ M10 |
 | Rollback | ✅ | ✅ M10 |
 | Recovery | ✅ | ✅ M10 |

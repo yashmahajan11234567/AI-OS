@@ -1020,6 +1020,215 @@ class TestSecretsIntegration:
 
 
 # =============================================================================
+# 10. Secret Rotation Tests (M11 §3.4 — bounded overlay-based rotation)
+# =============================================================================
+
+class TestSecretRotation:
+    """Test bounded secret rotation via ConfigurationManager.rotate_secret().
+
+    Implements the 10 tests required by the M11 §3.4 / Section 37 remediation
+    task for the Shared Secrets gap (§37.9 Security -> Secrets, §37.11 Deployment
+    -> Secrets).
+
+    Rotation is overlay-based: the frozen config is never mutated; rotated
+    values live in a separate in-memory overlay that shadows frozen values for
+    all read accessors.
+    """
+
+    @pytest.mark.asyncio
+    async def test_successful_rotation(self, cm_with_secrets, security_manager):
+        """rotate_secret returns True and updates get_secret() to the new value."""
+        # Register an explicit allow-rule for this rotation (kernel policy).
+        security_manager.register_allow_rule("test-operator", "secret.rotate", None)
+
+        old_val = cm_with_secrets.get_secret("security.jwtSecret")
+        assert old_val == "test-secret"
+
+        result = cm_with_secrets.rotate_secret(
+            "security.jwtSecret", "rotated-secret-123",
+            principal="test-operator",
+        )
+        assert result is True
+
+        new_val = cm_with_secrets.get_secret("security.jwtSecret")
+        assert new_val == "rotated-secret-123"
+        assert new_val != old_val
+
+    @pytest.mark.asyncio
+    async def test_secret_accessor_returns_new_value(self, cm_with_secrets, security_manager):
+        """get_secret() returns the rotated (new) value after rotation."""
+        security_manager.register_allow_rule("test-operator", "secret.rotate", None)
+        cm_with_secrets.rotate_secret(
+            "security.jwtSecret", "new-jwt-secret",
+            principal="test-operator",
+        )
+        assert cm_with_secrets.get_secret("security.jwtSecret") == "new-jwt-secret"
+        # Also verify a different secret path still works
+        assert cm_with_secrets.get_secret("llm.providers.openai.apiKey") == "sk-test-key"
+
+    @pytest.mark.asyncio
+    async def test_masking_preserved_after_rotation(self, cm_with_secrets, security_manager):
+        """get() and get_all() still mask rotated secrets."""
+        security_manager.register_allow_rule("test-operator", "secret.rotate", None)
+        cm_with_secrets.rotate_secret(
+            "security.jwtSecret", "super-secret-new-value",
+            principal="test-operator",
+        )
+
+        # get() returns mask
+        assert cm_with_secrets.get("security.jwtSecret") == "***"
+
+        # get_all() masks all secret leaves
+        all_config = cm_with_secrets.get_all()
+        assert all_config["security"]["jwtSecret"] == "***"
+
+        # get_secret() returns the new value (unmasked, as before)
+        assert cm_with_secrets.get_secret("security.jwtSecret") == "super-secret-new-value"
+
+    @pytest.mark.asyncio
+    async def test_non_secret_path_rejected(self, cm_with_secrets, security_manager):
+        """rotate_secret raises ConfigurationError for non-secret paths."""
+        from aios.core.configuration_manager import ConfigurationError
+
+        with pytest.raises(ConfigurationError, match="not a recognized secret"):
+            cm_with_secrets.rotate_secret(
+                "kernel.name", "new-name",
+                principal="test-operator",
+            )
+
+    @pytest.mark.asyncio
+    async def test_authorization_failure(self, cm_with_secrets, security_manager):
+        """rotate_secret fails when SecurityManager denies authorization."""
+        # The default SecurityManager fails-closed; an empty principal gets DENY.
+        from aios.core.configuration_manager import SecretNotAuthorizedError
+
+        with pytest.raises(SecretNotAuthorizedError, match="denied"):
+            cm_with_secrets.rotate_secret(
+                "security.jwtSecret", "new-val",
+                principal=None,  # unknown principal -> DENY
+            )
+
+    @pytest.mark.asyncio
+    async def test_immutable_config_preserved(self, cm_with_secrets, security_manager):
+        """Frozen config is not mutated by rotation; overlay is separate."""
+        from aios.core.configuration_manager import _normalize, _get_path
+
+        security_manager.register_allow_rule("test-operator", "secret.rotate", None)
+        original_hash = cm_with_secrets.config_hash
+
+        cm_with_secrets.rotate_secret(
+            "security.jwtSecret", "new-val",
+            principal="test-operator",
+        )
+
+        # The frozen config itself must be unchanged — the overlay is separate.
+        frozen_snapshot = cm_with_secrets._frozen_config
+        # Verify the frozen config still contains the original secret value
+        norm = _normalize(frozen_snapshot)
+        original_val = _get_path(norm, "security.jwtSecret")
+        assert original_val == "test-secret"
+
+        # Hash changed because rotation state is now reflected
+        assert cm_with_secrets.config_hash != original_hash
+
+    @pytest.mark.asyncio
+    async def test_audit_trail_recorded(self, cm_with_secrets, security_manager):
+        """Rotation emits a canonical SECURITY_ISSUE_FOUND security event."""
+        # Register allow-rule for the auditor principal.
+        security_manager.register_allow_rule("auditor", "secret.rotate", None)
+
+        # The rotation routes through SecurityManager.record_violation which
+        # stores the violation locally (audit trail, CC-SEC-003 attribution).
+        cm_with_secrets.rotate_secret(
+            "security.jwtSecret", "audited-new-secret",
+            principal="auditor",
+        )
+
+        # A security_rotation violation must be recorded.
+        violations = security_manager.list_violations()
+        rotation_violations = [
+            v for v in violations
+            if v.category == "secret_rotation" and "Secret rotated" in v.description
+        ]
+        assert len(rotation_violations) > 0, "No secret_rotation violation recorded"
+
+        # The violation context must carry the rotation metadata (no secret value).
+        v = rotation_violations[0]
+        assert v.context["secret_path"] == "security.jwtSecret"
+        assert v.context["principal"] == "auditor"
+        assert v.context["rotation_count"] >= 1
+
+    @pytest.mark.asyncio
+    async def test_state_and_hash_updated(self, cm_with_secrets, security_manager):
+        """Rotation increments rotation_count and updates config_hash."""
+        security_manager.register_allow_rule("test-operator", "secret.rotate", None)
+        initial_state = cm_with_secrets.get_secret_rotation_state()
+        assert initial_state["rotation_count"] == 0
+        initial_hash = cm_with_secrets.config_hash
+
+        cm_with_secrets.rotate_secret(
+            "security.jwtSecret", "rotated-1",
+            principal="test-operator",
+        )
+
+        state = cm_with_secrets.get_secret_rotation_state()
+        assert state["rotation_count"] == 1
+        assert "security.jwtSecret" in state["rotated_secret_versions"]
+        assert cm_with_secrets.config_hash != initial_hash
+
+        # Second rotation
+        cm_with_secrets.rotate_secret(
+            "security.apiKey", "rotated-2",
+            principal="test-operator",
+        )
+
+        state = cm_with_secrets.get_secret_rotation_state()
+        assert state["rotation_count"] == 2
+        assert "security.apiKey" in state["rotated_secret_versions"]
+
+    @pytest.mark.asyncio
+    async def test_old_secret_invalidated(self, cm_with_secrets, security_manager):
+        """After rotation, the old secret value is no longer retrievable."""
+        security_manager.register_allow_rule("test-operator", "secret.rotate", None)
+        old_value = "test-secret"
+        assert cm_with_secrets.get_secret("security.jwtSecret") == old_value
+
+        cm_with_secrets.rotate_secret(
+            "security.jwtSecret", "completely-new-value",
+            principal="test-operator",
+        )
+
+        new_value = cm_with_secrets.get_secret("security.jwtSecret")
+        assert new_value == "completely-new-value"
+        assert new_value != old_value
+        assert old_value != new_value
+
+    @pytest.mark.asyncio
+    async def test_regression_existing_secret_behavior(self, cm_with_secrets, security_manager):
+        """Non-rotated secrets behave identically to pre-rotation behavior."""
+        security_manager.register_allow_rule("test-operator", "secret.rotate", None)
+        # jwtSecret already exists with value "test-secret"
+        assert cm_with_secrets.get("security.jwtSecret") == "***"
+        assert cm_with_secrets.get_secret("security.jwtSecret") == "test-secret"
+
+        # Rotate one secret
+        cm_with_secrets.rotate_secret(
+            "security.jwtSecret", "new",
+            principal="test-operator",
+        )
+
+        # The rotated secret is updated
+        assert cm_with_secrets.get_secret("security.jwtSecret") == "new"
+
+        # The non-rotated secret is unchanged
+        assert cm_with_secrets.get_secret("security.apiKey") == "test-api-key"
+        assert cm_with_secrets.get("security.apiKey") == "***"
+
+        # Masking still works for rotated secrets
+        assert cm_with_secrets.get("security.jwtSecret") == "***"
+
+
+# =============================================================================
 # Run tests
 # =============================================================================
 

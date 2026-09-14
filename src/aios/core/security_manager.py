@@ -1065,6 +1065,19 @@ class SecurityManager:
         self._recorded_violations: dict[str, SecurityViolation] = {}
         self._violations_lock = threading.RLock()
 
+        # Allow-rule registry: the kernel's registered security policy surface
+        # (Part 4 §4.7.5 ABAC PDP). The ``authorize()`` decision-point consults
+        # these explicitly-registered rules BEFORE applying the fail-closed
+        # default. An unknown/absent rule still DENYs (CC-SEC-001 fail-closed);
+        # registering a rule is an affirmative allow, never a default.
+        #
+        # Rule keys are ``(principal, action, resource)``; a None wildcard in any
+        # position matches anything. This is the minimal, architecture-supported
+        # "kernel's registered security policy" the docstring references — NOT an
+        # invented policy engine. Fail-closed is preserved: no rule, no allow.
+        self._allow_rules: set[tuple[str | None, str | None, str | None]] = set()
+        self._allow_rules_lock = threading.RLock()
+
         # Configuration consumed from the FROZEN ConfigurationManager (C3).
         self._fail_closed = True
         self._audit_all_denials = True
@@ -1273,6 +1286,58 @@ class SecurityManager:
     # Business API — authorization & violation recording
     # ------------------------------------------------------------------
 
+    def register_allow_rule(
+        self,
+        principal: str | None,
+        action: str | None,
+        resource: str | None,
+    ) -> None:
+        """Register an explicit authorization allow-rule (Part 4 §4.7.5 ABAC PDP).
+
+        This is the kernel's registered security policy surface. A ``None`` in
+        any position is a wildcard (matches anything). Rules are additive and
+        affirmative — registering one grants ALLOW for matching requests, but the
+        fail-closed default (no matching rule -> DENY, CC-SEC-001) is never
+        weakened by the mere absence of a rule.
+
+        This is the minimal, architecture-supported allow path; it is NOT an
+        invented policy engine or identity provider. It lets the kernel's owning
+        policy layer authorize operations (e.g. ``secret.rotate``) that the
+        decision-point would otherwise DENY.
+        """
+        with self._allow_rules_lock:
+            self._allow_rules.add((principal, action, resource))
+        self._log_debug(
+            f"Registered allow-rule (principal={principal!r}, action={action!r}, "
+            f"resource={resource!r})"
+        )
+
+    def revoke_allow_rule(
+        self,
+        principal: str | None,
+        action: str | None,
+        resource: str | None,
+    ) -> None:
+        """Revoke a previously-registered authorization allow-rule."""
+        with self._allow_rules_lock:
+            self._allow_rules.discard((principal, action, resource))
+        self._log_debug(
+            f"Revoked allow-rule (principal={principal!r}, action={action!r}, "
+            f"resource={resource!r})"
+        )
+
+    def _has_allow_rule(
+        self, principal: str | None, action: str, resource: str
+    ) -> bool:
+        """True if an allow-rule affirmatively matches the request (wildcards ok)."""
+        with self._allow_rules_lock:
+            for rule_p, rule_a, rule_r in self._allow_rules:
+                if (rule_p is None or rule_p == principal) and (
+                    rule_a is None or rule_a == action
+                ) and (rule_r is None or rule_r == resource):
+                    return True
+        return False
+
     def authorize(
         self,
         principal: str | None,
@@ -1314,6 +1379,16 @@ class SecurityManager:
                         },
                     )
                 return decision
+        # Explicitly-registered allow-rule (the kernel's owned security policy,
+        # Part 4 §4.7.5). A matching rule affirmatively ALLOWs; absent any
+        # matching rule the fail-closed default below applies (CC-SEC-001).
+        # getattr-guard: an instance constructed without __init__ (e.g. tests
+        # hand-building a manager) has no allow-rule registry, so no rule can
+        # match — fail-closed is preserved.
+        if getattr(self, "_allow_rules", None) and self._has_allow_rule(
+            principal, action, resource
+        ):
+            return SecurityDecision.ALLOW
         # No explicit allow rule is defined within this manager's scope; the
         # default governance posture is fail-closed (DENY), unless the kernel's
         # owning policy layer has authorized the operation out-of-band.

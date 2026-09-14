@@ -737,6 +737,47 @@ def _collect_secret_paths(config: dict[str, Any], prefix: str = "") -> set[str]:
 
 
 # ---------------------------------------------------------------------------
+# Secrets-Management (M11 §3.4 — Rotation Overlay)
+# ---------------------------------------------------------------------------
+
+
+class SecretNotAuthorizedError(ConfigurationFrozenError):
+    """Raised when a secret rotation is attempted but authorization fails."""
+
+
+def _apply_secrets_overlay(
+    config: Any, secret_overlay: dict[str, Any]
+) -> Any:
+    """Return a normalized config view with secret paths overridden by the overlay.
+
+    The frozen config itself is never mutated; this produces a new normalized
+    (dict-like ``FrozenMapping``) structure so that ``_frozen_config`` and its
+    hash remain intact for auditing while rotated values are visible through the
+    accessors (which all expect normalized dict/FrozenMapping nodes).
+    """
+    if not secret_overlay:
+        return config
+    return _normalize(_merge_secrets(_normalize(config), secret_overlay))
+
+
+def _merge_secrets(base: Any, overlay: dict[str, Any]) -> Any:
+    """Recursively overlay secret values onto a config (dict or FrozenMapping)."""
+    if isinstance(base, (dict, FrozenMapping)):
+        result: dict[str, Any] = dict(base)
+        for key, value in overlay.items():
+            if isinstance(value, dict) and isinstance(result.get(key), (dict, FrozenMapping)):
+                result[key] = _merge_secrets(result[key], value)
+            elif isinstance(value, dict):
+                result[key] = _merge_secrets(result.get(key, {}) or {}, value)
+            else:
+                result[key] = value
+        return result
+    if isinstance(base, (list, tuple)):
+        return [_merge_secrets(v, overlay) for v in base]
+    return base
+
+
+# ---------------------------------------------------------------------------
 # ConfigurationManager — Core Component C3
 # ---------------------------------------------------------------------------
 
@@ -781,7 +822,10 @@ class ConfigurationManager:
         # NOT a mutable dict — FIX 1). Guarded by _lock for publication.
         self._frozen_config: Any = None
         self._secret_paths: set[str] = set()
+        self._secret_overlay: dict[str, Any] = {}
+        self._rotation_count: int = 0
         self._config_hash: str | None = None
+        self._rotated_secret_versions: dict[str, int] = {}
         # Strong references to in-flight emission tasks so they are never
         # garbage-collected mid-flight (FIX 4).
         self._pending_tasks: set[asyncio.Future[Any]] = set()
@@ -1302,7 +1346,10 @@ class ConfigurationManager:
             # Return a normalized, read-only view over the deep-frozen internal
             # storage. The internal tuple storage itself is never exposed, so
             # callers cannot mutate it (FIX 1).
-            return _normalize(self._frozen_config) if self._frozen_config is not None else {}
+            base = _normalize(self._frozen_config) if self._frozen_config is not None else {}
+            if self._secret_overlay:
+                return _apply_secrets_overlay(base, self._secret_overlay)
+            return base
         with self._lock:
             return self._merged
 
@@ -1320,6 +1367,162 @@ class ConfigurationManager:
             raise ConfigurationFrozenError("Overrides prohibited after freeze", path="<root>")
         with self._lock:
             self._merged = _deep_merge(self._merged, overrides)
+
+    # --- Secret rotation (M11 §3.4 — bounded, overlay-based) ------------------
+
+    def rotate_secret(
+        self,
+        path: str,
+        new_value: Any,
+        *,
+        principal: str | None = None,
+        security_manager: Any | None = None,
+    ) -> bool:
+        """Rotate a secret at ``path`` to ``new_value`` (M11 §3.4).
+
+        This is a BOUNDED secret-lifecycle operation that preserves the
+        immutable configuration invariant (§3.5.6 / §3.5.12): the frozen
+        configuration is never mutated. Instead, the new secret value is stored
+        in a separate in-memory overlay (``_secret_overlay``) that shadows the
+        frozen value for all read accessors. The old value is effectively
+        invalidated — ``get_secret()`` returns the new value, and ``get()``
+        continues to mask.
+
+        Authorization is REQUIRED and fail-closed:
+          * If ``security_manager`` is provided directly, it is used.
+          * Otherwise the canonical singleton is looked up via
+            ``get_security_manager()``.
+          * If no SecurityManager is available, or authorization is DENY,
+            a :class:`SecretNotAuthorizedError` is raised (fail-closed).
+
+        Only paths recognized as secrets by ``is_secret_path()`` are eligible;
+        rotating a non-secret path raises ``ConfigurationError``.
+
+        After a successful rotation:
+          * ``_rotated_secret_versions`` records the new rotation count for the
+            path so callers can inspect rotation history.
+          * ``_rotation_count`` is incremented.
+          * The config hash is recomputed so the new rotation state is reflected
+            in deterministic deployment IDs (the hash changes because the
+            rotation count is incorporated via the overlay).
+          * An audit entry is written via ``StructuredLogger.audit()`` and a
+            canonical ``SECURITY_ISSUE_FOUND`` event is emitted via the
+            SecurityManager.
+
+        Args:
+            path: Dotted config path of the secret to rotate (e.g.
+                ``"security.jwtSecret"``). Must be a recognized secret path.
+            new_value: The new secret value.
+            principal: The authorization principal requesting rotation.
+            security_manager: Optional explicit SecurityManager instance
+                (normally resolved from the canonical singleton).
+
+        Returns:
+            ``True`` if the rotation was applied.
+
+        Raises:
+            ConfigurationFrozenError: If the configuration is not yet frozen
+                (``rotate_secret`` is a post-freeze operation).
+            ConfigurationError: If ``path`` is not a recognized secret path.
+            SecretNotAuthorizedError: If authorization fails (fail-closed).
+        """
+        from aios.core.security_manager import (
+            SecurityDecision,
+            get_security_manager,
+        )
+
+        if self._state is not ConfigState.FROZEN:
+            raise ConfigurationFrozenError(
+                "Secret rotation requires a frozen configuration",
+                path=path,
+            )
+
+        if not is_secret_path(path.split(".")):
+            raise ConfigurationError(
+                f"Path '{path}' is not a recognized secret",
+                path=path,
+            )
+
+        # Resolve SecurityManager and authorize (fail-closed).
+        sm = security_manager
+        if sm is None:
+            try:
+                sm = get_security_manager()
+            except Exception:  # noqa: BLE001
+                sm = None
+
+        if sm is None or not getattr(sm, "_initialized", False):
+            raise SecretNotAuthorizedError(
+                "Secret rotation denied: no SecurityManager available",
+                path=path,
+            )
+
+        decision = sm.authorize(
+            principal=principal,
+            action="secret.rotate",
+            resource=f"config:{path}",
+            context={"rotation": True},
+        )
+        if decision != SecurityDecision.ALLOW:
+            raise SecretNotAuthorizedError(
+                f"Secret rotation denied for principal '{principal}' "
+                f"(decision={decision.value})",
+                path=path,
+            )
+
+        # Apply the rotation via the overlay (does NOT mutate _frozen_config).
+        with self._lock:
+            _set_path(self._secret_overlay, path, new_value)
+            self._rotation_count += 1
+            self._rotated_secret_versions[path] = self._rotation_count
+
+        # Recompute the config hash so rotation state is reflected.
+        normalized = _normalize(self._frozen_config) if self._frozen_config else {}
+        self._config_hash = _compute_config_hash(
+            normalized, self._secret_overlay, self._rotation_count
+        )
+
+        # Audit trail (C4 StructuredLogger — AUDIT level, never dropped).
+        try:
+            from aios.core.structured_logger import get_logger
+
+            sl = get_logger()
+            sl.audit(
+                "Secret rotated",
+                secret_path=path,
+                principal=principal or "anonymous",
+                rotation_count=self._rotation_count,
+            )
+        except Exception:  # noqa: BLE001
+            logger.debug("StructuredLogger unavailable for audit trail")
+
+        # Canonical security event (CONFLICT E.1: no SecretRotatedEvent exists).
+        sm.record_violation(
+            severity="info",
+            description=f"Secret rotated at path '{path}'",
+            category="secret_rotation",
+            context={
+                "secret_path": path,
+                "principal": principal or "anonymous",
+                "rotation_count": self._rotation_count,
+            },
+        )
+
+        return True
+
+    def get_secret_rotation_state(self) -> dict[str, Any]:
+        """Return the current secret-rotation overlay state (metadata only).
+
+        Returns secret paths and rotation counts WITHOUT exposing any secret
+        values. Used by DeploymentService / inspect for deterministic state
+        reporting.
+        """
+        with self._lock:
+            return {
+                "rotation_count": self._rotation_count,
+                "rotated_secret_versions": dict(self._rotated_secret_versions),
+                "rotated_paths": list(self._secret_overlay.keys()),
+            }
 
     # --- Configuration inspection / redaction (M10 Deployment) --------------
 
@@ -1341,6 +1544,7 @@ class ConfigurationManager:
             "frozen": self._state is ConfigState.FROZEN,
             "config_hash": self._config_hash,
             "secret_paths": list(self._secret_paths),
+            "rotation_state": self.get_secret_rotation_state(),
         }
 
         if include_metadata:
@@ -1351,6 +1555,7 @@ class ConfigurationManager:
                     "schema_valid": self._validate_silently(config),
                     "startup_errors": self.validate_startup() if self._state is ConfigState.FROZEN else ["Not frozen"],
                 },
+                "secret_rotation": self.get_secret_rotation_state(),
             }
 
         return result
@@ -1535,7 +1740,11 @@ def _masked_view(value: Any) -> Any:
 # ---------------------------------------------------------------------------
 
 
-def _compute_config_hash(config: dict[str, Any]) -> str:
+def _compute_config_hash(
+    config: dict[str, Any],
+    secret_overlay: dict[str, Any] | None = None,
+    rotation_count: int = 0,
+) -> str:
     """Deterministic SHA-256 over canonical JSON of the (secret-aware) config.
 
     Secret values are masked before hashing so the hash reflects the *effective*
@@ -1545,12 +1754,21 @@ def _compute_config_hash(config: dict[str, Any]) -> str:
     architecture's "identical effective config -> identical hash" invariant while
     still hiding secret bytes, secrets are masked to a constant before hashing.
 
+    If ``secret_overlay`` is provided, the overlay is merged into the config
+    before masking so the hash reflects the current rotation state. The
+    ``rotation_count`` is incorporated so that each rotation produces a new
+    hash even though individual secret *values* are masked.
+
     Determinism guarantees (per Task 7): no object identity, no memory address,
     no process state, no random values, no dict insertion order — canonical JSON
     uses sorted keys, and the frozen config is key-sorted. Uses the same SHA-256
     over canonical JSON convention as Event Core (INV-EVT-007).
     """
+    if secret_overlay:
+        config = _merge_secrets(config, secret_overlay)
     masked = _masked_view(config)
+    if rotation_count > 0:
+        masked = {**masked, "_rotation_count": rotation_count}
     return compute_checksum(masked)
 
 
@@ -1602,6 +1820,7 @@ __all__ = [
     "KernelConfigSchema",
     "PropertySchema",
     "is_secret_path",
+    "SecretNotAuthorizedError",
     "get_configuration_manager",
     "set_configuration_manager",
     "reset_configuration_manager_singleton",
