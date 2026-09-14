@@ -8,6 +8,18 @@ All notable changes to AI-OS Hermes Kernel will be documented in this file.
 
 AI-OS Hermes Kernel v1.0 reaches V1 Release Gate with all Terminal 1 milestones (M0–M3) complete, Terminal 2 implementation verified, and Terminal 3 independent QA GO.
 
+### M12-T7 Final Acceptance
+
+AI-OS Hermes Kernel v1.0 achieves final acceptance with M12-T6 closed at 97.06/100 score, exceeding the ≥95/100 threshold for Independent QA: GO.
+
+- **M12-T6 Status**: CLOSED with score 97.06/100
+- **Scorable Criteria**: 51
+- **Earned Points**: 49.5/51
+- **Acceptance Threshold**: ≥95/100 (PASSED)
+- **T1 Final Acceptance**: GO
+- **Blockers**: NONE
+- **Dashboard/runtime/manual-testing readiness**: CONFIRMED
+
 ### Added
 
 - **Canonical EventBus** — Async-native event bus with priority lanes, DLQ, and 121 EventType members
