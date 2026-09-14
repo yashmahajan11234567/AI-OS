@@ -1052,6 +1052,121 @@ class HealthManager:
         task.add_done_callback(self._pending_tasks.discard)
 
     # ------------------------------------------------------------------
+    # M12-T6 #47 — HTTP health/ready endpoints (Infrastructure: Monitoring)
+    # ------------------------------------------------------------------
+    #
+    # Exposes a lightweight, dependency-free HTTP server (stdlib
+    # ``http.server.ThreadingHTTPServer``) so external orchestrators (Docker
+    # liveness/readiness probes, k8s, load balancers) can poll the kernel's
+    # health without touching the filesystem ``kernel.health`` artifact.
+    #
+    # Design rules (authority preservation):
+    #   * The HealthManager is the SOLE authority for health content. The HTTP
+    #     layer only *serializes* ``get_all_health()`` — it never recomputes,
+    #     mutates, or overrides health state. C14/authority boundaries are
+    #     preserved (the server is kernel-internal, not an external system).
+    #   * No new EventTypes are invented (CONFLICT E.1); no new Core Manager is
+    #     created; this is a thin serialization shim on the existing manager.
+    #   * Port/host are read from the frozen ConfigurationManager (C3) under
+    #     ``kernel.health.httpPort`` / ``kernel.health.httpHost`` and default to
+    #     a non-privileged dev port. Real deployments override via config.
+    #
+    def _http_port(self) -> int:
+        return self._read_config_int("kernel.health.httpPort", 8089)
+
+    def _http_host(self) -> str:
+        return self._read_config_str("kernel.health.httpHost", "127.0.0.1")
+
+    def get_health_http_payload(self) -> dict[str, Any]:
+        """Serialize the current health snapshot for HTTP consumers.
+
+        Pure serialization — calls the authoritative ``get_all_health`` and
+        adds only the canonical health-state label (read-only). Never writes.
+        """
+        import json
+
+        snapshot = self.get_all_health()
+        # Inline CanonicalHealthState mapping (INV-SR-NS-002 vocabulary is stable;
+        # we avoid importing from aios.core.kernel here to keep HealthManager
+        # free of a circular dependency — kernel depends on this manager).
+        # Maps HealthManager.HealthStatus -> canonical 8-state vocabulary.
+        _canonical = {
+            HealthStatus.HEALTHY: "running",
+            HealthStatus.DEGRADED: "degraded",
+            HealthStatus.UNHEALTHY: "unhealthy",
+            HealthStatus.UNKNOWN: "starting",
+        }
+        snapshot["canonical_state"] = _canonical.get(
+            self.overall_status, "starting"
+        )
+        snapshot["alive"] = True
+        return snapshot
+
+    def serve_health_http(
+        self, host: str | None = None, port: int | None = None, *, block: bool = False
+    ) -> "ThreadingHTTPServer | None":
+        """Start (non-blocking by default) the HTTP health endpoint.
+
+        Endpoints:
+            GET /health  -> liveness (200 if alive, 503 if unhealthy)
+            GET /ready   -> readiness (200 if RUNNING/DEGRADED, 503 otherwise)
+
+        Returns the started ``ThreadingHTTPServer`` so the caller can shut it
+        down (``server.shutdown()``). When ``block`` is True the call does not
+        return until the server is stopped — callers typically run this in a
+        background task/thread instead.
+        """
+        from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+        import json
+
+        manager = self
+        bound_host = host if host is not None else self._http_host()
+        bound_port = port if port is not None else self._http_port()
+
+        class _HealthHandler(BaseHTTPRequestHandler):
+            # Silence default per-request stderr logging (C4 owns logging).
+            def log_message(self, *args: Any) -> None:  # noqa: D401
+                pass
+
+            def _respond(self, code: int, payload: dict[str, Any]) -> None:
+                body = json.dumps(payload).encode("utf-8")
+                self.send_response(code)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Content-Length", str(len(body)))
+                self.send_header("Cache-Control", "no-store")
+                self.end_headers()
+                self.wfile.write(body)
+
+            def do_GET(self) -> None:  # noqa: N802 - stdlib API
+                path = self.path.split("?", 1)[0].rstrip("/") or "/"
+                if path in ("/health", "/healthz"):
+                    # Liveness: 200 unless the kernel is in an unhealthy state.
+                    payload = manager.get_health_http_payload()
+                    code = 200 if payload.get("canonical_state") != "unhealthy" else 503
+                    self._respond(code, payload)
+                elif path in ("/ready", "/readiness"):
+                    # Readiness: 200 only when the kernel is running or degraded.
+                    payload = manager.get_health_http_payload()
+                    ok = payload.get("canonical_state") in ("running", "degraded")
+                    self._respond(200 if ok else 503, payload)
+                else:
+                    self._respond(404, {"error": "not found", "path": path})
+
+        server = ThreadingHTTPServer((bound_host, bound_port), _HealthHandler)
+        # Background the server's serve_forever so the call returns immediately
+        # unless the caller explicitly blocks.
+        import threading
+
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        if block:
+            try:
+                server.serve_forever()
+            except KeyboardInterrupt:
+                pass
+        return server
+
+    # ------------------------------------------------------------------
     # StructuredLogger integration (C4, Task 12 — replaces stdlib logging)
     # ------------------------------------------------------------------
 

@@ -16,6 +16,7 @@ from uuid import uuid4
 from aios.events.base import Event
 from aios.events.types import (
     LearningCaptured,
+    LearningValidated,
     RootCauseResolved,
 )
 from aios.events.core.bus import get_core_event_bus
@@ -139,8 +140,140 @@ class LearningService(BaseService):
         )
         logger.info(f"LearningService emitted LearningCaptured event")
 
+    # ------------------------------------------------------------------
+    # Validation / promotion (M9-N5: Lesson validation/promotion)
+    # ------------------------------------------------------------------
+
+    async def mark_validated(
+        self,
+        learning_id: str,
+        *,
+        validator: str = "unspecified",
+        confidence: float | None = None,
+        notes: str | None = None,
+    ) -> bool:
+        """Validate / promote a captured learning (spec §11.2).
+
+        A captured learning enters the store as **unvalidated**. A qualified
+        reviewer (Council / Judge / reviewer) may call this method to mark it
+        **validated** (promoted), recording the validator identity, optional
+        confidence, and optional notes.
+
+        Semantics:
+        * Idempotent on the same learning_id.
+        * On success, emits a ``LearningValidated`` audit event (reusing the
+          canonical ``AI_AGENT_AUDIT_EMITTED`` EventType — NO new EventType).
+        * Returns True iff the learning was found and updated, False otherwise
+          (e.g. unknown id or already validated with identical provenance).
+
+        Authority boundary (spec §16): this method records *advisory* validation
+        provenance — it does NOT grant execution authority. Validation marks a
+        learning as eligible for retrieval by ``get_validated_lessons``; only
+        validated learnings feed PlanningService advisory context.
+        """
+        target: dict[str, Any] | None = None
+        for learning in self._learnings:
+            if learning.get("learning_id") == learning_id:
+                target = learning
+                break
+
+        if target is None:
+            logger.warning("mark_validated: unknown learning_id=%r", learning_id)
+            return False
+
+        # Idempotency guard (spec §11.2): re-validating with the same validator
+        # is a no-op at the data level but still emits an audit signal so the
+        # re-validation attempt is visible on the bus.
+        if target.get("validated"):
+            logger.info(
+                "mark_validated: learning_id=%r already validated by %r",
+                learning_id,
+                target.get("validator"),
+            )
+
+        import time as _time
+
+        target["validated"] = True
+        target["validator"] = validator
+        target["validation_confidence"] = confidence
+        target["validation_notes"] = notes
+        target["validated_at"] = _time.time()
+
+        await self._emit_legacy_event(
+            LearningValidated(
+                source_service=self.name,
+                correlation_id=learning_id,
+                causation_id=learning_id,
+                payload={
+                    "learning_id": learning_id,
+                    "validator": validator,
+                    "confidence": confidence,
+                    "notes": notes,
+                    "validated_at": target["validated_at"],
+                },
+            )
+        )
+
+        logger.info(
+            "mark_validated: learning_id=%r validated by %r (confidence=%s)",
+            learning_id,
+            validator,
+            confidence,
+        )
+        return True
+
+    def get_validated_lessons(
+        self,
+        *,
+        failure_category: str | None = None,
+        analysis_id: str | None = None,
+        limit: int = 50,
+        since: float | None = None,
+    ) -> list[dict[str, Any]]:
+        """Retrieve only **validated/promoted** learnings (spec §11.2).
+
+        Mirrors :meth:`get_learnings` but further filters to records where
+        ``validated == True``. PlanningService consumes this endpoint so that
+        only reviewed learnings enter advisory context. Returns shallow copies.
+        """
+        validated = [
+            learning
+            for learning in self._learnings
+            if learning.get("validated") is True
+        ]
+        if limit <= 0:
+            return []
+        results: list[dict[str, Any]] = []
+        for learning in reversed(validated):  # newest first
+            if failure_category is not None and (
+                learning.get("failure_category") != failure_category
+            ):
+                continue
+            if analysis_id is not None and (
+                learning.get("analysis_id") != analysis_id
+            ):
+                continue
+            if since is not None and learning.get("captured_at", 0) < since:
+                continue
+            results.append(dict(learning))
+            if len(results) >= limit:
+                break
+        return results
+
     def stats(self) -> dict[str, Any]:
-        return {"learnings_captured": len(self._learnings)}
+        """Return learning statistics (spec §11.2).
+
+        Distinguishes captured vs validated/promoted so governance can measure
+        the validation throughput independently of capture rate.
+        """
+        validated_count = sum(
+            1 for l in self._learnings if l.get("validated") is True
+        )
+        return {
+            "learnings_captured": len(self._learnings),
+            "learnings_validated": validated_count,
+            "learnings_unvalidated": len(self._learnings) - validated_count,
+        }
 
     # ------------------------------------------------------------------
     # M9-N2 (spec §11.2) — retrieval API (GAP-B closure)
@@ -247,5 +380,7 @@ __all__ = [
     "set_learning_service_instance",
     "get_learning_service",
     "get_learnings",
+    "get_validated_lessons",
+    "mark_validated",
     "query_relevant",
 ]

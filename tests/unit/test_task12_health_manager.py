@@ -461,3 +461,129 @@ def test_health_manager_error_is_exception():
     assert isinstance(err, Exception)
     with pytest.raises(HealthManagerError):
         raise err
+
+
+# ---------------------------------------------------------------------------
+# M12-T6 #47 — HTTP health endpoint (Infrastructure: Monitoring)
+# ---------------------------------------------------------------------------
+
+
+def test_health_http_payload_includes_canonical_state_and_alive(hm):
+    hm.record_health("svc", "c1", HealthStatus.HEALTHY)
+    payload = hm.get_health_http_payload()
+    assert payload["overall"] == "HEALTHY"
+    # canonical_state maps to the 8-state vocabulary (lowercase).
+    assert payload["canonical_state"] == "running"
+    assert payload["alive"] is True
+    assert payload["total_checks"] == 1
+
+
+def test_health_http_payload_degraded(hm):
+    hm.record_health("svc", "c1", HealthStatus.DEGRADED)
+    payload = hm.get_health_http_payload()
+    assert payload["canonical_state"] == "degraded"
+
+
+def test_health_http_payload_unhealthy(hm):
+    hm.record_health("svc", "c1", HealthStatus.UNHEALTHY)
+    payload = hm.get_health_http_payload()
+    assert payload["canonical_state"] == "unhealthy"
+
+
+def test_serve_health_http_liveness_200_when_healthy(hm):
+    """GET /health returns 200 and a JSON payload when the kernel is healthy."""
+    import urllib.request
+
+    hm.record_health("svc", "c1", HealthStatus.HEALTHY)
+    server = hm.serve_health_http(host="127.0.0.1", port=0)
+    try:
+        port = server.server_address[1]
+        with urllib.request.urlopen(
+            f"http://127.0.0.1:{port}/health", timeout=5
+        ) as resp:
+            assert resp.status == 200
+            import json
+
+            data = json.loads(resp.read().decode("utf-8"))
+            assert data["canonical_state"] == "running"
+            assert data["alive"] is True
+    finally:
+        server.shutdown()
+        server.server_close()
+
+
+def test_serve_health_http_readiness_200_when_degraded(hm):
+    """GET /ready returns 200 when DEGRADED (degraded kernels still serve)."""
+    import urllib.request
+
+    hm.record_health("svc", "c1", HealthStatus.DEGRADED)
+    server = hm.serve_health_http(host="127.0.0.1", port=0)
+    try:
+        port = server.server_address[1]
+        with urllib.request.urlopen(
+            f"http://127.0.0.1:{port}/ready", timeout=5
+        ) as resp:
+            assert resp.status == 200
+            import json
+
+            data = json.loads(resp.read().decode("utf-8"))
+            assert data["canonical_state"] == "degraded"
+    finally:
+        server.shutdown()
+        server.server_close()
+
+
+def test_serve_health_http_readiness_503_when_unhealthy(hm):
+    """GET /ready returns 503 when UNHEALTHY (kernel not fit for work)."""
+    import urllib.request
+    from urllib.error import HTTPError
+
+    hm.record_health("svc", "c1", HealthStatus.UNHEALTHY)
+    server = hm.serve_health_http(host="127.0.0.1", port=0)
+    try:
+        port = server.server_address[1]
+        with pytest.raises(HTTPError) as exc_info:
+            urllib.request.urlopen(
+                f"http://127.0.0.1:{port}/ready", timeout=5
+            )
+        assert exc_info.value.code == 503
+    finally:
+        server.shutdown()
+        server.server_close()
+
+
+def test_serve_health_http_liveness_503_when_unhealthy(hm):
+    """GET /health (liveness) returns 503 when UNHEALTHY."""
+    import urllib.request
+    from urllib.error import HTTPError
+
+    hm.record_health("svc", "c1", HealthStatus.UNHEALTHY)
+    server = hm.serve_health_http(host="127.0.0.1", port=0)
+    try:
+        port = server.server_address[1]
+        with pytest.raises(HTTPError) as exc_info:
+            urllib.request.urlopen(
+                f"http://127.0.0.1:{port}/healthz", timeout=5
+            )
+        assert exc_info.value.code == 503
+    finally:
+        server.shutdown()
+        server.server_close()
+
+
+def test_serve_health_http_404_unknown_path(hm):
+    """Unknown paths return 404."""
+    import urllib.request
+    from urllib.error import HTTPError
+
+    server = hm.serve_health_http(host="127.0.0.1", port=0)
+    try:
+        port = server.server_address[1]
+        with pytest.raises(HTTPError) as exc_info:
+            urllib.request.urlopen(
+                f"http://127.0.0.1:{port}/nope", timeout=5
+            )
+        assert exc_info.value.code == 404
+    finally:
+        server.shutdown()
+        server.server_close()

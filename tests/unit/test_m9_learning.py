@@ -473,6 +473,317 @@ class TestPlanningAdvisoryContext:
 
 
 # ---------------------------------------------------------------------------
+# M9-N5 — Lesson validation / promotion
+# ---------------------------------------------------------------------------
+
+
+class TestMarkValidated:
+    """Covers the validation/promotion capability (spec §11.2)."""
+
+    def _service(self):
+        from aios.services.learning import LearningService
+
+        return LearningService()
+
+    async def _seed(self, svc, count=3):
+        for i in range(count):
+            await svc.capture_learning_from_analysis(
+                analysis_id=f"analysis_val-{i}",
+                failure_category="execution_error",
+                recommended_action="RETRY_WITH_BACKOFF",
+                root_cause=f"root cause {i}",
+                preventive_measures=[f"measure-{i}"],
+            )
+
+    async def test_validates_existing_learning(self):
+        """mark_validated finds the learning and sets validated==True."""
+        svc = self._service()
+        await self._seed(svc, 2)
+        target_id = svc._learnings[0]["learning_id"]
+
+        ok = await svc.mark_validated(
+            target_id, validator="council_judge", confidence=0.92, notes="verified"
+        )
+        assert ok is True
+        assert svc._learnings[0]["validated"] is True
+        assert svc._learnings[0]["validator"] == "council_judge"
+        assert svc._learnings[0]["validation_confidence"] == 0.92
+        assert svc._learnings[0]["validation_notes"] == "verified"
+        assert svc._learnings[0]["validated_at"] is not None
+
+    async def test_returns_false_for_unknown_id(self):
+        """mark_validated on a non-existent learning_id returns False."""
+        svc = self._service()
+        ok = await svc.mark_validated("learn_nonexistent", validator="reviewer")
+        assert ok is False
+
+    async def test_idempotent_re_validation_preserves_evidence(self):
+        """Re-validating is idempotent and preserves original evidence."""
+        svc = self._service()
+        await self._seed(svc, 1)
+        target_id = svc._learnings[0]["learning_id"]
+
+        await svc.mark_validated(target_id, validator="v1", confidence=0.8)
+        first_validated_at = svc._learnings[0]["validated_at"]
+
+        ok = await svc.mark_validated(
+            target_id, validator="v2", confidence=0.9, notes="re-checked"
+        )
+        assert ok is True
+        # Re-validation updates the record (idempotent at the data level).
+        assert svc._learnings[0]["validator"] == "v2"
+        assert svc._learnings[0]["validation_confidence"] == 0.9
+        assert svc._learnings[0]["validation_notes"] == "re-checked"
+        # Original evidence preserved.
+        assert svc._learnings[0]["root_cause"] == "root cause 0"
+
+    async def test_emits_learning_validated_event(self):
+        """Validation emits an audit event via AI_AGENT_AUDIT_EMITTED (no new type).
+
+        The LearningService._emit_legacy_event forwards to the canonical EventBus.
+        In test context with dispatch-worker disabled, we spy on the emit call
+        directly to verify the event payload structure without depending on
+        bus dispatch timing.
+        """
+        svc = self._service()
+        await self._seed(svc, 1)
+        target_id = svc._learnings[0]["learning_id"]
+
+        captured_events: list = []
+        original_emit = svc._emit_legacy_event
+
+        async def spy(event):
+            captured_events.append(event)
+            return await original_emit(event)
+
+        svc._emit_legacy_event = spy  # type: ignore[method-assign]
+        await svc.mark_validated(target_id, validator="judge", confidence=0.85)
+
+        validated_events = [
+            e for e in captured_events
+            if e.event_type.value == "AI_AGENT_AUDIT_EMITTED"
+            and "learning_id" in (e.payload or {})
+        ]
+        assert validated_events, "expected a LearningValidated audit event"
+        payload = validated_events[0].payload
+        assert payload["validator"] == "judge"
+        assert payload["learning_id"] == target_id
+        assert payload["confidence"] == 0.85
+
+    async def test_does_not_mutate_unrelated_runtime(self):
+        """Validation only changes the target learning record."""
+        svc = self._service()
+        await self._seed(svc, 3)
+        target_id = svc._learnings[0]["learning_id"]
+
+        original_count = len(svc._learnings)
+        await svc.mark_validated(target_id, validator="judge")
+
+        assert len(svc._learnings) == original_count  # no add/remove
+        assert svc._learnings[1].get("validated") is not True  # untouched
+        assert svc._learnings[2].get("validated") is not True  # untouched
+
+    async def test_emits_event_using_canonical_eventtype(self):
+        """Validation reuses AI_AGENT_AUDIT_EMITTED — no new EventType (spec §4)."""
+        svc = self._service()
+        await self._seed(svc, 1)
+        target_id = svc._learnings[0]["learning_id"]
+
+        captured_types: set = set()
+        original_emit = svc._emit_legacy_event
+
+        async def spy(event):
+            from aios.events.core.types import EventType as CT
+
+            if isinstance(event.event_type, CT):
+                captured_types.add(event.event_type)
+            else:
+                captured_types.add(str(event.event_type))
+            return await original_emit(event)
+
+        svc._emit_legacy_event = spy  # type: ignore[method-assign]
+        await svc.mark_validated(target_id, validator="judge")
+
+        from aios.events.core.types import EventType as CanonicalEventType
+
+        # Must reuse the canonical type, never introduce a new one.
+        assert CanonicalEventType.AI_AGENT_AUDIT_EMITTED in captured_types
+
+
+class TestGetValidatedLessons:
+    """get_validated_lessons returns only validated/promoted records."""
+
+    def _service(self):
+        from aios.services.learning import LearningService
+
+        return LearningService()
+
+    async def _seed(self, svc, count=3):
+        for i in range(count):
+            await svc.capture_learning_from_analysis(
+                analysis_id=f"analysis_vl-{i}",
+                failure_category="execution_error" if i % 2 == 0 else "timeout",
+                recommended_action="RETRY_WITH_BACKOFF",
+                root_cause=f"root cause {i}",
+                preventive_measures=[f"measure-{i}"],
+            )
+
+    async def test_returns_only_validated(self):
+        """Unvalidated learnings must NOT appear in get_validated_lessons."""
+        svc = self._service()
+        await self._seed(svc, 3)
+        # None validated yet.
+        assert svc.get_validated_lessons() == []
+
+        await svc.mark_validated(svc._learnings[1]["learning_id"], validator="judge")
+        validated = svc.get_validated_lessons()
+        assert len(validated) == 1
+        assert validated[0]["analysis_id"] == "analysis_vl-1"
+
+    async def test_filters_by_failure_category(self):
+        svc = self._service()
+        await self._seed(svc, 4)
+        await svc.mark_validated(svc._learnings[0]["learning_id"], validator="j")
+        await svc.mark_validated(svc._learnings[2]["learning_id"], validator="j")
+        results = svc.get_validated_lessons(failure_category="execution_error")
+        assert len(results) == 2
+        assert all(l["failure_category"] == "execution_error" for l in results)
+
+    async def test_filters_by_analysis_id(self):
+        svc = self._service()
+        await self._seed(svc, 3)
+        await svc.mark_validated(svc._learnings[1]["learning_id"], validator="j")
+        found = svc.get_validated_lessons(analysis_id="analysis_vl-1")
+        assert len(found) == 1
+
+    async def test_limit_bounds_result(self):
+        svc = self._service()
+        await self._seed(svc, 5)
+        for l in svc._learnings:
+            await svc.mark_validated(l["learning_id"], validator="j")
+        assert len(svc.get_validated_lessons(limit=2)) == 2
+
+    async def test_shallow_copies_not_store_references(self):
+        svc = self._service()
+        await self._seed(svc, 1)
+        await svc.mark_validated(svc._learnings[0]["learning_id"], validator="j")
+        retrieved = svc.get_validated_lessons()[0]
+        retrieved["tampered"] = True
+        assert "tampered" not in svc._learnings[0]
+
+    async def test_validated_records_include_validation_metadata(self):
+        svc = self._service()
+        await self._seed(svc, 1)
+        await svc.mark_validated(
+            svc._learnings[0]["learning_id"],
+            validator="council_judge",
+            confidence=0.88,
+            notes="confirmed reproducible",
+        )
+        retrieved = svc.get_validated_lessons()[0]
+        assert retrieved["validated"] is True
+        assert retrieved["validator"] == "council_judge"
+        assert retrieved["validation_confidence"] == 0.88
+        assert retrieved["validation_notes"] == "confirmed reproducible"
+
+
+class TestStatsDistinguishesValidated:
+    """stats() must distinguish captured vs validated/promoted counts."""
+
+    def _service(self):
+        from aios.services.learning import LearningService
+
+        return LearningService()
+
+    async def _seed(self, svc, count=3):
+        for i in range(count):
+            await svc.capture_learning_from_analysis(
+                analysis_id=f"analysis_st-{i}",
+                failure_category="execution_error",
+                recommended_action="R",
+                root_cause=f"rc {i}",
+                preventive_measures=[],
+            )
+
+    async def test_initial_stats_unvalidated(self):
+        svc = self._service()
+        await self._seed(svc, 3)
+        stats = svc.stats()
+        assert stats["learnings_captured"] == 3
+        assert stats["learnings_validated"] == 0
+        assert stats["learnings_unvalidated"] == 3
+
+    async def test_stats_after_partial_validation(self):
+        svc = self._service()
+        await self._seed(svc, 5)
+        await svc.mark_validated(svc._learnings[0]["learning_id"], validator="j")
+        await svc.mark_validated(svc._learnings[2]["learning_id"], validator="j")
+        stats = svc.stats()
+        assert stats["learnings_captured"] == 5
+        assert stats["learnings_validated"] == 2
+        assert stats["learnings_unvalidated"] == 3
+
+
+class TestPlanningPrefersValidated:
+    """PlanningService prefers validated learnings for advisory context."""
+
+    def _planner(self):
+        from aios.services.planning import PlanningService
+
+        return PlanningService()
+
+    async def test_plan_uses_validated_lessons(self):
+        """Validated learnings appear in advisory context with advisory markers."""
+        from aios.services.bootstrap import bootstrap_engineering_services
+        from aios.services.learning import get_learning_service
+
+        bootstrap_engineering_services(enabled=["memory", "learning", "planning"])
+        learning_svc = get_learning_service()
+        await learning_svc.capture_learning_from_analysis(
+            analysis_id="analysis_pv",
+            failure_category="timeout",
+            recommended_action="INCREASE_TIMEOUT",
+            root_cause="network latency to external api",
+            preventive_measures=["circuit breaker"],
+        )
+        # Validate it so it enters get_validated_lessons.
+        await learning_svc.mark_validated(
+            learning_svc._learnings[0]["learning_id"], validator="judge"
+        )
+
+        planner = self._planner()
+        plan = planner.plan({"task_id": "t1", "goal": "fix network latency issues"})
+        ctx = plan["advisory_context"]
+        assert ctx["advisory"] is True
+        assert any("network" in l["root_cause"] for l in ctx["learnings"])
+        # Advisory markers force-set on every retrieved learning.
+        for learning in ctx["learnings"]:
+            assert learning["advisory"] is True
+            assert learning["authority"] == "advisory_only"
+
+    async def test_plan_advisory_flag_always_true(self):
+        """Even when falling back to unvalidated learnings, advisory=True."""
+        from aios.services.bootstrap import bootstrap_engineering_services
+        from aios.services.learning import get_learning_service
+
+        bootstrap_engineering_services(enabled=["memory", "learning", "planning"])
+        await get_learning_service().capture_learning_from_analysis(
+            analysis_id="analysis_unval",
+            failure_category="timeout",
+            recommended_action="RETRY",
+            root_cause="db connection pool exhausted",
+            preventive_measures=["pool warmup"],
+        )
+
+        planner = self._planner()
+        plan = planner.plan({"task_id": "t2", "goal": "fix db connection pool"})
+        ctx = plan["advisory_context"]
+        # No validated learnings → fallback to query_relevant → still advisory.
+        assert ctx["advisory"] is True
+        assert any("db" in l["root_cause"] for l in ctx["learnings"])
+
+
+# ---------------------------------------------------------------------------
 # M9-N5 — Graph-based remediation proposer (advisory)
 # ---------------------------------------------------------------------------
 

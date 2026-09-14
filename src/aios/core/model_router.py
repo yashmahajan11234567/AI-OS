@@ -315,30 +315,62 @@ class ModelRouter:
     async def _call_model(
         self, model: ModelConfig, request: ModelRequest
     ) -> ModelResponse:
-        """Call the selected model (placeholder for actual implementation)."""
+        """Call the selected model.
+
+        Dispatches to a registered provider backend when one is wired for the
+        routed model (e.g. FreeLLMAPI via ``register_freellmapi_provider``).
+        Falls back to a mock response for unregistered/local-only providers so
+        that the kernel always returns a deterministic shape without a live
+        LLM backend.
+        """
         import time
 
         start = time.perf_counter()
 
-        # This is a placeholder - actual implementation would call APIs
-        # For now, return a mock response
-        await asyncio.sleep(0.1)  # Simulate latency
+        # Dispatch to a real provider backend when the routed model declares one.
+        # ``register_freellmapi_provider`` stores the provider on the router and
+        # marks the model config with ``config["freellmapi"] = True``.
+        freellmapi_provider = getattr(self, "_freellmapi_provider", None)
+        if freellmapi_provider is not None and model.config.get("freellmapi"):
+            response = await freellmapi_provider.generate(request)
+        else:
+            # No real backend registered for this model — return a deterministic
+            # mock response (dev/test fallback per C13: FreeLLMAPI is dev/test only).
+            await asyncio.sleep(0.1)  # Simulate latency
+            response = ModelResponse(
+                content=f"[Mock response from {model.model_id}] {request.prompt[:100]}...",
+                model_id=model.model_id,
+                provider=model.provider,
+                tokens_used={"input": 100, "output": 50},
+                cost=0.001,
+                latency_ms=int((time.perf_counter() - start) * 1000),
+            )
 
-        response = ModelResponse(
-            content=f"[Mock response from {model.model_id}] {request.prompt[:100]}...",
-            model_id=model.model_id,
-            provider=model.provider,
-            tokens_used={"input": 100, "output": 50},
-            cost=0.001,
-            latency_ms=int((time.perf_counter() - start) * 1000),
-        )
+        # Ensure the model_id is reflected on the response (providers may
+        # resolve a different id). Keep latency fresh.
+        response.model_id = model.model_id
+        response.provider = model.provider
+        response.latency_ms = int((time.perf_counter() - start) * 1000)
 
         # Update stats
-        stats = self._usage_stats[model.model_id]
+        stats = self._usage_stats.setdefault(
+            model.model_id,
+            {
+                "requests": 0,
+                "tokens_in": 0,
+                "tokens_out": 0,
+                "total_cost": 0.0,
+                "errors": 0,
+                "avg_latency_ms": 0,
+            },
+        )
         stats["requests"] += 1
         stats["tokens_in"] += response.tokens_used.get("input", 0)
         stats["tokens_out"] += response.tokens_used.get("output", 0)
         stats["total_cost"] += response.cost
+        # Rolling average latency
+        prev_total = stats["avg_latency_ms"] * (stats["requests"] - 1)
+        stats["avg_latency_ms"] = int((prev_total + response.latency_ms) / stats["requests"])
 
         return response
 

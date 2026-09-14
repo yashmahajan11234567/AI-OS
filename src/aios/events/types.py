@@ -1223,6 +1223,26 @@ class LearningCaptured(Event):
 
 
 @dataclass(kw_only=True)
+class LearningValidated(Event):
+    """A captured learning has been validated / promoted (spec M9-N5).
+
+    Reuses the canonical ``AI_AGENT_AUDIT_EMITTED`` EventType — NO new
+    EventType is introduced (M9 §4 Non-Goals; M9 §7.3 compatibility). The
+    advisory validation provenance (validator, confidence, notes) is carried
+    in the payload so Terminal 3 audits can trace the validation decision.
+    """
+
+    event_type: EventType = EventType.AI_AGENT_AUDIT_EMITTED
+    payload: dict[str, Any] = field(default_factory=lambda: {
+        "learning_id": "",
+        "validator": "",
+        "confidence": None,
+        "notes": None,
+        "validated_at": 0.0,
+    })
+
+
+@dataclass(kw_only=True)
 class PatternExtracted(Event):
     """Pattern has been extracted."""
 
@@ -1458,6 +1478,7 @@ __all__ = [
     "FailureClassified",
     # Learning
     "LearningCaptured",
+    "LearningValidated",
     "PatternExtracted",
     "KnowledgeUpdated",
     # State

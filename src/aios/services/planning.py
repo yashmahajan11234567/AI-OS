@@ -165,6 +165,12 @@ class PlanningService(BaseService):
         and any retrieval failure must never block planning. The result is a
         plain payload field — consumers treat it as advisory context, not as
         instructions or verdicts (M9 §16 authority boundaries).
+
+        M9-N5 validation/promotion: PlanningService PREFERS validated/promoted
+        learnings (``get_validated_lessons``) so only reviewed intelligence
+        enters advisory context. If no validated learnings exist, it falls back
+        to ``query_relevant`` over ALL captured learnings so an empty store
+        never starves planning — but the advisory flag is preserved either way.
         """
         try:
             from aios.services.learning import get_learning_service
@@ -173,10 +179,19 @@ class PlanningService(BaseService):
         except RuntimeError:
             return {}
         try:
-            learnings = service.query_relevant(objective, limit=5)
+            learnings = service.get_validated_lessons(limit=5)
+            if not learnings:
+                # No validated learnings yet — fall back to keyword-relevant
+                # captured learnings so advisory context is still populated.
+                learnings = service.query_relevant(objective, limit=5)
         except Exception as exc:  # noqa: BLE001 — advisory must not block planning
             logger.warning("Advisory learning retrieval failed (ignored): %s", exc)
             return {}
+        # Advisory-only markers (spec §16): this data informs but never decides.
+        for learning in learnings:
+            learning.setdefault("advisory", True)
+            learning.setdefault("authority", "advisory_only")
+            learning.setdefault("trust_level", "untrusted")
         return {
             "learnings": learnings,
             "source": "learning_service",
