@@ -43,7 +43,7 @@ Based on actual current repository state as of 2026-09-12
 | Deterministic tests | ✅ | ✅ | Test suite shows deterministic behavior; 1,046+ tests passing |
 | AI-driven tests | ✅ | ✅ | AIAgencyService provides AI-driven testing perspectives |
 | User simulation | ✅ | ✅ | UserSimulationAgent provides isolated browser sessions |
-| Security tests | ⚠️ Partial | ✅ M11 | M11 Security Hardening implementation verified complete with 193 passing security tests |
+| Security tests | ✅ | ✅ M11 | M11 Security Hardening implementation verified complete with 245 passing security tests (independent QA verified) |
 | E2E | ⚠️ Partial | ✅ M8 | M8-T1 Hermes ACP real subprocess test exists but requires HERMES_ACP_TEST=1; M8-T2/T3/T4/T5 tests exist |
 | Chaos/reliability | ❌ | ✅ M11 | Chaos testing not yet implemented; fault injection into kernel components pending |
 
