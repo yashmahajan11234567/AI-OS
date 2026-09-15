@@ -640,7 +640,27 @@ class ProjectService:
         }
 
 
-# Service registry key
+    async def start(self) -> None:
+        """Async no-op lifecycle start method.
+
+        ProjectService is stateless/request-oriented and has no lifecycle resources requiring startup.
+        This method exists to satisfy the ServiceType.ENGINEERING registration requirement
+        without adding any side effects.
+        """
+        logger.debug("ProjectService.start() called - no-op (stateless service)")
+        return None
+
+    async def stop(self) -> None:
+        """Async no-op lifecycle stop method.
+
+        ProjectService has no subscriptions/background resources requiring shutdown.
+        This method exists to satisfy the ServiceType.ENGINEERING registration requirement
+        without adding any side effects.
+        """
+        logger.debug("ProjectService.stop() called - no-op (stateless service)")
+        return None
+
+    # Service registry key
 SERVICE_KEY = "engineering.project_workspace"
 
 

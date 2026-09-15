@@ -2849,6 +2849,30 @@ class HermesKernel:
             metadata={"version": "1.0.0", "description": "Non-authoritative dashboard backend over AI-OS"},
         )
 
+        # Register dashboard user allow-rules for project actions (SecurityManager fail-closed requires explicit allow)
+        if self._security_manager is not None:
+            self._security_manager.register_allow_rule(
+                principal="dashboard_user",
+                action="project.create",
+                resource=None  # None acts as wildcard for resource
+            )
+            self._security_manager.register_allow_rule(
+                principal="dashboard_user",
+                action="project.transition",
+                resource=None  # None acts as wildcard for resource
+            )
+            self._security_manager.register_allow_rule(
+                principal="dashboard_user",
+                action="project.publish_notion",
+                resource=None  # None acts as wildcard for resource
+            )
+            self._security_manager.register_allow_rule(
+                principal="dashboard_user",
+                action="project.clear_action",
+                resource=None  # None acts as wildcard for resource
+            )
+            logger.debug("Registered dashboard_user allow-rules for project actions")
+
         # Also start the HTTP server for health endpoints
         http_server = DashboardHTTPServer(
             dashboard_service=service,
