@@ -1,0 +1,1 @@
+- [B4-T2 Implementation](b4-t2-implementation-report.md) — **IMPLEMENTED** (2026-09-22); 7 files changed, 9 production phase handlers wired, 3 new EventType values, EvidenceEntry expanded, zero regressions; ready for T3 QA

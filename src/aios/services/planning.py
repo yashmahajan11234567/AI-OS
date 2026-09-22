@@ -4,6 +4,11 @@ Engineering Service responsible for task decomposition, scheduling, and
 resource allocation. Consumes PlanningRequested / PlanRejected events and
 emits PlanningCompleted / PlanningFailed. Planning never calls other services
 directly; it relies on the Memory service (via events) and kernel managers.
+
+B1-R1 remediation (2026-09-22): PlanningService now routes deterministic plans
+through the existing LLMCouncil for multi-perspective advisory review before
+emitting PlanningCompleted. Council results are advisory-only per ADR #10 and
+authority boundary requirements.
 """
 
 from __future__ import annotations
@@ -28,6 +33,7 @@ from aios.events.core.payload import EventPayload
 from aios.events.core.category import EventCategory, category_for_event_type
 from aios.events.core.priority import EventPriority
 from aios.services.base import BaseService
+from aios.core.llm_council import LLMCouncil, LLMRole
 
 logger = logging.getLogger(__name__)
 
@@ -42,6 +48,14 @@ class PlanningService(BaseService):
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
+        self._llm_council = None  # Defer initialization until needed
+
+    @property
+    def llm_council(self) -> LLMCouncil:
+        """Get the LLMCouncil instance, initializing on first access."""
+        if self._llm_council is None:
+            self._llm_council = LLMCouncil()
+        return self._llm_council
 
     async def on_start(self) -> None:
         logger.info(f"PlanningService.on_start called")
@@ -54,15 +68,53 @@ class PlanningService(BaseService):
         """Handle PlanningRequested event and emit PlanningCompleted."""
         logger.info(f"PlanningService received event: {event.eventType}, correlationId: {event.correlationId}")
         payload = event.payload.to_dict() if hasattr(event.payload, 'to_dict') else dict(event.payload)
-        plan = self.plan(payload)
 
-        correlation_id = event.correlationId
+        # Extract information from the planning request
+        planning_id = payload.get("planning_id", "")
+        objective = payload.get("objective", "")
+        constraints = payload.get("constraints", [])
+        context = payload.get("context", {})
+
+        # Extract self-prompt and other B1-specific information from context
+        self_prompt = context.get("self_prompt", {})
+        project_id = context.get("project_id", "")
+        correlation_id_from_context = context.get("correlation_id", "")
+        lifecycle_context = {
+            "user_intent": context.get("user_intent", {}),
+            "planning_outcome": context.get("planning_outcome", {}),
+            "research_findings": context.get("research_findings", {}),
+            "requirements_spec": context.get("requirements_spec", {}),
+            "approved_plan": context.get("approved_plan", {}),
+            "task_assignments": context.get("task_assignments", {}),
+        }
+
+        # Enhance the planning request with B1-specific information
+        enhanced_payload = {
+            **payload,
+            "planning_id": planning_id,
+            "objective": objective,
+            "constraints": constraints,
+            "context": {
+                **context,
+                "b1_planning_metadata": {
+                    "self_prompt": self_prompt,
+                    "project_id": project_id,
+                    "correlation_id": correlation_id_from_context or event.correlationId,
+                    "lifecycle_context": lifecycle_context,
+                    "provenance": "B1_T1_Governed_Intelligent_Planning_Pipeline",
+                    "advisory_status": True  # SelfPromptGenerator output is advisory per audit
+                }
+            }
+        }
+
+        # Generate deterministic plan (B1-T1 requirement: preserve deterministic planner)
+        plan = self.plan(enhanced_payload)
 
         if plan is None:
             await self.emit_core_event(
                 EventType.PLANNING_FAILED,
                 {
-                    "task_id": payload.get("task_id", ""),
+                    "planning_id": planning_id,
                     "reason": "planning produced no steps",
                 },
                 correlation_id=correlation_id,
@@ -70,16 +122,131 @@ class PlanningService(BaseService):
             )
             return
 
-        await self.emit_core_event(
-            EventType.PLANNING_COMPLETED,
-            {
-                "task_id": payload.get("task_id", ""),
+        # B1-R1: Route deterministic plan through LLMCouncil for advisory review
+        # Council results are advisory-only per ADR #10 - never override deterministic planning
+        council_advisory = None
+        try:
+            # Get LLMCouncil instance (may fail if kernel not fully initialized)
+            llm_council = self.llm_council
+
+            # Prepare plan summary for council review with B2 context
+            context_summary = ""
+            if context:
+                # Extract B2 context information for council review
+                project_info = context.get("project_id", "unknown")
+                obsidian_info = f"{len(context.get('obsidian_context', {}).get('data', {}).get('notes', []))} notes" if context.get('obsidian_context') else "0 notes"
+                graphify_info = f"{len(context.get('graphify_context', {}).get('data', {}).get('nodes', []))} nodes" if context.get('graphify_context') else "0 nodes"
+                claude_mem_info = f"{len(context.get('claude_mem_context', {}).get('data', {}).get('memories', []))} memories" if context.get('claude_mem_context') else "0 memories"
+                git_info = "available" if context.get('git_context', {}).get('data') else "unavailable"
+                history_info = "available" if context.get('history_context', {}).get('data') else "unavailable"
+
+                context_summary = f"\nB2 Context: Project={project_info}, Obsidian={obsidian_info}, Graphify={graphify_info}, Claude-Mem={claude_mem_info}, Git={git_info}, History={history_info}"
+
+            plan_summary = f"Objective: {objective}\nPlan: {plan.get('steps', [])}\nConstraints: {constraints}{context_summary}"
+
+            # Convene council session and get independent proposals from all six roles
+            council_session, proposals = await llm_council.deliberate_and_propose(
+                topic=f"Review deterministic plan for: {objective}",
+                proposal_title=f"Deterministic Plan Review: {planning_id}",
+                proposal_description=plan_summary,
+                objective_id=planning_id or str(uuid4()),
+                options=[  # Simple approve/reject options for advisory review
+                    {"id": "approve", "description": "Approve the deterministic plan as advisory guidance"},
+                    {"id": "reject", "description": "Reject the deterministic plan"},
+                    {"id": "conditional", "description": "Approve with conditions/advisory notes"}
+                ],
+                roles=list(LLMRole),  # All six cognitive roles
+                builder_excluded=True  # INV-009: builder cannot self-approve
+            )
+
+            # Extract advisory feedback from council proposals
+            advisory_notes = []
+            for proposal in proposals:
+                if hasattr(proposal, 'options') and proposal.options:
+                    # Extract the selected option/advice from each role
+                    selected_option = getattr(proposal, 'selected_option', None) or \
+                                    getattr(proposal, 'option_id', None) or \
+                                    (proposal.options[0] if proposal.options else None)
+                    if selected_option:
+                        advisory_notes.append(f"{proposal.metadata.get('llm_role', 'unknown')}: {selected_option}")
+
+            council_advisory = {
+                "council_session_id": getattr(council_session, 'council_id', None),
+                "council_role_feedback": advisory_notes,
+                "council_metadata": {
+                    "provenance": "LLMCouncil",
+                    "advisory_status": True,  # Explicitly mark as advisory per ADR #10
+                    "authority": "advisory_only",  # Never overrides deterministic planner
+                    "roles_consulted": [role.value for role in LLMRole],
+                    "builder_excluded": True
+                }
+            }
+
+        except Exception as exc:
+            # B1-R1 requirement: Handle LLMCouncil failures without fabricating successful review
+            # Log failure but continue with deterministic plan (advisory context is optional)
+            logger.warning(f"LLMCouncil advisory review failed (continuing with deterministic plan only): {exc}")
+            council_advisory = {
+                "error": str(exc),
+                "council_metadata": {
+                    "provenance": "LLMCouncil",
+                    "advisory_status": True,
+                    "authority": "advisory_only",
+                    "review_failed": True
+                }
+            }
+
+        correlation_id = event.correlationId
+
+        if plan is None:
+            await self.emit_core_event(
+                EventType.PLANNING_FAILED,
+                {
+                    "planning_id": planning_id,
+                    "reason": "planning produced no steps",
+                },
+                correlation_id=correlation_id,
+                causation_id=correlation_id,
+            )
+            return
+
+        # Prepare the planning completed event with preserved information
+        planning_completed_payload = {
+            "planning_id": planning_id,
+            "plan": {
                 "plan_id": plan["plan_id"],
+                "task_id": plan["task_id"],
+                "goal": plan["goal"],
                 "steps": plan["steps"],
                 "resources": plan["resources"],
-                # M9-N3: advisory learning refs only — never directives.
                 "advisory_context": plan.get("advisory_context", {}),
+                # B1-specific preserved information
+                "b1_planning_metadata": {
+                    "self_prompt": self_prompt,
+                    "project_id": project_id,
+                    "original_objective": objective,
+                    "correlation_id": correlation_id_from_context or event.correlationId,
+                    "lifecycle_context": lifecycle_context,
+                    "provenance": "B1_T1_Governed_Intelligent_Planning_Pipeline",
+                    "advisory_status": True
+                }
             },
+            "tasks": [],  # Will be populated by downstream services
+            "estimated_duration": 0,  # Will be calculated by downstream services
+            # B1-R1: Attach LLMCouncil advisory results (advisory-only, never overrides plan)
+            "llm_council_advisory": council_advisory,
+            # Preserve the original planning context for transparency
+            "original_request": {
+                "planning_id": planning_id,
+                "objective": objective,
+                "constraints": constraints,
+                "context": context
+            }
+        }
+
+        await self.emit_core_event(
+            EventType.PLANNING_COMPLETED,
+            planning_completed_payload,
             correlation_id=correlation_id,
             causation_id=correlation_id,
         )

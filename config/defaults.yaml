@@ -125,6 +125,64 @@ acp:
 obsidian:
   vault_path: ""
 
+# Usage Accounting settings
+usage:
+  retention_hours: 24.0
+
+# Provider Cooldown Settings
+provider:
+  cooldown:
+    enabled: true
+    base_duration_seconds: 30
+    max_duration_seconds: 300
+    multiplier: 2.0
+    # Cooldown durations for specific failure categories (overrides calculated values)
+    # Set to 0 to disable cooldown for specific categories
+    category_overrides:
+      rate_limit: 60          # 1 minute
+      quota_exceeded: 300     # 5 minutes
+      timeout: 30             # 30 seconds
+      network: 30             # 30 seconds
+      server_error: 60        # 1 minute
+      service_unavailable: 60 # 1 minute
+      authentication: 0       # No cooldown - auth issues need manual fix
+      invalid_request: 0      # No cooldown - client issue
+      invalid_model: 0        # No cooldown - client issue
+      unknown: 30             # 30 seconds default
+
+  # Provider Group Configuration
+  groups:
+    # Example provider group configurations
+    # Each group defines a pool of providers and a selection policy
+    #
+    # Example 1: Round-robin group for text generation
+    # text_generation_rr:
+    #   label: "Text Generation Round Robin Group"
+    #   policy: round_robin
+    #   providers:
+    #     - anthropic
+    #     - openai
+    #     - gemini
+    #
+    # Example 2: Weighted group for cost optimization
+    # cost_optimized:
+    #   label: "Cost Optimized Group"
+    #   policy: weighted
+    #   providers:
+    #     - anthropic: { weight: 1.0 }
+    #     - openai: { weight: 2.0 }  # Higher weight = more likely to be selected
+    #     - local: { weight: 0.5 }   # Lower weight = less likely to be selected
+    #
+    # Example 3: Least connections group for load balancing
+    # load_balanced:
+    #   label: "Load Balanced Group"
+    #   policy: least_connections
+    #   providers:
+    #     - anthropic
+    #     - openai
+    #     - gemini
+    #     - local
+
 # Services configuration
 services:
   enabled: [

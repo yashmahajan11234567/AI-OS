@@ -58,6 +58,7 @@ class RetryAttempt:
     delay_ms: int
     timestamp: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     succeeded: bool = False
+    retry_after_ms: Optional[int] = None  # Server-suggested delay when available
 
 
 @dataclass
@@ -79,9 +80,9 @@ class RetryBudget:
         """True if no retries remain."""
         return len(self.attempts) >= self.policy.max_retries
 
-    def record_attempt(self, error: Exception, error_type: str) -> RetryAttempt:
+    def record_attempt(self, error: Exception, error_type: str, retry_after_ms: Optional[int] = None) -> RetryAttempt:
         attempt_num = len(self.attempts) + 1
-        delay = self._calculate_delay(attempt_num)
+        delay = self._calculate_delay(attempt_num, retry_after_ms)
 
         attempt = RetryAttempt(
             attempt=attempt_num,
@@ -90,11 +91,22 @@ class RetryBudget:
             error=str(error),
             error_type=error_type,
             delay_ms=delay,
+            retry_after_ms=retry_after_ms,
         )
         self.attempts.append(attempt)
         return attempt
 
-    def _calculate_delay(self, attempt: int) -> int:
+    def _calculate_delay(self, attempt: int, retry_after_ms: Optional[int] = None) -> int:
+        # If server provided Retry-After, use it (but respect max delay bound)
+        if retry_after_ms is not None:
+            delay = retry_after_ms
+            delay = min(delay, self.policy.max_delay_ms)
+            if self.policy.jitter:
+                import random
+                delay = int(delay * (0.5 + random.random()))
+            return delay
+
+        # Otherwise use existing strategy logic
         policy = self.policy
         if policy.strategy == RetryStrategy.FIXED:
             delay = policy.base_delay_ms
@@ -248,14 +260,18 @@ class RetryManager:
                     attempt = budget.record_attempt(e, error_type)
 
                     # Publish retry scheduled event
+                    event_data = {
+                        "task_id": task_id,
+                        "service": service,
+                        "retry_count": attempt.attempt,
+                        "delay_ms": attempt.delay_ms,
+                    }
+                    # Include Retry-After information when available
+                    if attempt.retry_after_ms is not None:
+                        event_data["retry_after_seconds"] = attempt.retry_after_ms // 1000
                     await self._emit_event(
                         EventType.RETRY_SCHEDULED,
-                        {
-                            "task_id": task_id,
-                            "service": service,
-                            "retry_count": attempt.attempt,
-                            "delay_ms": attempt.delay_ms,
-                        },
+                        event_data,
                         correlation_id=correlation_id,
                     )
 
@@ -263,13 +279,17 @@ class RetryManager:
                     await asyncio.sleep(attempt.delay_ms / 1000.0)
 
                     # Publish retry executed event
+                    event_data = {
+                        "task_id": task_id,
+                        "service": service,
+                        "retry_count": attempt.attempt,
+                    }
+                    # Include Retry-After information when available
+                    if attempt.retry_after_ms is not None:
+                        event_data["retry_after_seconds"] = attempt.retry_after_ms // 1000
                     await self._emit_event(
                         EventType.RETRY_EXECUTED,
-                        {
-                            "task_id": task_id,
-                            "service": service,
-                            "retry_count": attempt.attempt,
-                        },
+                        event_data,
                         correlation_id=correlation_id,
                     )
                 else:
@@ -280,16 +300,20 @@ class RetryManager:
         await self.retry_budget_exhausted(task_id, service, budget, correlation_id)
 
         # Publish task failed event
+        event_data = {
+            "task_id": task_id,
+            "service": service,
+            "error": str(last_exception),
+            "error_type": type(last_exception).__name__,
+            "retryable": True,
+            "retry_count": policy.max_retries,
+        }
+        # Include Retry-After information from last attempt when available
+        if budget.attempts and budget.attempts[-1].retry_after_ms is not None:
+            event_data["retry_after_seconds"] = budget.attempts[-1].retry_after_ms // 1000
         await self._emit_event(
             EventType.TASK_FAILED,
-            {
-                "task_id": task_id,
-                "service": service,
-                "error": str(last_exception),
-                "error_type": type(last_exception).__name__,
-                "retryable": True,
-                "retry_count": policy.max_retries,
-            },
+            event_data,
             correlation_id=correlation_id,
         )
 

@@ -23,6 +23,7 @@ from aios.core.model_router import (
     ModelResponse,
 )
 from aios.adapters.freellmapi import FreeLLMAPIProvider, FreeLLMAPIConfig
+from aios.core.provider_registry import ProviderRegistry
 
 
 class FakeProvider:
@@ -68,13 +69,16 @@ def _freellmapi_model(router: ModelRouter) -> ModelConfig:
 @pytest.mark.asyncio
 async def test_dispatches_to_freellmapi_provider_when_marked(router):
     """generate() must call the registered _freellmapi_provider.generate."""
+    print("DEBUG: Starting test_dispatches_to_freellmapi_provider_when_marked")
     provider = FakeProvider(content="real-dispatch")
     router._freellmapi_provider = provider
     _freellmapi_model(router)
 
+    print(f"DEBUG: About to call router.generate with provider.calls={provider.calls}")
     resp = await router.generate(
         ModelRequest(prompt="hello world", preferred_model="freellmapi-default")
     )
+    print(f"DEBUG: After router.generate, provider.calls={provider.calls}")
 
     assert provider.calls == 1, "FreeLLMAPI provider was not invoked"
     assert resp.content.startswith("real-dispatch"), resp.content
@@ -139,3 +143,161 @@ async def test_usage_stats_updated_on_dispatch(router):
     assert stats["tokens_in"] == 10
     assert stats["tokens_out"] == 20
     assert stats["total_cost"] == 0.0
+
+
+@pytest.mark.asyncio
+async def test_disabled_provider_not_dispatched_via_registry():
+    """Test that a disabled provider is not dispatched when looked up via ProviderRegistry."""
+    # Create router with a provider registry
+    provider_registry = ProviderRegistry()
+    router = ModelRouter(provider_registry=provider_registry)
+
+    # Create a mock provider
+    class MockProvider:
+        def __init__(self):
+            self.generate_called = False
+
+        async def generate(self, request):
+            self.generate_called = True
+            print(f"MockProvider.generate called with prompt: {request.prompt[:20]}...")
+            return ModelResponse(
+                content="mock response",
+                model_id=request.preferred_model or "test",
+                provider=ModelProvider.LOCAL,
+            )
+
+    mock_provider = MockProvider()
+    provider_registry.register_provider("test-provider", mock_provider)
+
+    # Register a model that uses this provider - mimic the existing test pattern
+    model_config = ModelConfig(
+        model_id="test-model",
+        provider=ModelProvider.LOCAL,
+        name="Test Model",
+        capabilities=[ModelCapability.TEXT_GENERATION],
+        enabled=True,
+        config={"provider": "test-provider"}  # This tells the router to use ProviderRegistry
+    )
+    router.register_model(model_config)
+
+    # Debug: Check what actually got registered
+    print(f"All models in router: {list(router._models.keys())}")
+    if "test-model" in router._models:
+        registered_model = router._models["test-model"]
+        print(f"Registered model config: {registered_model.config}")
+        print(f"Registered model provider: {registered_model.provider}")
+        assert registered_model.config.get("provider") == "test-provider"
+    else:
+        print("ERROR: test-model not found in router._models")
+        # Let's see what models ARE registered
+        for model_id, model_config in router._models.items():
+            print(f"  {model_id}: provider={model_config.provider}, config={model_config.config}")
+
+    # Verify provider works when enabled
+    print("Testing with ENABLED provider...")
+    request = ModelRequest(prompt="test", preferred_model="test-model")
+    response = await router.generate(request)
+    print(f"Response from enabled provider: {response.content}")
+    print(f"Mock provider generate_called: {mock_provider.generate_called}")
+
+    assert mock_provider.generate_called == True, f"Expected generate to be called, got {mock_provider.generate_called}"
+    assert response.content == "mock response", f"Expected 'mock response', got {response.content}"
+
+    # Reset for next test
+    mock_provider.generate_called = False
+
+    # Disable the provider
+    result = provider_registry.disable_provider("test-provider")
+    assert result == True, "Failed to disable provider"
+
+    # Debug: Check provider health state
+    health = provider_registry._provider_health.get("test-provider")
+    print(f"After disable - provider health: {health}")
+    if health:
+        print(f"After disable - provider enabled: {health.enabled}")
+
+    # Verify provider is NOT dispatched when disabled
+    print("Testing with DISABLED provider...")
+    response = await router.generate(request)
+    print(f"Response from disabled provider: {response.content}")
+    print(f"Mock provider generate_called: {mock_provider.generate_called}")
+
+    assert mock_provider.generate_called == False, f"Expected generate NOT to be called, got {mock_provider.generate_called}"
+    assert "Mock response" in response.content, f"Expected 'Mock response' in content, got {response.content}"
+    """Test that a disabled provider is not dispatched when looked up via ProviderRegistry."""
+    # Create router with a provider registry
+    provider_registry = ProviderRegistry()
+    router = ModelRouter(provider_registry=provider_registry)
+
+    # Create a mock provider
+    class MockProvider:
+        def __init__(self):
+            self.generate_called = False
+
+        async def generate(self, request):
+            self.generate_called = True
+            print(f"MockProvider.generate called with prompt: {request.prompt[:20]}...")
+            return ModelResponse(
+                content="mock response",
+                model_id=request.preferred_model or "test",
+                provider=ModelProvider.LOCAL,
+            )
+
+    mock_provider = MockProvider()
+    provider_registry.register_provider("test-provider", mock_provider)
+
+    # Register a model that uses this provider - mimic the existing test pattern
+    model_config = ModelConfig(
+        model_id="test-model",
+        provider=ModelProvider.LOCAL,
+        name="Test Model",
+        capabilities=[ModelCapability.TEXT_GENERATION],
+        enabled=True,
+        config={"provider": "test-provider"}  # This tells the router to use ProviderRegistry
+    )
+    router.register_model(model_config)
+
+    # Debug: Check what actually got registered
+    print(f"All models in router: {list(router._models.keys())}")
+    if "test-model" in router._models:
+        registered_model = router._models["test-model"]
+        print(f"Registered model config: {registered_model.config}")
+        print(f"Registered model provider: {registered_model.provider}")
+        assert registered_model.config.get("provider") == "test-provider"
+    else:
+        print("ERROR: test-model not found in router._models")
+        # Let's see what models ARE registered
+        for model_id, model_config in router._models.items():
+            print(f"  {model_id}: provider={model_config.provider}, config={model_config.config}")
+
+    # Verify provider works when enabled
+    print("Testing with ENABLED provider...")
+    request = ModelRequest(prompt="test", preferred_model="test-model")
+    response = await router.generate(request)
+    print(f"Response from enabled provider: {response.content}")
+    print(f"Mock provider generate_called: {mock_provider.generate_called}")
+
+    assert mock_provider.generate_called == True, f"Expected generate to be called, got {mock_provider.generate_called}"
+    assert response.content == "mock response", f"Expected 'mock response', got {response.content}"
+
+    # Reset for next test
+    mock_provider.generate_called = False
+
+    # Disable the provider
+    result = provider_registry.disable_provider("test-provider")
+    assert result == True, "Failed to disable provider"
+
+    # Debug: Check provider health state
+    health = provider_registry._provider_health.get("test-provider")
+    print(f"After disable - provider health: {health}")
+    if health:
+        print(f"After disable - provider enabled: {health.enabled}")
+
+    # Verify provider is NOT dispatched when disabled
+    print("Testing with DISABLED provider...")
+    response = await router.generate(request)
+    print(f"Response from disabled provider: {response.content}")
+    print(f"Mock provider generate_called: {mock_provider.generate_called}")
+
+    assert mock_provider.generate_called == False, f"Expected generate NOT to be called, got {mock_provider.generate_called}"
+    assert "Mock response" in response.content, f"Expected 'Mock response' in content, got {response.content}"

@@ -1007,14 +1007,13 @@ class EventBus:
         # Get canonical metrics
         metrics = self.getMetrics()
         return {
-            "total_events_published": metrics.published_count,
+            "total_events_published": metrics.published,
             "active_subscriptions": self._subscriptions.subscription_count,
             "history_size": len(self._history),
             "max_history": getattr(self._config, "max_history", 10000),
             # Include canonical metrics for completeness
-            "canonical_dlq_size": metrics.dlq_count,
-            "canonical_retry_count": metrics.retry_count,
-            "canonical_rejected_count": metrics.rejected_count,
+            "canonical_dlq_size": metrics.dlq,
+            "canonical_retry_count": metrics.retries,
         }
 
     # --- dead-letter queries / replay --------------------------------------

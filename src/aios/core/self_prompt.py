@@ -77,6 +77,17 @@ class SelfPromptContext:
     knowledge_updated: dict[str, Any] = field(default_factory=dict)
     state_persisted: dict[str, Any] = field(default_factory=dict)
     current_aios_state: dict[str, Any] = field(default_factory=dict)
+    # B2-T1 Context Plane Integration Fields
+    project_id: str = field(default_factory=str)
+    lifecycle_context: dict[str, Any] = field(default_factory=dict)
+    obsidian_context: dict[str, Any] = field(default_factory=dict)
+    graphify_context: dict[str, Any] = field(default_factory=dict)
+    claude_mem_context: dict[str, Any] = field(default_factory=dict)
+    git_context: dict[str, Any] = field(default_factory=dict)
+    history_context: dict[str, Any] = field(default_factory=dict)
+    provenance: dict[str, Any] = field(default_factory=dict)
+    advisory_metadata: dict[str, Any] = field(default_factory=dict)
+    correlation_id: str = field(default_factory=str)
 
 
 @dataclass(frozen=True)
@@ -185,6 +196,17 @@ class SelfPrompt:
             "knowledge_updated": ctx.knowledge_updated,
             "state_persisted": ctx.state_persisted,
             "current_aios_state": ctx.current_aios_state,
+            # B2-T1 Context Plane Integration Fields
+            "project_id": ctx.project_id,
+            "lifecycle_context": ctx.lifecycle_context,
+            "obsidian_context": ctx.obsidian_context,
+            "graphify_context": ctx.graphify_context,
+            "claude_mem_context": ctx.claude_mem_context,
+            "git_context": ctx.git_context,
+            "history_context": ctx.history_context,
+            "provenance": ctx.provenance,
+            "advisory_metadata": ctx.advisory_metadata,
+            "correlation_id": ctx.correlation_id,
         }
 
     def _directive_to_dict(self, directive: SelfPromptDirective) -> dict[str, Any]:

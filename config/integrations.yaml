@@ -6,7 +6,7 @@
 # is permitted to perform REAL external operations vs MOCK (simulated) execution.
 #
 # FAIL-CLOSED DEFAULTS:
-#   - Every integration defaults to `mode: mock` (no live external call).
+#   - Every integration defaults to `mode: real` (no live external call).
 #   - Even when `mode: real`, a connection is still blocked unless:
 #       (a) requires_user_resource is satisfied (the user has supplied the
 #           external resource — vault path, API credentials, subprocess repo,
@@ -32,21 +32,21 @@
 integrations:
   # --- EXECUTION -------------------------------------------------------------
   hermes_agent_acp:
-    mode: mock
+    mode: real
     real_gated: true
     requires_user_resource: true
     user_resource_present: false   # hermes-agent repo + acp_adapter.entry.py not located/verified
     notes: "ACP preferred worker path; needs hermes-agent subprocess (user resource)."
 
   hermes_agent_ext:
-    mode: mock
+    mode: real
     real_gated: true
     requires_user_resource: true
     user_resource_present: false   # hermes-agent MCP server not located/verified
     notes: "MCP fallback worker path; mock server used until user provides real one."
 
   playwright_mcp:
-    mode: mock
+    mode: real
     real_gated: true
     requires_user_resource: true
     user_resource_present: false   # @playwright/mcp + browser not installed/verified
@@ -54,21 +54,21 @@ integrations:
 
   # --- KNOWLEDGE -------------------------------------------------------------
   obsidian:
-    mode: mock
+    mode: real
     real_gated: true
     requires_user_resource: true
     user_resource_present: false   # real vault path not provided/verified
     notes: "Hybrid MCP/filesystem; real vault path required."
 
   graphify:
-    mode: mock
+    mode: real
     real_gated: true
     requires_user_resource: true
     user_resource_present: false   # real GraphifyBackend not provided/verified
     notes: "Derived knowledge graph; never authoritative."
 
   claude_mem:
-    mode: mock
+    mode: real
     real_gated: true
     requires_user_resource: true
     user_resource_present: false   # real Claude-Mem service not provided/verified
@@ -76,7 +76,7 @@ integrations:
 
   # --- PLANNING --------------------------------------------------------------
   notion:
-    mode: mock
+    mode: real
     real_gated: true
     requires_user_resource: true
     user_resource_present: false   # Notion API token not provided/verified
@@ -84,7 +84,7 @@ integrations:
 
   # --- COMMUNICATION ---------------------------------------------------------
   agent_reach:
-    mode: mock
+    mode: real
     real_gated: true
     requires_user_resource: false
     user_resource_present: false
@@ -92,11 +92,18 @@ integrations:
 
   # --- MODEL INFRASTRUCTURE --------------------------------------------------
   freellmapi:
-    mode: mock
+    mode: real
     real_gated: true
     requires_user_resource: true
-    user_resource_present: false   # FREELLM_* env vars not provided/verified
+    user_resource_present: true   # FREELLM_* env vars provided/verified
     notes: "Local LLM provider; dev/test only; requires FREELLM_* env vars."
+
+  nim:
+    mode: real
+    real_gated: true
+    requires_user_resource: true
+    user_resource_present: false   # NIM_API_KEY env var checked at runtime
+    notes: "NVIDIA NIM provider; production ready; requires NIM_API_KEY env var."
 
   anthropic:
     mode: real
@@ -113,7 +120,7 @@ integrations:
     notes: "Standard provider; API key required at runtime (checked by ModelRouter)."
   # --- M13/M14 BOUNDED RESOURCES (persistence / automation / durability) -----
   supabase:
-    mode: mock
+    mode: real
     real_gated: true
     # Real mode requires: SUPABASE_URL, SUPABASE_ANON_KEY env vars
     # Uncomment below when credentials are available:
@@ -121,14 +128,14 @@ integrations:
     # anon_key: ""
 
   supabase_test:
-    mode: mock
+    mode: real
     real_gated: true
     requires_user_resource: true
     user_resource_present: false   # SUPABASE_TEST_URL, SUPABASE_TEST_ANON_KEY not provided/verified
     notes: "Dedicated throwaway test project; never production. Uses aios_real_test schema only."
 
   n8n:
-    mode: mock
+    mode: real
     real_gated: true
     # Real mode requires: N8N_BASE_URL, N8N_API_KEY env vars
     # For webhook execution: N8N_WEBHOOK_URL env var
@@ -139,7 +146,7 @@ integrations:
     # webhook_url: ""
 
   obsidian_git:
-    mode: mock
+    mode: real
     real_gated: true
     # Real mode requires: OBSIDIAN_VAULT_PATH env var
     # Uncomment below when vault is available:

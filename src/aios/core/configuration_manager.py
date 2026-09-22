@@ -745,6 +745,13 @@ class SecretNotAuthorizedError(ConfigurationFrozenError):
     """Raised when a secret rotation is attempted but authorization fails."""
 
 
+# ---------------------------------------------------------------------------
+# CredentialStore integration (M14-T2 — secure persistence)
+# ---------------------------------------------------------------------------
+
+_CREDENTIAL_STORE_ENABLED = os.environ.get("AIOS_CREDENTIAL_STORE_KEY") is not None
+
+
 def _apply_secrets_overlay(
     config: Any, secret_overlay: dict[str, Any]
 ) -> Any:
@@ -1255,6 +1262,10 @@ class ConfigurationManager:
         # Step 6: transition to FROZEN.
         with self._lock:
             self._state = ConfigState.FROZEN
+
+        # Step 7: Load persisted credentials (fail-closed, no plaintext fallback)
+        self._load_persisted_credentials()
+
         return config_hash
 
     def _run_emission(self, event_type: EventType, payload: dict[str, Any]) -> None:
@@ -1367,6 +1378,108 @@ class ConfigurationManager:
             raise ConfigurationFrozenError("Overrides prohibited after freeze", path="<root>")
         with self._lock:
             self._merged = _deep_merge(self._merged, overrides)
+
+    # --- CredentialStore integration (M14-T2 — secure persistence) ------------
+
+    def _load_persisted_credentials(self) -> None:
+        """Load persisted credentials from CredentialStore during initialization.
+
+        Called after freeze() to restore secret overlay from encrypted persistence.
+        Fail-closed: if loading fails, _secret_overlay remains empty (no plaintext
+        fallback).
+        """
+        if not _CREDENTIAL_STORE_ENABLED:
+            return
+
+        try:
+            from aios.security.credential_store import get_credential_store
+
+            store = get_credential_store()
+            if store is None or not store.is_initialized():
+                logger.debug("CredentialStore not available; skipping persistence")
+                return
+
+            # Load credentials for all known provider IDs
+            # Note: provider IDs are tracked dynamically; we scan what's stored
+            providers = store.list_providers()
+            for provider_id in providers:
+                result = store.load_credentials(provider_id)
+                if result is None:
+                    logger.warning(
+                        "Failed to load credentials for provider '%s' "
+                        "(fail-closed: no plaintext fallback)",
+                        provider_id,
+                    )
+                    continue
+
+                secret_overlay, rotation_count, rotated_secret_versions = result
+
+                # Merge into existing secret overlay (provider-specific paths)
+                # Provider credential paths follow pattern: llm.providers.{provider_id}.apiKey
+                for secret_path, secret_value in secret_overlay.items():
+                    full_path = f"llm.providers.{provider_id}.{secret_path}"
+                    if is_secret_path(full_path.split(".")):
+                        # Only merge if this path is recognized as a secret
+                        _set_path(self._secret_overlay, full_path, secret_value)
+
+                # Restore rotation metadata (take max to preserve current state)
+                self._rotation_count = max(self._rotation_count, rotation_count)
+                for path, version in rotated_secret_versions.items():
+                    self._rotated_secret_versions[path] = max(
+                        self._rotated_secret_versions.get(path, 0), version
+                    )
+
+            if providers:
+                logger.debug(
+                    "Loaded persisted credentials for %d provider(s)", len(providers)
+                )
+        except Exception as exc:  # noqa: BLE001
+            # Fail-closed: don't crash on persistence failure
+            logger.warning("Failed to load persisted credentials: %s", exc)
+
+    def _persist_secret_overlay(self) -> None:
+        """Persist current secret overlay to CredentialStore after rotation.
+
+        Groups secrets by provider ID and stores encrypted.
+        """
+        if not _CREDENTIAL_STORE_ENABLED:
+            return
+
+        if not self._secret_overlay:
+            return
+
+        try:
+            from aios.security.credential_store import get_credential_store
+
+            store = get_credential_store()
+            if store is None or not store.is_initialized():
+                return
+
+            # Group secrets by provider ID
+            # Extract provider_id from path like 'llm.providers.{provider_id}.apiKey'
+            providers: dict[str, dict[str, Any]] = {}
+            for path in self._secret_overlay.keys():
+                parts = path.split(".")
+                # Look for pattern: llm.providers.{provider_id}.{secret_key}
+                if len(parts) >= 4 and parts[0] == "llm" and parts[1] == "providers":
+                    provider_id = parts[2]
+                    secret_key = ".".join(parts[3:])
+                    if provider_id not in providers:
+                        providers[provider_id] = {}
+                    providers[provider_id][secret_key] = self._secret_overlay[path]
+
+            # Persist each provider
+            for provider_id, overlay in providers.items():
+                store.store_credentials(
+                    provider_id=provider_id,
+                    secret_overlay=overlay,
+                    rotation_count=self._rotation_count,
+                    rotated_secret_versions=dict(self._rotated_secret_versions),
+                )
+
+        except Exception as exc:  # noqa: BLE001
+            # Log but don't fail — persistence is best-effort
+            logger.warning("Failed to persist secret overlay: %s", exc)
 
     # --- Secret rotation (M11 §3.4 — bounded, overlay-based) ------------------
 
@@ -1508,7 +1621,43 @@ class ConfigurationManager:
             },
         )
 
+        # Persist updated credentials to CredentialStore (best-effort)
+        self._persist_secret_overlay()
+
+        # Notify live providers of credential rotation
+        self._notify_provider_credential_rotation(path)
+
         return True
+
+    def _notify_provider_credential_rotation(self, rotated_path: str) -> None:
+        """
+        Notify the ProviderRegistry to reload credentials for the affected provider.
+
+        Extracts the provider ID from the rotated secret path and notifies
+        the ProviderRegistry to trigger credential reload on the live provider instance.
+
+        Args:
+            rotated_path: The dotted path of the rotated secret (e.g.,
+                         "llm.providers.nim.apiKey")
+        """
+        try:
+            # Extract provider ID from path like "llm.providers.{provider_id}.{secret_key}"
+            path_parts = rotated_path.split(".")
+            if len(path_parts) >= 4 and path_parts[0] == "llm" and path_parts[1] == "providers":
+                provider_id = path_parts[2]
+
+                # Get the ProviderRegistry and notify it to reload credentials
+                from aios.core.provider_registry import get_provider_registry
+                registry = get_provider_registry()
+                if registry:
+                    registry.reload_provider_credentials(provider_id)
+                else:
+                    logger.warning("ProviderRegistry not available for credential rotation notification")
+            else:
+                logger.debug("Secret rotation path '%s' does not match provider credential pattern", rotated_path)
+        except Exception as exc:
+            # Don't let notification failures affect the core rotation functionality
+            logger.debug("Failed to notify ProviderRegistry of credential rotation: %s", exc)
 
     def get_secret_rotation_state(self) -> dict[str, Any]:
         """Return the current secret-rotation overlay state (metadata only).

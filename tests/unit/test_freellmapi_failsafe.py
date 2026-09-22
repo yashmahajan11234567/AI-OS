@@ -212,6 +212,10 @@ async def test_freellmapi_does_not_fabricate_responses_on_configuration_errors(r
             delattr(router, '_freellmapi_provider')
         if "freellmapi-test" in router._models:
             del router._models["freellmapi-test"]
+        # Unregister provider from the router's registry to ensure test isolation
+        provider_registry = getattr(router, "_provider_registry", None)
+        if provider_registry is not None:
+            provider_registry.unregister_provider("freellmapi")
 
     # Test scenario 2: No env vars (get defaults)
     env_vars = {}
@@ -231,3 +235,87 @@ async def test_freellmapi_does_not_fabricate_responses_on_configuration_errors(r
             delattr(router, '_freellmapi_provider')
         if "freellmapi-test" in router._models:
             del router._models["freellmapi-test"]
+        # Unregister provider from the router's registry to ensure test isolation
+        provider_registry = getattr(router, "_provider_registry", None)
+        if provider_registry is not None:
+            provider_registry.unregister_provider("freellmapi")
+
+
+def test_freellmapi_provider_configure_method():
+    """Test that FreeLLMAPIProvider.configure updates non-secret configuration."""
+    config = FreeLLMAPIConfig(
+        base_url="http://original.example.com",
+        default_model="original-model",
+        timeout_seconds=30
+    )
+    provider = FreeLLMAPIProvider(config)
+
+    # Verify initial state
+    assert provider._config.base_url == "http://original.example.com"
+    assert provider._config.default_model == "original-model"
+    assert provider._config.timeout_seconds == 30
+
+    # Configure new values
+    provider.configure({
+        "base_url": "http://new.example.com",
+        "default_model": "new-model",
+        "timeout_seconds": 60
+    })
+
+    # Verify configuration was updated
+    assert provider._config.base_url == "http://new.example.com"
+    assert provider._config.default_model == "new-model"
+    assert provider._config.timeout_seconds == 60
+
+
+def test_freellmapi_provider_configure_partial_update():
+    """Test that FreeLLMAPIProvider.configure works with partial updates."""
+    config = FreeLLMAPIConfig(
+        base_url="http://original.example.com",
+        default_model="original-model",
+        timeout_seconds=30
+    )
+    provider = FreeLLMAPIProvider(config)
+
+    # Update only base_url
+    provider.configure({"base_url": "http://partial.example.com"})
+
+    # Verify only base_url was updated
+    assert provider._config.base_url == "http://partial.example.com"
+    assert provider._config.default_model == "original-model"  # unchanged
+    assert provider._config.timeout_seconds == 30  # unchanged
+
+
+@pytest.mark.asyncio
+async def test_freellmapi_provider_reload_credentials_closes_session():
+    """Test that FreeLLMAPIProvider.reload_credentials closes existing session."""
+    from unittest.mock import AsyncMock, MagicMock
+
+    provider = FreeLLMAPIProvider(FreeLLMAPIConfig(base_url="http://test.example.com", api_key="test-key"))
+
+    # Mock a session with async close method
+    mock_session = MagicMock()
+    mock_session.closed = False
+    mock_session.close = AsyncMock()
+    provider._session = mock_session
+
+    # Call reload_credentials
+    await provider.reload_credentials()
+
+    # Verify session was closed
+    mock_session.close.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_freellmapi_provider_reload_credentials_no_session():
+    """Test that FreeLLMAPIProvider.reload_credentials handles no existing session."""
+    provider = FreeLLMAPIProvider(FreeLLMAPIConfig(base_url="http://test.example.com", api_key="test-key"))
+
+    # Ensure no session exists
+    provider._session = None
+
+    # Call reload_credentials - should not raise
+    await provider.reload_credentials()
+
+    # Verify still no session
+    assert provider._session is None

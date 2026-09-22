@@ -76,7 +76,22 @@ class _Handler(BaseHTTPRequestHandler):
                 self._send_json({"error": "dashboard backend not available"}, 503)
                 return
             try:
-                snapshot = self.dashboard_service.get_all_pages()
+                # Extract project_id query parameter if present
+                project_id = None
+                if "?" in self.path:
+                    query_part = self.path.split("?", 1)[1]
+                    # Simple parsing for project_id parameter
+                    for param in query_part.split("&"):
+                        if param.startswith("project_id="):
+                            project_id = param.split("=", 1)[1]
+                            break
+
+                if project_id is not None:
+                    # Return project-specific workspace data
+                    snapshot = {"pages": {"project_workspace": self.dashboard_service.get_project_workspace(project_id)}}
+                else:
+                    # Return all pages (existing behavior)
+                    snapshot = self.dashboard_service.get_all_pages()
             except Exception as exc:  # noqa: BLE001 — never leak internals
                 self._send_json({"error": f"snapshot failed: {exc}"}, 500)
                 return

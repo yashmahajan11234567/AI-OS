@@ -467,3 +467,109 @@ def test_observability_page_payload_redaction(kernel_mock):
     ws_summary = workflow_started_events[0]["payload_summary"]
     assert ws_summary["nested"]["client_secret"] == "***REDACTED***"
     assert ws_summary["nested"]["inner_normal"] == "visible"
+
+
+def test_planning_submit_user_message_action_gated_by_security(kernel_mock, security_deny, security_allow):
+    """Test that planning.submit_user_message action is gated by SecurityManager (fail-closed)."""
+    from aios.services.project_service import ProjectService
+    from unittest.mock import MagicMock
+
+    # Setup kernel with project service and required adapters
+    obsidian_git_adapter = MagicMock()
+    obsidian_git_adapter.create_knowledge = MagicMock()
+    kernel_mock.obsidian_git_adapter = obsidian_git_adapter
+
+    project_svc = ProjectService(kernel=kernel_mock, event_bus=None, security_manager=None, config={})
+
+    # Create the test project first
+    test_project = project_svc.create_project(name="Test Project", description="Test project for planning messages")
+    test_project_id = test_project.project_id
+
+    # Test with security deny
+    svc_deny = _make_service(kernel_mock, security_deny)
+    svc_deny._project_service = project_svc
+    result_deny = asyncio.run(svc_deny.request_action("planning.submit_user_message",
+                                                      {"project_id": test_project_id, "content": "Hello AI-OS"}))
+    assert result_deny.authorized is False
+    assert result_deny.status == "rejected"
+    security_deny.authorize.assert_called_once()
+
+    # Test with security allow
+    svc_allow = _make_service(kernel_mock, security_allow)
+    svc_allow._project_service = project_svc
+    result_allow = asyncio.run(svc_allow.request_action("planning.submit_user_message",
+                                                       {"project_id": test_project_id, "content": "Hello AI-OS"}))
+    assert result_allow.authorized is True
+    assert result_allow.status == "completed"
+    assert result_allow.data["content"] == "Hello AI-OS"
+    assert result_allow.data["role"] == "user"
+    assert "message_id" in result_allow.data
+    assert result_allow.data["project_id"] == test_project_id
+
+
+def test_planning_submit_user_message_requires_project_id(kernel_mock, security_allow):
+    """Test that planning.submit_user_message action requires project_id parameter."""
+    from aios.services.project_service import ProjectService
+    from unittest.mock import MagicMock
+
+    # Setup kernel with project service and required adapters
+    obsidian_git_adapter = MagicMock()
+    obsidian_git_adapter.create_knowledge = MagicMock()
+    kernel_mock.obsidian_git_adapter = obsidian_git_adapter
+
+    project_svc = ProjectService(kernel=kernel_mock, event_bus=None, security_manager=None, config={})
+
+    svc = _make_service(kernel_mock, security_allow)
+    svc._project_service = project_svc
+    result = asyncio.run(svc.request_action("planning.submit_user_message",
+                                           {"content": "Hello AI-OS"}))  # Missing project_id
+    assert result.status == "error"
+    assert "requires project_id" in result.detail
+
+
+def test_planning_submit_user_message_requires_content(kernel_mock, security_allow):
+    """Test that planning.submit_user_message action requires content parameter."""
+    from aios.services.project_service import ProjectService
+    from unittest.mock import MagicMock
+
+    # Setup kernel with project service and required adapters
+    obsidian_git_adapter = MagicMock()
+    obsidian_git_adapter.create_knowledge = MagicMock()
+    kernel_mock.obsidian_git_adapter = obsidian_git_adapter
+
+    project_svc = ProjectService(kernel=kernel_mock, event_bus=None, security_manager=None, config={})
+
+    svc = _make_service(kernel_mock, security_allow)
+    svc._project_service = project_svc
+    result = asyncio.run(svc.request_action("planning.submit_user_message",
+                                           {"project_id": "test-proj"}))  # Missing content
+    assert result.status == "error"
+    assert "requires content string" in result.detail
+
+
+def test_planning_submit_user_message_rejects_empty_content(kernel_mock, security_allow):
+    """Test that planning.submit_user_message action rejects empty or whitespace-only content."""
+    from aios.services.project_service import ProjectService
+    from unittest.mock import MagicMock
+
+    # Setup kernel with project service and required adapters
+    obsidian_git_adapter = MagicMock()
+    obsidian_git_adapter.create_knowledge = MagicMock()
+    kernel_mock.obsidian_git_adapter = obsidian_git_adapter
+
+    project_svc = ProjectService(kernel=kernel_mock, event_bus=None, security_manager=None, config={})
+
+    svc = _make_service(kernel_mock, security_allow)
+    svc._project_service = project_svc
+
+    # Test empty string
+    result = asyncio.run(svc.request_action("planning.submit_user_message",
+                                           {"project_id": "test-proj", "content": ""}))
+    assert result.status == "error"
+    assert "content cannot be empty" in result.detail
+
+    # Test whitespace only
+    result = asyncio.run(svc.request_action("planning.submit_user_message",
+                                           {"project_id": "test-proj", "content": "   \n\t  "}))
+    assert result.status == "error"
+    assert "content cannot be empty" in result.detail

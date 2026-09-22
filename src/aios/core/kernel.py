@@ -29,6 +29,7 @@ from aios.events.core.bus import (
 )
 from aios.core.service_registry import (
     ServiceRegistry as CoreServiceRegistry,
+    ServiceType,
     get_service_registry as get_core_service_registry,
     reset_service_registry_singleton as reset_core_service_registry_singleton,
 )
@@ -465,6 +466,77 @@ class HermesKernel:
         """Get the non-authoritative M14-T2 Project Workspace service (bounded UI resource)."""
         return self._project_service
 
+    async def validate_execution_approval(self, project_id: str, plan_id: str) -> tuple[bool, str]:
+        """Validate that a plan has human approval before allowing execution.
+
+        This is the execution gate (INV-B3-13). Before ANY transition to
+        BOUNDED_EXECUTION / EXECUTING, the system MUST independently verify
+        the exact approved project + exact approved plan identity.
+
+        Denies execution when any of:
+        - project does not exist
+        - project is not PLAN_APPROVED
+        - no approved plan exists
+        - requested plan does not match approved plan (exact binding)
+        - approval is stale (project plan was regenerated after approval)
+        - approval belongs to another project
+        - plan was rejected and not regenerated
+        - any required approval identity/provenance is invalid
+        """
+        from aios.services.project_service import ProjectState
+
+        if self._project_service is None:
+            return False, "ProjectService unavailable"
+
+        project = self._project_service.get_project(project_id)
+        if project is None:
+            return False, f"Project {project_id} not found"
+
+        # 1. Project must be in PLAN_APPROVED state
+        if project.state != ProjectState.PLAN_APPROVED:
+            return False, (
+                f"Project {project_id} is not in PLAN_APPROVED state "
+                f"(current: {project.state.value})"
+            )
+
+        # 2. A plan must exist
+        current_plan = project.plan
+        if not current_plan:
+            return False, f"No plan found for project {project_id}"
+
+        # 3. Exact plan_id binding: the approved plan id must match what's being
+        #    executed. This enforces INV-B3-13: APPROVAL(project A, plan A)
+        #    != EXECUTION(project A, plan B) and vice versa.
+        approved_plan_id = project.approved_plan_id
+        if approved_plan_id is None:
+            return False, f"Project {project_id} has no approved plan identity recorded"
+
+        current_plan_id = current_plan.get("id", "") if isinstance(current_plan, dict) else ""
+        if current_plan_id and current_plan_id != approved_plan_id:
+            return False, (
+                f"Plan identity mismatch for project {project_id}: "
+                f"approved plan='{approved_plan_id}' but current plan='{current_plan_id}' "
+                f"(plan was regenerated after approval — stale approval)"
+            )
+
+        if plan_id and plan_id != approved_plan_id:
+            return False, (
+                f"Requested plan '{plan_id}' does not match approved plan "
+                f"'{approved_plan_id}' for project {project_id}"
+            )
+
+        # 4. Staleness / replacement check: if the plan was regenerated and
+        #    approved_plan_id still points to the old plan, deny.
+        #    (The save_plan method below clears approved_plan_id on regeneration,
+        #    so this is an additional safety net.)
+        if project.plan_rejected and not current_plan_id:
+            return False, f"Project {project_id} plan was rejected and no new plan exists"
+
+        logger.info(
+            f"Execution approval validated for project {project_id} plan {approved_plan_id}"
+        )
+        return True, "Execution approved"
+
     @property
     def self_loop_engine(self) -> SelfLoopEngine | None:
         """Get the M13 SelfLoopEngine (single authoritative autonomous decision-making engine)."""
@@ -520,6 +592,11 @@ class HermesKernel:
         return get_model_router()
 
     @property
+    def provider_registry(self) -> ProviderRegistry | None:
+        """Get the ProviderRegistry Core Component."""
+        return self._provider_registry
+
+    @property
     def mcp_manager(self) -> MCPManager | None:
         """Get the MCPManager."""
         return getattr(self, '_mcp_manager', None)
@@ -553,6 +630,18 @@ class HermesKernel:
     def evidence_engine(self) -> EvidenceEngine | None:
         """Get the M10-T4 Evidence Engine (core.evidence_engine)."""
         return self._evidence_engine
+
+    @property
+    def state_verification(self) -> Any:
+        """Get the M10-N7 State Verification Service."""
+        from aios.services.state_verification import get_state_verification
+        return get_state_verification()
+
+    @property
+    def learning_service(self) -> Any:
+        """Get the M9 LearningService singleton."""
+        from aios.services.learning import get_learning_service
+        return get_learning_service()
 
     @property
     def m10_recovery_manager(self) -> M10RecoveryManager | None:
@@ -812,6 +901,9 @@ class HermesKernel:
         # G1 (M8-T4) — register FreeLLMAPI provider with ModelRouter (dev/test)
         await self._init_freellmapi()
 
+        # Register NVIDIA NIM provider with ModelRouter (production ready)
+        await self._init_nim()
+
         # Agent Reach — register communication capability
         await self._init_agent_reach()
 
@@ -996,6 +1088,7 @@ class HermesKernel:
             ("EventBus", self._event_bus),
             ("ServiceRegistry", self._service_registry),
             ("ConfigurationManager", self._configuration),
+            ("CredentialStore", self._credential_store),
             ("StructuredLogger", self._structured_logger),
             ("LifecycleManager", self._lifecycle),
             ("StateManager", self._state_manager),
@@ -1240,6 +1333,21 @@ class HermesKernel:
         # Manager (Phase 4+) or Service (Phase 9+) can read it.
         self._configuration.freeze()
 
+        # M14-T2: Initialize CredentialStore for secure credential persistence
+        # (fail-closed: if key unavailable, store remains disabled, no plaintext fallback)
+        from aios.security.credential_store import get_credential_store
+        self._credential_store = get_credential_store(
+            store_path=self._config.data_dir / "credentials"
+        )
+        if self._credential_store is not None and self._credential_store.is_initialized():
+            logger.info(
+                "CredentialStore initialized at %s", self._config.data_dir / "credentials"
+            )
+        else:
+            logger.warning(
+                "CredentialStore disabled (no encryption key; credentials will not persist)"
+            )
+
         # Validate startup configuration immediately after freeze.
         startup_errors = self._configuration.validate_startup()
         if startup_errors:
@@ -1254,6 +1362,18 @@ class HermesKernel:
         self._structured_logger = get_logger()
         set_logger(self._structured_logger)
         await self._structured_logger.initialize(self)
+
+        # ProviderRegistry — Core Component for provider management
+        # Register as a core component so it's managed by LifecycleManager
+        from aios.core.provider_registry import ProviderRegistry
+        self._provider_registry = ProviderRegistry()
+        await self._service_registry.register(
+            self._provider_registry,
+            service_id="core.provider_registry",
+            service_type=ServiceType.ENGINEERING,
+            metadata={"version": "0.1.0", "description": "Provider registry for ModelRouter"},
+        )
+        await self._provider_registry.initialize(self)
 
         # Managers (constructed after C1–C4, use canonical singletons).
         # Task 10 — StateManager is a Phase-2 Core Manager; it receives the
@@ -2723,6 +2843,50 @@ class HermesKernel:
         register_freellmapi_provider(model_router, config)
         logger.info("FreeLLMAPI provider registered with ModelRouter (dev/test)")
 
+    async def _init_nim(self) -> None:
+        """Register NVIDIA NIM provider with ModelRouter (production ready).
+
+        Registers the NIM model backend into the EXISTING ModelRouter
+        (per INV-002: one model router). Gated by config/integrations.yaml mode
+        and NIM_* environment variables (user resource).
+        """
+        # Use canonical ModelRouter singleton (INV-002).
+        from aios.core.model_router import get_model_router
+        model_router = get_model_router()
+        if not model_router:
+            logger.debug("ModelRouter not available; skipping NIM registration")
+            return
+
+        # Check integration framework mode (PHASE 2)
+        try:
+            from aios.integrations import load_integrations_config, IntegrationMode
+            registry = load_integrations_config()
+            if registry.get("nim") and registry.get("nim").mode != IntegrationMode.REAL:
+                logger.debug("NIM mode is mock; skipping provider registration")
+                return
+            if not registry.get("nim").real_allowed():
+                logger.debug("NIM real connection not permitted (env gate / user resource absent)")
+                return
+        except Exception:
+            # Framework unavailable — keep fail-closed: don't auto-register.
+            logger.debug("Integration framework unavailable; NIM remains mock")
+            return
+
+        # Get env-based config (NIM_API_URL, NIM_API_KEY, etc.)
+        from aios.adapters.nim import (
+            register_nim_provider,
+            get_nim_config_from_env,
+        )
+
+        config = get_nim_config_from_env()
+        # Only register if the user actually provided endpoint credentials.
+        if not config.base_url:
+            logger.debug("NIM base_url not configured; skipping (user resource absent)")
+            return
+
+        register_nim_provider(model_router, config)
+        logger.info("NVIDIA NIM provider registered with ModelRouter")
+
     async def _init_agent_reach(self) -> None:
         """Register AgentReach communication capability and adapter.
 
@@ -2871,6 +3035,23 @@ class HermesKernel:
                 action="project.clear_action",
                 resource=None  # None acts as wildcard for resource
             )
+            # Human approval actions
+            self._security_manager.register_allow_rule(
+                principal="dashboard_user",
+                action="project.approve_plan",
+                resource=None  # None acts as wildcard for resource
+            )
+            self._security_manager.register_allow_rule(
+                principal="dashboard_user",
+                action="project.reject_plan",
+                resource=None  # None acts as wildcard for resource
+            )
+            # Planning Chat actions
+            self._security_manager.register_allow_rule(
+                principal="dashboard_user",
+                action="planning.submit_user_message",
+                resource=None
+            )
             logger.debug("Registered dashboard_user allow-rules for project actions")
 
         # Also start the HTTP server for health endpoints
@@ -2982,6 +3163,11 @@ class HermesKernel:
         mock_mode = not self._read_config_bool("services.self_loop.real_mode_enabled", False)
         self._self_loop_engine.set_mock_mode(mock_mode)
 
+        # B4-T2: Register production B4 evaluation handlers when real mode is enabled
+        if not mock_mode and self._self_loop_engine:
+            self._self_loop_engine.register_b4_handlers()
+            logger.debug("M14-T2: B4 production evaluation handlers registered")
+
         logger.debug(f"M13 SelfLoopEngine initialized (mock_mode={mock_mode}, max_cycles={max_cycles})")
 
     async def _init_self_prompting(self) -> None:
@@ -3022,6 +3208,17 @@ class HermesKernel:
         # Wire the generator into the self-loop engine
         if self._self_loop_engine:
             self._self_loop_engine._prompt_generator = self._self_prompt_generator
+
+        # B2-T1: Wire context adapter references into SelfLoopEngine
+        if self._self_loop_engine:
+            self._self_loop_engine.set_adapter_references(
+                obsidian_adapter=self._obsidian_adapter,
+                graphify_adapter=self._graphify_adapter,
+                claude_mem_adapter=self._claude_mem_adapter,
+                evidence_engine=self._evidence_engine,
+                state_manager=self._state_manager,
+            )
+            logger.debug("B2-T1: Context adapter references wired into SelfLoopEngine")
 
         logger.debug(f"M13 SelfPromptGenerator initialized (max_cycles={max_cycles}, convergence_action={convergence_action})")
 
@@ -3206,7 +3403,8 @@ class HermesKernel:
             name: {
                 "started": status.started,
                 "healthy": status.healthy,
-                "started_at": status.started_at.isoformat() if status.started_at else None,
+                "started_at": status.started_at.isoformat()
+                if status.started_at else None,
                 "last_error": status.last_error,
             }
             for name, status in self._services.items()

@@ -78,6 +78,9 @@ class EvidenceEntry:
     component: str
     service_id: str | None = None
     correlation_id: str | None = None
+    project_id: str | None = None
+    plan_id: str | None = None
+    cycle_id: str | None = None
     timestamp: datetime = field(default_factory=datetime.utcnow)
     payload: dict[str, Any] = field(default_factory=dict)
     metadata: dict[str, Any] = field(default_factory=dict)
@@ -89,6 +92,9 @@ class EvidenceEntry:
             "component": self.component,
             "service_id": self.service_id,
             "correlation_id": self.correlation_id,
+            "project_id": self.project_id,
+            "plan_id": self.plan_id,
+            "cycle_id": self.cycle_id,
             "timestamp": self.timestamp.isoformat(),
             "payload": self.payload,
             "metadata": self.metadata,
@@ -102,6 +108,9 @@ class EvidenceEntry:
             component=data["component"],
             service_id=data.get("service_id"),
             correlation_id=data.get("correlation_id"),
+            project_id=data.get("project_id"),
+            plan_id=data.get("plan_id"),
+            cycle_id=data.get("cycle_id"),
             timestamp=datetime.fromisoformat(data["timestamp"]),
             payload=data.get("payload", {}),
             metadata=data.get("metadata", {}),
@@ -165,6 +174,9 @@ class EvidenceStore:
         self._by_correlation: dict[str, list[str]] = {}  # correlation_id -> [evidence_id]
         self._by_type: dict[EvidenceType, list[str]] = {}  # evidence_type -> [evidence_id]
         self._by_component: dict[str, list[str]] = {}  # component -> [evidence_id]
+        self._by_project: dict[str, list[str]] = {}  # project_id -> [evidence_id]
+        self._by_plan: dict[str, list[str]] = {}  # plan_id -> [evidence_id]
+        self._by_cycle: dict[str, list[str]] = {}  # cycle_id -> [evidence_id]
         self._initialized = False
 
     def _log(self, level: str, message: str, **fields: Any) -> None:
@@ -193,6 +205,12 @@ class EvidenceStore:
                 self._by_correlation.setdefault(entry.correlation_id, []).append(entry.evidence_id)
             self._by_type.setdefault(entry.evidence_type, []).append(entry.evidence_id)
             self._by_component.setdefault(entry.component, []).append(entry.evidence_id)
+            if entry.project_id:
+                self._by_project.setdefault(entry.project_id, []).append(entry.evidence_id)
+            if entry.plan_id:
+                self._by_plan.setdefault(entry.plan_id, []).append(entry.evidence_id)
+            if entry.cycle_id:
+                self._by_cycle.setdefault(entry.cycle_id, []).append(entry.evidence_id)
 
     def _write_entry(self, entry: EvidenceEntry) -> None:
         file_path = self._base_path / f"{entry.evidence_id}.json"
@@ -228,12 +246,38 @@ class EvidenceStore:
             ids = self._by_component.get(component, [])
             return [self._index[eid] for eid in ids if eid in self._index]
 
+    async def query_by_project(self, project_id: str) -> list[EvidenceEntry]:
+        """Retrieve all EvidenceEntries for a specific project (cross-project isolation)."""
+        with self._index_lock:
+            ids = self._by_project.get(project_id, [])
+            return [self._index[eid] for eid in ids if eid in self._index]
+
+    async def query_by_plan(self, plan_id: str) -> list[EvidenceEntry]:
+        """Retrieve all EvidenceEntries for a specific plan."""
+        with self._index_lock:
+            ids = self._by_plan.get(plan_id, [])
+            return [self._index[eid] for eid in ids if eid in self._index]
+
+    async def query_by_cycle(self, cycle_id: str) -> list[EvidenceEntry]:
+        """Retrieve all EvidenceEntries for a specific cycle."""
+        with self._index_lock:
+            ids = self._by_cycle.get(cycle_id, [])
+            return [self._index[eid] for eid in ids if eid in self._index]
+
     async def query_recent(
         self,
         limit: int = 100,
         since: datetime | None = None,
     ) -> list[EvidenceEntry]:
         """Retrieve most recent EvidenceEntries, optionally filtered by time."""
+        return self.query_recent_sync(limit=limit, since=since)
+
+    def query_recent_sync(
+        self,
+        limit: int = 100,
+        since: datetime | None = None,
+    ) -> list[EvidenceEntry]:
+        """Synchronous retrieval of recent EvidenceEntries."""
         with self._index_lock:
             entries = list(self._index.values())
         entries.sort(key=lambda e: e.timestamp, reverse=True)
@@ -466,6 +510,27 @@ class EvidenceEngine:
     ) -> list[EvidenceEntry]:
         """Retrieve most recent EvidenceEntries."""
         return await self._store.query_recent(limit=limit, since=since)
+
+    # Sync wrapper for backward compatibility (called from sync context in SelfLoopEngine)
+    def get_recent_evidence(self, limit: int = 100) -> list[EvidenceEntry]:
+        """Sync access to recent evidence — wraps query_recent for use outside async contexts.
+
+        Note: This is a B4-T2 compatibility shim. In production, prefer the async
+        query_recent() method. This method uses asyncio.run() which may create a
+        new event loop; it is intended for one-off reads from sync code paths.
+        """
+        import asyncio as _asyncio
+        try:
+            loop = _asyncio.get_running_loop()
+        except RuntimeError:
+            loop = None
+        if loop and loop.is_running():
+            # We're in a running loop — cannot call asyncio.run() here.
+            # Fall back to direct store access (bypasses async persistence).
+            return self._store.query_recent_sync(limit=limit)
+        else:
+            # No running loop — safe to use asyncio.run()
+            return _asyncio.run(self._store.query_recent(limit=limit))
 
     # ---- Event emission (sync-to-async bridge) -------------------------------
 

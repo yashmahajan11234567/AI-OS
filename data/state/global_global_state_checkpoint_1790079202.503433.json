@@ -1,0 +1,13 @@
+{
+  "snapshot_id": "checkpoint_1790079202.503433",
+  "scope": "global",
+  "identifier": "global_state",
+  "state": {
+    "test_key": "test_value"
+  },
+  "metadata": {
+    "final": true
+  },
+  "timestamp": "2026-09-22T17:43:22.503433",
+  "version": 1
+}

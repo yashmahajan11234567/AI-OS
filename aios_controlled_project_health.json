@@ -1,0 +1,1 @@
+{"status": "running", "alive": true, "ready": true, "startup_complete": true, "uptime_seconds": 6773.44659, "timestamp": "2026-09-15T07:43:10.083285", "dependencies": {"components": {}, "total_checks": 0, "healthy_checks": 0, "unhealthy_checks": 0, "degraded_checks": 0}, "lifecycle_state": "OPERATIONAL", "health_manager_status": "UNKNOWN"}

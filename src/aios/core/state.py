@@ -47,7 +47,7 @@ import json
 import threading
 import uuid
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
 from enum import Enum
 from pathlib import Path
 from typing import Any
@@ -717,6 +717,142 @@ class StateManager:
         if not state_key:
             return []
         return self._history.get(state_key, [])[-limit:]
+
+    def get_git_context(self) -> dict[str, Any]:
+        """
+        Get Git/project context for REQUIREMENTS phase.
+
+        Returns factual/project provenance information from Git/environment.
+        If Git information is unavailable, returns safe empty/unavailable representation.
+
+        Returns:
+            Dict containing Git context with source="git" provenance-only semantics
+        """
+        try:
+            import os
+            import subprocess
+
+            # Try to get actual Git information
+            git_context = {
+                "source": "git",
+                "authority": "provenance_only",
+                "advisory": True,
+                "data": {},
+                "provenance": {
+                    "source": "git",
+                    "extracted_at": datetime.now(timezone.utc).isoformat(),
+                    "authority": "provenance_only"
+                }
+            }
+
+            # Get repository path
+            git_context["data"]["repository_path"] = os.getcwd()
+
+            # Try to get Git branch
+            try:
+                branch_result = subprocess.run(
+                    ["git", "rev-parse", "--abbrev-ref", "HEAD"],
+                    capture_output=True,
+                    text=True,
+                    timeout=5
+                )
+                if branch_result.returncode == 0:
+                    git_context["data"]["branch"] = branch_result.stdout.strip()
+                else:
+                    git_context["data"]["branch"] = "unknown"
+            except (subprocess.TimeoutExpired, FileNotFoundError):
+                git_context["data"]["branch"] = os.environ.get("GIT_BRANCH", "unknown")
+
+            # Try to get Git commit
+            try:
+                commit_result = subprocess.run(
+                    ["git", "rev-parse", "HEAD"],
+                    capture_output=True,
+                    text=True,
+                    timeout=5
+                )
+                if commit_result.returncode == 0:
+                    git_context["data"]["commit"] = commit_result.stdout.strip()
+                else:
+                    git_context["data"]["commit"] = "unknown"
+            except (subprocess.TimeoutExpired, FileNotFoundError):
+                git_context["data"]["commit"] = os.environ.get("GIT_COMMIT", "unknown")
+
+            # Try to get working tree status
+            try:
+                status_result = subprocess.run(
+                    ["git", "status", "--porcelain"],
+                    capture_output=True,
+                    text=True,
+                    timeout=5
+                )
+                if status_result.returncode == 0:
+                    git_context["data"]["working_tree_clean"] = len(status_result.stdout.strip()) == 0
+                else:
+                    git_context["data"]["working_tree_clean"] = "unknown"
+            except (subprocess.TimeoutExpired, FileNotFoundError):
+                git_context["data"]["working_tree_clean"] = os.environ.get("GIT_WORKING_TREE_CLEAN", "unknown") == "true"
+
+            return git_context
+
+        except Exception as e:
+            # Return safe empty/unavailable representation on error
+            return {
+                "source": "git",
+                "authority": "provenance_only",
+                "advisory": True,
+                "data": {
+                    "repository_path": "",
+                    "branch": "unknown",
+                    "commit": "unknown",
+                    "working_tree_clean": "unknown"
+                },
+                "provenance": {
+                    "source": "git",
+                    "extracted_at": datetime.now(timezone.utc).isoformat(),
+                    "authority": "provenance_only",
+                    "error": str(e)
+                },
+                "error": str(e)
+            }
+
+    def get_state_history(self, limit: int = 5) -> list[dict[str, Any]]:
+        """
+        Get historical state/context information for EVIDENCE phase.
+
+        Reuses existing StateManager history implementation as get_state_history(limit=5).
+        Returns contextual/advisory historical information.
+
+        Args:
+            limit: Maximum number of history entries to return
+
+        Returns:
+            List of historical state snapshots in dict format, empty list if no history
+        """
+        try:
+            # Get global state history as default context
+            # Using "global" scope with "global_state" identifier as the default
+            history_snapshots = self.get_history(StateScope.GLOBAL, "global_state", limit)
+
+            # Convert StateSnapshot objects to dict format for compatibility
+            history_dicts = []
+            for snapshot in history_snapshots:
+                history_dict = {
+                    "snapshot_id": snapshot.snapshot_id,
+                    "scope": snapshot.scope.value,
+                    "identifier": snapshot.identifier,
+                    "state": snapshot.state,
+                    "metadata": snapshot.metadata,
+                    "timestamp": snapshot.timestamp.isoformat(),
+                    "version": snapshot.version
+                }
+                history_dicts.append(history_dict)
+
+            return history_dicts
+
+        except Exception:
+            # Return empty list on any error - graceful degradation
+            return []
 
     def list_identifiers(self, scope: StateScope) -> list[str]:
         """List all identifiers for a scope."""

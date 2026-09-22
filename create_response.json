@@ -1,0 +1,1 @@
+{"action": "project.create", "authorized": true, "decision": "ALLOW", "status": "completed", "detail": "Action executed under AI-OS authority.", "data": {"project_id": "proj-e3f83c1554ce", "state": "CREATED"}}

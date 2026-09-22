@@ -1,0 +1,1 @@
+{"action": "project.transition", "authorized": true, "decision": "ALLOW", "status": "error", "detail": "Bounded execution failed: Lifecycle transition rejected by AI-OS: transition PLANNING -> DISCUSSION not permitted", "data": {}}

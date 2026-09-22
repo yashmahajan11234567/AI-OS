@@ -104,11 +104,43 @@ class DashboardService(BaseService):
             component_name="dashboard_backend",
             version=SemanticVersion(1, 0, 0),
         )
+        # Store latest planning results for display in planning chat
+        self._latest_planning_result: Optional[dict[str, Any]] = None
+        self._planning_results_history: list[dict[str, Any]] = []
 
     # ------------------------------------------------------------------ helpers
 
     def _now(self) -> str:
         return datetime.now(timezone.utc).isoformat()
+
+    async def on_start(self) -> None:
+        """Subscribe to planning completed events to display results in planning chat."""
+        await super().on_start()
+        self.subscribe(self._handle_planning_completed, PlanningCompleted)
+        logger.info(f"{self.name}.on_start completed - subscribed to PlanningCompleted events")
+
+    async def _handle_planning_completed(self, event: CoreEvent) -> None:
+        """Handle PlanningCompleted events to store results for display."""
+        try:
+            payload = event.payload.to_dict() if hasattr(event.payload, 'to_dict') else dict(event.payload)
+            planning_result = {
+                "planning_id": payload.get("planning_id", ""),
+                "timestamp": self._now(),
+                "payload": payload,
+                "correlation_id": str(event.correlationId) if event.correlationId else ""
+            }
+
+            # Store as latest result
+            self._latest_planning_result = planning_result
+
+            # Keep history (limit to last 10 results)
+            self._planning_results_history.append(planning_result)
+            if len(self._planning_results_history) > 10:
+                self._planning_results_history = self._planning_results_history[-10:]
+
+            logger.debug(f"Stored planning result for planning_id: {payload.get('planning_id', '')}")
+        except Exception as e:
+            logger.warning(f"Failed to handle PlanningCompleted event: {e}")
 
     async def _emit(
         self,
@@ -151,14 +183,20 @@ class DashboardService(BaseService):
     # PAGE 1 — Planning Chat (self-loop state)
     # ============================================================
 
-    def get_planning_chat(self) -> dict[str, Any]:
-        """Read-only view of the authoritative self-loop state."""
+    def get_planning_chat(self, project_id: Optional[str] = None) -> dict[str, Any]:
+        """Read-only view of the authoritative self-loop state.
+
+        If project_id is provided, includes project context and message history
+        for the ChatGPT-style Planning Workspace.
+        """
         engine = getattr(self._kernel, "self_loop_engine", None) if self._kernel else None
         generator = getattr(self._kernel, "self_prompt_generator", None) if self._kernel else None
 
         status: dict[str, Any] = {}
         last_prompt: dict[str, Any] = {}
         phase_map: list[dict[str, Any]] = []
+        project_context: dict[str, Any] = {}
+        messages: list[dict[str, Any]] = []
 
         if engine is not None:
             try:
@@ -192,6 +230,41 @@ class DashboardService(BaseService):
             except Exception:  # noqa: BLE001
                 gen_config = {}
 
+        # If project_id is provided, include project context and message history
+        if project_id is not None:
+            project_service = self._resolve_project_service()
+            if project_service is not None:
+                try:
+                    snapshot = project_service.get_project_snapshot(project_id)
+                    if snapshot.get("found"):
+                        project_context = {
+                            "project_id": snapshot["project"]["project_id"],
+                            "name": snapshot["project"]["name"],
+                            "state": snapshot["project"]["state"],
+                            "message_count": snapshot["project"]["message_count"],
+                        }
+                        # Convert message format to match frontend expectations
+                        raw_messages = snapshot.get("messages", [])
+                        messages = [
+                            {
+                                "message_id": msg.get("message_id"),
+                                "role": msg.get("role"),
+                                "content": msg.get("content"),
+                                "created_at": msg.get("created_at"),
+                            }
+                            for msg in raw_messages
+                        ]
+                except Exception:  # noqa: BLE001 — defensive read
+                    project_context = {}
+                    messages = []
+
+        # Get planning results from storage
+        latest_planning_result = None
+        planning_history = []
+        if self._latest_planning_result:
+            latest_planning_result = self._latest_planning_result
+            planning_history = self._planning_results_history.copy()
+
         return {
             "page": "planning_chat",
             "authority": "aios_sole",
@@ -199,6 +272,12 @@ class DashboardService(BaseService):
             "generator_config": gen_config,
             "phase_map": phase_map,
             "last_self_prompt": last_prompt,
+            "project_context": project_context,
+            "messages": messages,
+            "planning_results": {
+                "latest": latest_planning_result,
+                "history": planning_history
+            },
             "read_only": True,
         }
 
@@ -803,11 +882,86 @@ class DashboardService(BaseService):
             "project.transition",
             "project.publish_notion",
             "project.clear_action",
+            "project.approve_plan",
+            "project.reject_plan",
         ):
             project_service = self._resolve_project_service()
             if project_service is None:
                 raise RuntimeError("ProjectService unavailable (authored by AI-OS Terminal 1)")
             return await self._execute_project_action(action, params, project_service)
+
+        # --- Planning Chat actions (PAGE  ---
+        if action == "planning.submit_user_message":
+            project_id = params.get("project_id")
+            content = params.get("content")
+
+            # Validate required parameters
+            if project_id is None:
+                raise ValueError("planning.submit_user_message requires project_id")
+            if content is None:
+                raise ValueError("planning.submit_user_message requires content string")
+            if not isinstance(content, str) or not content.strip():
+                raise ValueError("content cannot be empty")
+
+            project_service = self._resolve_project_service()
+            if project_service is None:
+                raise RuntimeError("ProjectService unavailable (authored by AI-OS Terminal 1)")
+
+            # Add the message using the project service
+            message = await project_service.add_message(
+                project_id=project_id,
+                role="user",
+                content=content.strip()
+            )
+
+            # Trigger SelfLoopEngine to process the user message
+            user_intent = {
+                "goal": content.strip(),
+                "source": "planning_workspace",
+                "project_id": project_id,
+                "message_id": message.message_id,
+                "timestamp": message.created_at
+            }
+
+            # Execute the self-loop cycle with the user intent
+            engine = self._kernel.self_loop_engine
+            if engine is not None:
+                try:
+                    cycle = await engine.execute_cycle(user_intent)
+
+                    # Return enhanced message data with self-loop results
+                    return {
+                        "message_id": message.message_id,
+                        "role": message.role,
+                        "content": message.content,
+                        "created_at": message.created_at,
+                        "project_id": project_id,
+                        "self_loop_cycle_id": cycle.cycle_id,
+                        "self_loop_state": cycle.state.value if hasattr(cycle.state, 'value') else str(cycle.state),
+                        "phases_completed": len(cycle.phase_results),
+                        "self_prompt_generated": cycle.self_prompt is not None
+                    }
+                except Exception as e:
+                    # If self-loop execution fails, still return the persisted message
+                    # but indicate the self-loop processing failed
+                    logger.warning(f"SelfLoopEngine execution failed: {e}")
+                    return {
+                        "message_id": message.message_id,
+                        "role": message.role,
+                        "content": message.content,
+                        "created_at": message.created_at,
+                        "project_id": project_id,
+                        "self_loop_error": str(e)
+                    }
+            else:
+                # Fallback to original behavior if engine not available
+                return {
+                    "message_id": message.message_id,
+                    "role": message.role,
+                    "content": message.content,
+                    "created_at": message.created_at,
+                    "project_id": project_id
+                }
 
         raise ValueError(f"Unsupported dashboard action: {action}")
 
@@ -865,6 +1019,44 @@ class DashboardService(BaseService):
                 project_id, ProjectState.READY_FOR_ACTION
             )
             return {"project_id": project_id, "state": project.state.value}
+
+        if action == "project.approve_plan":
+            project_id = params.get("project_id")
+            plan_id = params.get("plan_id")
+            if project_id is None:
+                raise ValueError("project.approve_plan requires project_id")
+            if plan_id is None:
+                raise ValueError("project.approve_plan requires plan_id")
+            success, message, project = await project_service.approve_plan(
+                project_id, plan_id
+            )
+            if not success:
+                raise ValueError(f"Plan approval failed: {message}")
+            return {
+                "project_id": project.project_id,
+                "state": project.state.value,
+                "plan_id": plan_id,
+                "approval_message": message
+            }
+
+        if action == "project.reject_plan":
+            project_id = params.get("project_id")
+            plan_id = params.get("plan_id")
+            if project_id is None:
+                raise ValueError("project.reject_plan requires project_id")
+            if plan_id is None:
+                raise ValueError("project.reject_plan requires plan_id")
+            success, message, project = await project_service.reject_plan(
+                project_id, plan_id
+            )
+            if not success:
+                raise ValueError(f"Plan rejection failed: {message}")
+            return {
+                "project_id": project.project_id,
+                "state": project.state.value,
+                "plan_id": plan_id,
+                "rejection_message": message
+            }
 
         raise ValueError(f"Unsupported project action: {action}")
 

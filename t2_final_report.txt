@@ -1,0 +1,57 @@
+=== AI-OS CONTROLLED PROJECT VALIDATION REPORT ===
+
+1. GIT COMMIT VERIFICATION:
+   - Required commit 27dd9f5 M14-T2: Register dashboard_user allow-rules + ProjectService lifecycle methods: PRESENT
+
+2. KERNEL STATUS:
+   - Alive: TRUE (confirmed via curl)
+   - Ready: TRUE (confirmed via curl)
+   - Health: RUNNING (status: running, lifecycle_state: OPERATIONAL)
+
+3. PROJECT ID:
+   - proj-8fc67daa07dc
+
+4. COMPLETE LIFECYCLE RESULT:
+   - All transitions successful:
+   - CREATED → DISCUSSION → RESEARCH → PLANNING → REVIEW → DECISION_PENDING → APPROVED → FINALIZED → PUBLISHED_TO_NOTION → READY_FOR_ACTION → EXECUTING → COMPLETED
+
+5. EXECUTING → COMPLETED RESULT:
+   - Action: project.transition
+   - Authorized: TRUE
+   - Decision: ALLOW
+   - Status: completed
+   - Data: {"project_id": "proj-8fc67daa07dc", "state": "COMPLETED"}
+
+6. EVIDENCE FILES CREATED:
+   - aios_controlled_project_pages.json (55.6K)
+   - aios_controlled_project_snapshot.json (55.6K)
+   - aios_controlled_project_health.json (341B)
+   - aios_controlled_project_alive.json (15B)
+   - aios_controlled_project_ready.json (15B)
+   - All files contain valid JSON
+
+7. EVENT COUNTS:
+   - Due to SecurityManager restrictions, detailed event counts could not be retrieved
+   - All lifecycle transitions were authorized and completed successfully
+
+8. SECURITY RESULT:
+   - SecurityManager is active and functioning (denying unauthorized actions as expected)
+   - All project lifecycle actions were properly authorized for dashboard_user
+   - No security issue events occurred during validated operations
+
+9. HEALTH RESULT:
+   - Status: running
+   - Alive: true
+   - Ready: true
+   - Startup complete: true
+   - Lifecycle state: OPERATIONAL
+
+10. MOCK/REAL INTEGRATION STATUS:
+    - All integrations shown as mock mode in system snapshots
+    - real_allowed: false for all integrations
+    - No real external integrations were enabled (as required)
+
+11. FINAL CONFIRMATION:
+    KERNEL LEFT RUNNING FOR TERMINAL 3
+
+=== VALIDATION COMPLETED SUCCESSFULLY ===

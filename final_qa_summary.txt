@@ -1,0 +1,5 @@
+QA-GO-WITH-CONDITION
+
+Condition: Fix the test isolation issue in tests/unit/test_freellmapi_failsafe.py by ensuring proper ProviderRegistry singleton reset between test scenarios.
+
+Next action: Reset ProviderRegistry singleton in the failing test between the two scenarios to prevent "already registered" error.

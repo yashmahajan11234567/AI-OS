@@ -33,6 +33,8 @@ from datetime import datetime, timezone
 from enum import Enum
 from typing import Any, Optional
 
+from aios.events.core.types import EventType
+
 logger = logging.getLogger(__name__)
 
 
@@ -50,6 +52,9 @@ class ProjectState(str, Enum):
     PLANNING = "PLANNING"
     REVIEW = "REVIEW"
     DECISION_PENDING = "DECISION_PENDING"
+    PLAN_AWAITING_HUMAN_APPROVAL = "PLAN_AWAITING_HUMAN_APPROVAL"
+    PLAN_APPROVED = "PLAN_APPROVED"
+    PLAN_REJECTED = "PLAN_REJECTED"
     APPROVED = "APPROVED"
     FINALIZED = "FINALIZED"
     PUBLISHED_TO_NOTION = "PUBLISHED_TO_NOTION"
@@ -67,7 +72,21 @@ _ALLOWED_TRANSITIONS: dict[ProjectState, set[ProjectState]] = {
     ProjectState.RESEARCH: {ProjectState.PLANNING, ProjectState.RESEARCH},
     ProjectState.PLANNING: {ProjectState.REVIEW, ProjectState.PLANNING},
     ProjectState.REVIEW: {ProjectState.DECISION_PENDING, ProjectState.REVIEW},
-    ProjectState.DECISION_PENDING: {ProjectState.APPROVED, ProjectState.DECISION_PENDING},
+    ProjectState.DECISION_PENDING: {
+        ProjectState.APPROVED,
+        ProjectState.PLAN_AWAITING_HUMAN_APPROVAL,
+        ProjectState.DECISION_PENDING
+    },
+    ProjectState.PLAN_AWAITING_HUMAN_APPROVAL: {
+        ProjectState.PLAN_APPROVED,
+        ProjectState.PLAN_REJECTED,
+        ProjectState.PLAN_AWAITING_HUMAN_APPROVAL
+    },
+    ProjectState.PLAN_APPROVED: {
+        ProjectState.APPROVED,
+        ProjectState.PLAN_APPROVED
+    },
+    ProjectState.PLAN_REJECTED: {ProjectState.PLAN_REJECTED, ProjectState.REVIEW},
     ProjectState.APPROVED: {ProjectState.FINALIZED, ProjectState.APPROVED},
     ProjectState.FINALIZED: {ProjectState.PUBLISHED_TO_NOTION, ProjectState.FINALIZED},
     ProjectState.PUBLISHED_TO_NOTION: {ProjectState.READY_FOR_ACTION},
@@ -77,8 +96,10 @@ _ALLOWED_TRANSITIONS: dict[ProjectState, set[ProjectState]] = {
     ProjectState.BLOCKED: {
         ProjectState.CREATED, ProjectState.DISCUSSION, ProjectState.RESEARCH,
         ProjectState.PLANNING, ProjectState.REVIEW, ProjectState.DECISION_PENDING,
-        ProjectState.APPROVED, ProjectState.FINALIZED, ProjectState.PUBLISHED_TO_NOTION,
-        ProjectState.READY_FOR_ACTION, ProjectState.EXECUTING,
+        ProjectState.PLAN_AWAITING_HUMAN_APPROVAL, ProjectState.PLAN_APPROVED,
+        ProjectState.PLAN_REJECTED, ProjectState.APPROVED, ProjectState.FINALIZED,
+        ProjectState.PUBLISHED_TO_NOTION, ProjectState.READY_FOR_ACTION,
+        ProjectState.EXECUTING,
     },
 }
 
@@ -141,6 +162,16 @@ class Project:
     tasks: list[dict[str, Any]] = field(default_factory=list)
     plan: dict[str, Any] = field(default_factory=dict)
     notion_page_id: Optional[str] = None
+    # B3-R1: Exact plan-binding for human approval gate.
+    # approved_plan_id tracks the exact plan identity that received human
+    # approval. A regenerated/replaced plan must have a different id, which
+    # invalidates the previous approval (INV-B3-13).
+    approved_plan_id: Optional[str] = None
+    # Timestamp of the most recent approval (used for staleness checks).
+    approval_timestamp: Optional[str] = None
+    # Whether the current plan was explicitly rejected (prevents re-approval
+    # without regeneration).
+    plan_rejected: bool = False
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -266,6 +297,123 @@ class ProjectService:
                 await result
         except Exception as exc:  # noqa: BLE001 — never break the dashboard
             logger.debug("ProjectService event emission skipped: %s", exc)
+
+    # ------------------------------------------------------------------
+    # Human approval actions
+    # ------------------------------------------------------------------
+
+    async def approve_plan(
+        self,
+        project_id: str,
+        plan_id: str,
+        correlation_id: Optional[str] = None,
+    ) -> tuple[bool, str, Project]:
+        """Explicitly approve a plan awaiting human approval.
+
+        B3-R1: Approval is bound to the EXACT plan_id that was generated
+        during the planning phase. A regenerated/replaced plan (different
+        plan_id) will NOT match the stored approved_plan_id and the
+        execution gate will deny it.
+
+        This method validates that:
+        - The project exists
+        - The project is in PLAN_AWAITING_HUMAN_APPROVAL state
+        - The plan_id matches the current plan (exact binding)
+        - Updates the project state to PLAN_APPROVED with plan identity
+        """
+        project = self._projects.get(project_id)
+        if project is None:
+            return False, "project not found", project
+
+        # Verify project is in the correct state for approval
+        if project.state != ProjectState.PLAN_AWAITING_HUMAN_APPROVAL:
+            return False, f"project is not awaiting approval (current state: {project.state.value})", project
+
+        # Verify the plan exists
+        current_plan = project.plan
+        if not current_plan:
+            return False, "no plan found to approve", project
+
+        # B3-R1: Exact plan_id binding — the plan_id must match the current
+        # plan's identity. The plan dict should contain an "id" field that
+        # was assigned when the plan was first created/saved.
+        current_plan_id = current_plan.get("id", "") if isinstance(current_plan, dict) else ""
+        if current_plan_id and current_plan_id != plan_id:
+            return False, (
+                f"plan_id mismatch: requested '{plan_id}' but current plan is '{current_plan_id}'"
+            ), project
+
+        # Apply the transition to approved state
+        project.state = ProjectState.PLAN_APPROVED
+        project.approved_plan_id = plan_id  # B3-R1: bind approval to exact plan
+        project.approval_timestamp = self._now()  # B3-R1: record for staleness check
+        project.plan_rejected = False
+        project.updated_at = self._now()
+
+        # Emit approval event
+        await self._emit(
+            EventType.PLAN_APPROVED,
+            {
+                "project_id": project_id,
+                "plan_id": plan_id,
+                "approval_timestamp": project.approval_timestamp,
+                "plan_content": current_plan
+            },
+            correlation_id=correlation_id,
+        )
+
+        return True, "plan approved successfully", project
+
+    async def reject_plan(
+        self,
+        project_id: str,
+        plan_id: str,
+        correlation_id: Optional[str] = None,
+    ) -> tuple[bool, str, Project]:
+        """Explicitly reject a plan awaiting human approval.
+
+        B3-R1: Records rejection so the plan cannot be re-approved without
+        regeneration. Stores the rejected plan_id for traceability.
+        """
+        project = self._projects.get(project_id)
+        if project is None:
+            return False, "project not found", project
+
+        # Verify project is in the correct state for rejection
+        if project.state != ProjectState.PLAN_AWAITING_HUMAN_APPROVAL:
+            return False, f"project is not awaiting approval (current state: {project.state.value})", project
+
+        # Verify the plan exists
+        current_plan = project.plan
+        if not current_plan:
+            return False, "no plan found to reject", project
+
+        # B3-R1: Exact plan_id binding for rejection too
+        current_plan_id = current_plan.get("id", "") if isinstance(current_plan, dict) else ""
+        if current_plan_id and current_plan_id != plan_id:
+            return False, (
+                f"plan_id mismatch: requested '{plan_id}' but current plan is '{current_plan_id}'"
+            ), project
+
+        # Apply the transition to rejected state
+        project.state = ProjectState.PLAN_REJECTED
+        project.approved_plan_id = None  # B3-R1: clear any previous approval
+        project.plan_rejected = True     # B3-R1: mark as rejected
+        project.updated_at = self._now()
+
+        # Emit rejection event
+        await self._emit(
+            EventType.PLAN_REJECTED,
+            {
+                "project_id": project_id,
+                "plan_id": plan_id,
+                "rejection_timestamp": self._now(),
+                "plan_content": current_plan
+            },
+            correlation_id=correlation_id,
+        )
+
+        return True, "plan rejected successfully", project
 
     # ------------------------------------------------------------------
     # Project lifecycle (creation / transitions)
@@ -499,11 +647,20 @@ class ProjectService:
 
     async def save_plan(self, project_id: str, plan: dict[str, Any]) -> None:
         """Persist a plan variant to the project vault /plans/ (advisory until
-        approved). Does NOT transition state or grant execution authority."""
+        approved). Does NOT transition state or grant execution authority.
+
+        B3-R1: Saving a new plan invalidates any prior human approval for the
+        previous plan variant. The old approval was for the old plan identity;
+        a regenerated plan requires fresh human approval before execution.
+        """
         project = self._projects.get(project_id)
         if project is None:
             raise KeyError(f"project {project_id} not found")
         project.plan = plan
+        # B3-R1: Invalidate prior approval when plan is regenerated
+        project.approved_plan_id = None
+        project.approval_timestamp = None
+        project.plan_rejected = False
         project.updated_at = self._now()
         adapter = self._obsidian_git()
         if adapter is not None:

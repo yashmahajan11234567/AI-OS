@@ -202,30 +202,41 @@ class TestSelfLoopEngine:
 
     @pytest.mark.asyncio
     async def test_mock_cycle_execution(self, engine):
-        """Test full cycle execution in mock mode."""
-        user_intent = {"intent": "test_mock_cycle", "goal": "verify all phases complete"}
+        """Test full cycle execution in mock mode pauses at approval boundary.
+
+        B3-R1: The governed behavior stops at PLAN_AWAITING_HUMAN_APPROVAL —
+        planning completes, SELF_LOOP_PAUSED_FOR_APPROVAL is emitted, and the
+        cycle enters PAUSED state. No auto-approval occurs.
+        """
+        user_intent = {"intent": "test_mock_cycle", "goal": "verify approval boundary"}
         cycle = await engine.execute_cycle(user_intent)
 
-        assert cycle.state == SelfLoopState.COMPLETED_CYCLE
+        # B3-R1: cycle pauses at approval boundary, does NOT complete
+        assert cycle.state == SelfLoopState.PAUSED
         assert cycle.end_time is not None
-        assert len(cycle.phase_results) == 19
-        assert engine.cycle_count == 1
-
-        # Verify all phases completed
-        for phase in SelfLoopPhase:
-            assert phase in cycle.phase_results
-            result = cycle.phase_results[phase]
-            assert result.success is True  # Mock mode always succeeds
+        # Cognition phases (1-7) completed before the gate
+        assert len(cycle.phase_results) == 7
+        # Execution phases are NOT reached
+        assert SelfLoopPhase.BOUNDED_EXECUTION not in cycle.phase_results
+        assert engine.cycle_count == 0  # cycle not counted until full completion
 
     @pytest.mark.asyncio
-    async def test_self_prompt_generated_in_cycle(self, engine):
-        """Test that self-prompt is generated during cycle."""
-        user_intent = {"intent": "test_prompt", "goal": "verify prompt generation"}
+    async def test_self_prompt_not_generated_without_approval(self, engine):
+        """Test that self-prompt is NOT generated when approval boundary pauses cycle.
+
+        B3-R1: The approved_plan field is populated by the PLAN phase (phase 6 of
+        cognition), but the self_prompt (phase 8) is only generated after the
+        approval gate is passed. Since the cycle pauses before phase 8,
+        self_prompt remains None.
+        """
+        user_intent = {"intent": "test_prompt", "goal": "verify no auto-approval"}
         cycle = await engine.execute_cycle(user_intent)
 
-        assert cycle.self_prompt is not None
-        assert isinstance(cycle.self_prompt, SelfPrompt)
-        assert cycle.self_prompt.cycle_id == cycle.cycle_id
+        # B3-R1: self_prompt is NOT auto-generated — approval required first
+        assert cycle.self_prompt is None
+        assert cycle.state == SelfLoopState.PAUSED
+        # approved_plan from the PLAN phase (cognition) IS available
+        assert cycle.phase_results[SelfLoopPhase.PLAN].success is True
 
     def test_get_status(self, engine):
         """Test status reporting."""
@@ -234,6 +245,41 @@ class TestSelfLoopEngine:
         assert status["paused"] is False
         assert status["cycle_count"] == 0
         assert status["mock_mode"] is True
+
+    @pytest.mark.asyncio
+    async def test_execution_denied_without_approval(self, engine):
+        """B3-R1: Cycle pauses and does NOT auto-approve."""
+        user_intent = {"intent": "test_no_autoapprove", "goal": "verify pause"}
+        cycle = await engine.execute_cycle(user_intent)
+
+        # Cycle must be paused at approval boundary
+        assert cycle.state == SelfLoopState.PAUSED
+        assert SelfLoopPhase.BOUNDED_EXECUTION not in cycle.phase_results
+
+    @pytest.mark.asyncio
+    async def test_resume_requires_valid_approval(self, engine):
+        """B3-R1: resume() calls validate_execution_approval and stays paused if denied."""
+        # Create engine with a kernel mock that denies approval
+        kernel_mock = MagicMock()
+        kernel_mock.project_service = MagicMock()
+        kernel_mock.project_service.get_project.return_value = None  # project not found → denial
+        kernel_mock.validate_execution_approval = AsyncMock(return_value=(False, "project not found"))
+        engine._kernel = kernel_mock
+
+        user_intent = {"intent": "test_resume_denied", "goal": "verify resume gate"}
+        cycle = await engine.execute_cycle(user_intent)
+
+        # execute_cycle() sets cycle.state=PAUSED but does NOT set _paused=True
+        # (only pause() does). Manually set the engine state so resume() proceeds.
+        engine._running = True
+        engine._paused = True
+
+        # Engine is paused; try to resume
+        await engine.resume()
+
+        # Should still be paused because validation failed (project not found)
+        assert cycle.state == SelfLoopState.PAUSED
+        assert engine._paused is True
 
 
 class TestExecutionBounds:

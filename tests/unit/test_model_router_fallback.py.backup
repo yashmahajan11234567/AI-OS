@@ -1,0 +1,384 @@
+"""
+Unit tests for ModelRouter failure-aware provider fallback functionality.
+"""
+
+from __future__ import annotations
+
+import asyncio
+from unittest.mock import AsyncMock
+
+import pytest
+
+from aios.core.model_router import ModelRouter, ModelConfig, ModelRequest, ModelResponse, ModelProvider, ModelCapability
+from aios.core.provider import Provider
+from aios.core.provider_failures import ProviderFailure, FailureCategory
+from aios.core.provider_registry import ProviderRegistry
+
+
+class MockFailingProvider(Provider):
+    """Mock provider that always fails with a specific failure category."""
+
+    def __init__(self, provider_id: str, failure_category: FailureCategory):
+        self.provider_id = provider_id
+        self.failure_category = failure_category
+        self.generate_call_count = 0
+
+    async def generate(self, request: ModelRequest) -> ModelResponse:
+        self.generate_call_count += 1
+
+        # Create a ProviderFailure
+        failure = ProviderFailure(
+            category=self.failure_category,
+            provider_id=self.provider_id,
+            model_id=request.preferred_model or "test-model",
+            retryable=False,  # Simplify for testing
+            fallback_eligible=self.failure_category in {
+                FailureCategory.TIMEOUT,
+                FailureCategory.NETWORK,
+                FailureCategory.SERVER_ERROR,
+                FailureCategory.SERVICE_UNAVAILABLE,
+                FailureCategory.RATE_LIMIT,
+                FailureCategory.QUOTA_EXCEEDED,
+                FailureCategory.AUTHENTICATION,
+                FailureCategory.INVALID_MODEL
+            },
+            safe_message=f"Mock failure from {self.provider_id}"
+        )
+
+        return ModelResponse(
+            content=f"Failure from {self.provider_id}",
+            model_id=request.preferred_model or "test-model",
+            provider=ModelProvider.LOCAL,  # Use LOCAL as in existing tests
+            metadata={
+                "failure_category": failure.category.value,
+                "failure_retryable": failure.retryable,
+                "failure_fallback_eligible": failure.fallback_eligible,
+                "failure_safe_message": failure.safe_message,
+            }
+        )
+
+
+class MockSuccessProvider(Provider):
+    """Mock provider that always succeeds."""
+
+    def __init__(self, provider_id: str):
+        self.provider_id = provider_id
+        self.generate_call_count = 0
+
+    async def generate(self, request: ModelRequest) -> ModelResponse:
+        self.generate_call_count += 1
+
+        return ModelResponse(
+            content=f"Success from {self.provider_id}",
+            model_id=request.preferred_model or "test-model",
+            provider=ModelProvider.LOCAL,  # Use LOCAL as in existing tests
+            tokens_used={"input": 10, "output": 5},
+            cost=0.001
+        )
+
+
+@pytest.fixture
+def registry_router():
+    """Create a ModelRouter with a ProviderRegistry."""
+    registry = ProviderRegistry()
+    return ModelRouter(provider_registry=registry)
+
+
+@pytest.mark.asyncio
+async def test_fallback_on_fallback_eligible_failure(registry_router):
+    """Test that fallback occurs when failure is fallback_eligible."""
+    # Create a failing provider that should trigger fallback (TIMEOUT is fallback_eligible)
+    failing_provider = MockFailingProvider(
+        provider_id="failing-provider",
+        failure_category=FailureCategory.TIMEOUT
+    )
+
+    # Create a succeeding provider for fallback
+    succeeding_provider = MockSuccessProvider(
+        provider_id="succeeding-provider"
+    )
+
+    # Register the failing model
+    failing_model = ModelConfig(
+        model_id="failing-model",
+        provider=ModelProvider.NIM,
+        name="Failing Model",
+        capabilities=[ModelCapability.TEXT_GENERATION],
+        enabled=True,
+        config={"provider": "nim"}
+    )
+    registry_router.register_model(failing_model)
+
+    # Register the succeeding model
+    succeeding_model = ModelConfig(
+        model_id="succeeding-model",
+        provider=ModelProvider.KILO,
+        name="Succeeding Model",
+        capabilities=[ModelCapability.TEXT_GENERATION],
+        enabled=True,
+        config={"provider": "kilo"}
+    )
+    registry_router.register_model(succeeding_model)
+
+    # Mock the provider registry to return our providers
+    # Store the original method to avoid recursion
+    original_get_provider = registry_router._provider_registry.get_provider
+    def mock_get_provider(provider_id):
+        if provider_id == "nim":
+            return failing_provider
+        elif provider_id == "kilo":
+            return succeeding_provider
+        return original_get_provider(provider_id)
+
+    registry_router._provider_registry.get_provider = mock_get_provider
+
+    # Make a request that should trigger fallback - specify preferred_model to route to our test model
+    request = ModelRequest(
+        prompt="test prompt",
+        required_capabilities=[ModelCapability.TEXT_GENERATION],
+        preferred_model="failing-model"
+    )
+
+    response = await registry_router.generate(request)
+
+    # Should have succeeded via fallback
+    assert "Success from succeeding-provider" in response.content
+    assert succeeding_provider.generate_call_count >= 1
+    assert failing_provider.generate_call_count >= 1
+
+
+@pytest.mark.asyncio
+async def test_no_fallback_on_non_fallback_eligible_failure(registry_router):
+    """Test that no fallback occurs when failure is not fallback_eligible."""
+    # Create a failing provider that should NOT trigger fallback (INVALID_REQUEST is NOT fallback_eligible)
+    failing_provider = MockFailingProvider(
+        provider_id="failing-provider",
+        failure_category=FailureCategory.INVALID_REQUEST
+    )
+
+    # Register the failing model
+    failing_model = ModelConfig(
+        model_id="failing-model",
+        provider=ModelProvider.NIM,
+        name="Failing Model",
+        capabilities=[ModelCapability.TEXT_GENERATION],
+        enabled=True,
+        config={"provider": "nim"}
+    )
+    registry_router.register_model(failing_model)
+
+    # Store the original method to avoid recursion
+    original_get_provider = registry_router._provider_registry.get_provider
+    # Mock the provider registry
+    def mock_get_provider(provider_id):
+        if provider_id == "nim":
+            return failing_provider
+        return original_get_provider(provider_id)
+
+    registry_router._provider_registry.get_provider = mock_get_provider
+
+    # Make a request - specify preferred_model to route to our test model
+    request = ModelRequest(
+        prompt="test prompt",
+        required_capabilities=[ModelCapability.TEXT_GENERATION],
+        preferred_model="failing-model"
+    )
+
+    response = await registry_router.generate(request)
+
+    # Should have failed without attempting fallback
+    assert "Failure from failing-provider" in response.content
+    assert failing_provider.generate_call_count >= 1
+
+
+@pytest.mark.asyncio
+async def test_cross_provider_fallback(registry_router):
+    """Test fallback to a different provider."""
+    # Create failing provider
+    failing_provider = MockFailingProvider(
+        provider_id="provider-a",
+        failure_category=FailureCategory.TIMEOUT
+    )
+
+    # Create succeeding provider (different provider)
+    succeeding_provider = MockSuccessProvider(
+        provider_id="provider-b"
+    )
+
+    # Register models
+    failing_model = ModelConfig(
+        model_id="model-x",
+        provider=ModelProvider.NIM,
+        name="Model X",
+        capabilities=[ModelCapability.TEXT_GENERATION],
+        enabled=True,
+        config={"provider": "nim"}
+    )
+    registry_router.register_model(failing_model)
+
+    succeeding_model = ModelConfig(
+        model_id="model-y",
+        provider=ModelProvider.KILO,
+        name="Model Y",
+        capabilities=[ModelCapability.TEXT_GENERATION],
+        enabled=True,
+        config={"provider": "kilo"}
+    )
+    registry_router.register_model(succeeding_model)
+
+    # Store the original method to avoid recursion
+    original_get_provider = registry_router._provider_registry.get_provider
+    # Mock provider registry
+    def mock_get_provider(provider_id):
+        if provider_id == "nim":
+            return failing_provider
+        elif provider_id == "kilo":
+            return succeeding_provider
+        return original_get_provider(provider_id)
+
+    registry_router._provider_registry.get_provider = mock_get_provider
+
+    # Request - specify preferred_model to route to our test model
+    request = ModelRequest(
+        prompt="test prompt",
+        required_capabilities=[ModelCapability.TEXT_GENERATION],
+        preferred_model="model-x"
+    )
+
+    response = await registry_router.generate(request)
+
+    # Should succeed via fallback to different provider
+    assert "Success from provider-b" in response.content
+    assert failing_provider.generate_call_count >= 1
+    assert succeeding_provider.generate_call_count >= 1
+
+
+@pytest.mark.asyncio
+async def test_same_provider_different_model_fallback(registry_router):
+    """Test fallback to same provider, different model."""
+    # Create failing provider
+    failing_provider = MockFailingProvider(
+        provider_id="same-provider",
+        failure_category=FailureCategory.TIMEOUT
+    )
+
+    # Create succeeding provider (same provider, different model)
+    succeeding_provider = MockSuccessProvider(
+        provider_id="same-provider"
+    )
+
+    # Register models
+    failing_model = ModelConfig(
+        model_id="model-a",
+        provider=ModelProvider.NIM,
+        name="Model A",
+        capabilities=[ModelCapability.TEXT_GENERATION],
+        enabled=True,
+        config={"provider": "nim"}
+    )
+    registry_router.register_model(failing_model)
+
+    succeeding_model = ModelConfig(
+        model_id="model-b",
+        provider=ModelProvider.KILO,
+        name="Model B",
+        capabilities=[ModelCapability.TEXT_GENERATION],
+        enabled=True,
+        config={"provider": "kilo"}
+    )
+    # Store the original method to avoid recursion
+    original_get_provider = registry_router._provider_registry.get_provider
+    registry_router.register_model(succeeding_model)
+
+    # Mock provider registry - return failing provider first, then succeeding provider
+    call_count = {"count": 0}
+    def mock_get_provider(provider_id):
+        call_count["count"] += 1
+        if provider_id == "nim":
+            return failing_provider if call_count["count"] == 1 else succeeding_provider
+        elif provider_id == "kilo":
+            return succeeding_provider if call_count["count"] > 1 else failing_provider
+        return original_get_provider(provider_id)
+
+    registry_router._provider_registry.get_provider = mock_get_provider
+
+    # Request - specify preferred_model to route to our test model
+    request = ModelRequest(
+        prompt="test prompt",
+        required_capabilities=[ModelCapability.TEXT_GENERATION],
+        preferred_model="model-a"
+    )
+
+    response = await registry_router.generate(request)
+
+    # Should succeed via fallback (to either same or different model - the important thing is it succeeded)
+    assert "Success from" in response.content
+    # At least one provider should have been called
+    assert failing_provider.generate_call_count >= 1 or succeeding_provider.generate_call_count >= 1
+
+
+@pytest.mark.asyncio
+async def test_capability_preserving_fallback(registry_router):
+    """Test that fallback preserves required capabilities."""
+    # Create failing provider that lacks required capability in its model
+    failing_provider = MockFailingProvider(
+        provider_id="failing-provider",
+        failure_category=FailureCategory.TIMEOUT
+    )
+
+    # Create succeeding provider
+    succeeding_provider = MockSuccessProvider(
+        provider_id="succeeding-provider"
+    )
+
+    # Register failing model (missing required capability)
+    failing_model = ModelConfig(
+        model_id="failing-model",
+        provider=ModelProvider.NIM,
+        name="Failing Model",
+        capabilities=[ModelCapability.EMBEDDING],  # Missing text_generation!
+        enabled=True,
+        config={"provider": "nim"}
+    )
+    registry_router.register_model(failing_model)
+
+    # Register succeeding model (has required capability)
+    succeeding_model = ModelConfig(
+        model_id="succeeding-model",
+        provider=ModelProvider.KILO,
+    # Store the original method to avoid recursion
+    original_get_provider = registry_router._provider_registry.get_provider
+        name="Succeeding Model",
+        capabilities=[ModelCapability.TEXT_GENERATION],  # Has the required capability
+        enabled=True,
+        config={"provider": "kilo"}
+    )
+    registry_router.register_model(succeeding_model)
+
+    # Mock provider registry
+    def mock_get_provider(provider_id):
+        if provider_id == "nim":
+            return failing_provider
+        elif provider_id == "kilo":
+            return succeeding_provider
+        return original_get_provider(provider_id)
+
+    registry_router._provider_registry.get_provider = mock_get_provider
+
+    # Request REQUIRES text_generation capability - specify preferred_model to route to our test model
+    request = ModelRequest(
+        prompt="test prompt",
+        required_capabilities=[ModelCapability.TEXT_GENERATION],  # This is REQUIRED
+        preferred_model="failing-model"
+    )
+
+    response = await registry_router.generate(request)
+
+    # Should succeed via fallback to model that has the required capability
+    assert "Success from succeeding-provider" in response.content
+    assert failing_provider.generate_call_count >= 1
+    assert succeeding_provider.generate_call_count >= 1
+
+
+if __name__ == "__main__":
+    pytest.main([__file__])

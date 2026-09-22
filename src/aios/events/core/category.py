@@ -121,6 +121,8 @@ _EVENT_TYPE_CATEGORY: dict[EventType, EventCategory] = {
     EventType.PLANNING_REQUESTED: EventCategory.AUDIT,
     EventType.PLANNING_COMPLETED: EventCategory.AUDIT,
     EventType.PLANNING_FAILED: EventCategory.AUDIT,
+    EventType.PLAN_AWAITING_APPROVAL: EventCategory.AUDIT,
+    EventType.PLAN_APPROVED: EventCategory.AUDIT,
     EventType.PLAN_REJECTED: EventCategory.AUDIT,
     EventType.CODE_GENERATED: EventCategory.AUDIT,
     EventType.CODING_COMPLETED: EventCategory.AUDIT,
@@ -180,6 +182,9 @@ _EVENT_TYPE_CATEGORY: dict[EventType, EventCategory] = {
     EventType.MODEL_ROUTED: EventCategory.DIAGNOSTIC,
     EventType.MODEL_FALLBACK: EventCategory.DIAGNOSTIC,
     EventType.MODEL_PROVIDER_REGISTERED: EventCategory.DIAGNOSTIC,
+    EventType.PROVIDER_COOLDOWN_STARTED: EventCategory.DIAGNOSTIC,
+    EventType.PROVIDER_COOLDOWN_EXPIRED: EventCategory.DIAGNOSTIC,
+    EventType.PROVIDER_GROUP_SELECTED: EventCategory.DIAGNOSTIC,
     EventType.MEMORY_GRAPHIFY_QUERY: EventCategory.DATA,
     EventType.MEMORY_GRAPHIFY_PATH: EventCategory.DATA,
     EventType.AGENT_REACH_FETCH: EventCategory.DATA,
@@ -200,6 +205,7 @@ _EVENT_TYPE_CATEGORY: dict[EventType, EventCategory] = {
     EventType.SELF_LOOP_PHASE_COMPLETED: EventCategory.SYSTEM,
     EventType.SELF_LOOP_PHASE_FAILED: EventCategory.SYSTEM,
     EventType.SELF_LOOP_PAUSED: EventCategory.SYSTEM,
+    EventType.SELF_LOOP_PAUSED_FOR_APPROVAL: EventCategory.SYSTEM,
     EventType.SELF_LOOP_RESUMED: EventCategory.SYSTEM,
     EventType.SELF_LOOP_STOPPED: EventCategory.SYSTEM,
     EventType.SELF_PROMPT_GENERATED: EventCategory.AUDIT,
@@ -231,6 +237,10 @@ _EVENT_TYPE_CATEGORY: dict[EventType, EventCategory] = {
     EventType.LEARNING_APPLIED: EventCategory.AUDIT,
     EventType.LEARNING_REJECTED: EventCategory.AUDIT,
     EventType.KNOWLEDGE_UPDATED: EventCategory.DATA,
+    # === M14 B4 EVALUATION LIFECYCLE ===
+    EventType.EVIDENCE_CREATED: EventCategory.AUDIT,
+    EventType.VERIFICATION_PASSED: EventCategory.AUDIT,
+    EventType.VERIFICATION_FAILED: EventCategory.AUDIT,
 }
 
 

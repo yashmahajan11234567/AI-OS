@@ -544,3 +544,135 @@ async def test_find01_async_init_shutdown_still_works(bus, sm, sr):
     await sm.shutdown()
     assert not sm.is_initialized
     assert not sm.health_ready()
+
+
+# ---------------------------------------------------------------------------
+# B2-R1: get_git_context() and get_state_history() remediation tests
+# ---------------------------------------------------------------------------
+
+def test_get_git_context_exists(sm):
+    """Test that get_git_context() method exists."""
+    assert hasattr(sm, 'get_git_context')
+    assert callable(sm.get_git_context)
+
+
+def test_get_git_context_returns_dict(sm):
+    """Test that get_git_context() returns a dict with expected structure."""
+    git_context = sm.get_git_context()
+
+    assert isinstance(git_context, dict)
+    assert git_context.get("source") == "git"
+    assert git_context.get("authority") == "provenance_only"
+    assert git_context.get("advisory") is True
+    assert "data" in git_context
+    assert "provenance" in git_context
+
+
+def test_get_git_context_with_git_repo(sm, tmp_path):
+    """Test get_git_context() in a proper Git repository."""
+    # Create a temporary Git repo
+    import subprocess
+    import os
+
+    # Initialize a git repo in tmp_path
+    subprocess.run(["git", "init"], cwd=tmp_path, capture_output=True)
+    subprocess.run(["git", "config", "user.email", "test@example.com"], cwd=tmp_path, capture_output=True)
+    subprocess.run(["git", "config", "user.name", "Test User"], cwd=tmp_path, capture_output=True)
+
+    # Create a file and commit
+    test_file = tmp_path / "test.txt"
+    test_file.write_text("test content")
+    subprocess.run(["git", "add", "."], cwd=tmp_path, capture_output=True)
+    subprocess.run(["git", "commit", "-m", "Initial commit"], cwd=tmp_path, capture_output=True)
+
+    # Change to the git repo directory
+    original_dir = os.getcwd()
+    try:
+        os.chdir(tmp_path)
+        git_context = sm.get_git_context()
+
+        # Verify Git information is present
+        assert git_context["data"]["repository_path"] == str(tmp_path)
+        assert git_context["data"]["branch"] != "unknown"
+        assert git_context["data"]["commit"] != "unknown"
+        assert isinstance(git_context["data"]["working_tree_clean"], bool)
+    finally:
+        os.chdir(original_dir)
+
+
+def test_get_git_context_without_git(sm, tmp_path):
+    """Test get_git_context() when not in a Git repository."""
+    # Create a StateManager with tmp_path as persistence
+    sm = StateManager(persistence_path=tmp_path / "state")
+
+    # Change to a non-git directory (parent of tmp_path)
+    import os
+    original_dir = os.getcwd()
+    try:
+        os.chdir(str(tmp_path.parent))
+        git_context = sm.get_git_context()
+
+        # Should return safe defaults when Git is not available
+        assert git_context["source"] == "git"
+        assert git_context["data"]["branch"] == "unknown"
+        assert git_context["data"]["commit"] == "unknown"
+    finally:
+        os.chdir(original_dir)
+
+
+def test_get_state_history_exists(sm):
+    """Test that get_state_history() method exists."""
+    assert hasattr(sm, 'get_state_history')
+    assert callable(sm.get_state_history)
+
+
+def test_get_state_history_empty(sm):
+    """Test get_state_history() returns empty list when no history exists."""
+    history = sm.get_state_history()
+    assert isinstance(history, list)
+    assert len(history) == 0
+
+
+def test_get_state_history_respects_limit(sm):
+    """Test that get_state_history() respects the limit parameter."""
+    # Create some state history
+    sm.set_state(StateScope.GLOBAL, "global_state", "key1", "value1")
+    sm.checkpoint(StateScope.GLOBAL, "global_state")
+
+    # Add more checkpoints
+    sm.set_state(StateScope.GLOBAL, "global_state", "key2", "value2")
+    sm.checkpoint(StateScope.GLOBAL, "global_state")
+
+    sm.set_state(StateScope.GLOBAL, "global_state", "key3", "value3")
+    sm.checkpoint(StateScope.GLOBAL, "global_state")
+
+    # Get history with limit
+    history = sm.get_state_history(limit=2)
+
+    # Should return at most 2 entries
+    assert len(history) <= 2
+    assert isinstance(history, list)
+
+    # Verify structure of returned items
+    if history:
+        assert isinstance(history[0], dict)
+        assert "snapshot_id" in history[0]
+        assert "timestamp" in history[0]
+        assert "state" in history[0]
+
+
+def test_get_state_history_with_data(sm):
+    """Test get_state_history() returns structured data when history exists."""
+    # Create initial state
+    sm.set_state(StateScope.GLOBAL, "global_state", "status", "active")
+    sm.checkpoint(StateScope.GLOBAL, "global_state")
+
+    # Get history
+    history = sm.get_state_history()
+
+    assert len(history) >= 1
+    assert isinstance(history[0], dict)
+    assert history[0]["scope"] == "global"
+    assert history[0]["identifier"] == "global_state"
+    assert "state" in history[0]
+    assert "metadata" in history[0]

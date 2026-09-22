@@ -44,7 +44,7 @@
   <span class="note" style="margin:0">AI-OS (Terminal 1) is the sole governance, verification &amp; decision authority. This UI only visualizes state and forwards authorized actions.</span>
 </header>
 <nav>
-  <button data-page="planning_chat" class="active">1 · Planning Chat</button>
+  <button data-page="planning_chat" class="active">1 · Planning Workspace</button>
   <button data-page="resource_onboarding">2 · Resource Onboarding</button>
   <button data-page="project_workspace">3 · Project Workspace</button>
   <button data-page="project_execution">4 · Project / Execution</button>
@@ -100,27 +100,232 @@ function render() {
 
 function renderPlanning() {
   const p = DATA.pages.planning_chat;
-  const sl = p.self_loop || {};
-  let html = card("Self-Loop Engine (authoritative autonomous loop)",
-    kv("running", sl.running) + kv("paused", sl.paused) + kv("mock_mode", sl.mock_mode)
-    + kv("cycle_count", sl.cycle_count) + kv("current_cycle", sl.current_cycle||'-')
-    + kv("current_phase", sl.current_phase||'-'));
-  const gen = p.generator_config || {};
-  html += card("Self-Prompt Generator config",
-    kv("max_cycles", gen.max_cycles) + kv("max_depth", gen.max_depth) + kv("convergence_action", gen.convergence_action));
-  const ph = (p.phase_map||[]).map(x =>
-    `<div class="phase ${x.completed?'done':'pending'}">${x.phase}${x.completed?' ✓':''}</div>`).join('');
-  html += card("19-Phase Lifecycle", `<div class="phase-grid">${ph}</div>`);
-  const sp = p.last_self_prompt || {};
-  html += card("Last Self-Prompt (read-only)",
-    kv("action_type", sp.action_type||'-') + kv("target_systems", JSON.stringify(sp.target_systems||[]))
-    + kv("validation_status", sp.validation_status||'-'));
-  document.getElementById('page-planning_chat').innerHTML = html
-    + `<div class="card"><h3>Authorized actions</h3>
-       <button class="action" onclick="act('self_loop.control',{op:'pause'})">Pause loop</button>
-       <button class="action" onclick="act('self_loop.control',{op:'resume'})">Resume loop</button>
-       <button class="action" onclick="act('self_loop.control',{op:'stop'})">Stop loop</button>
-       <div class="note" style="margin-top:8px">These are forwarded to AI-OS and gated by SecurityManager (fail-closed).</div></div>`;
+
+  // Check if we have project context (for Planning Workspace mode)
+  const hasProjectContext = p.project_context && p.project_context.name;
+
+  if (hasProjectContext) {
+    // Planning Workspace mode - ChatGPT style interface
+    const project = p.project_context;
+    const messages = p.messages || [];
+
+    let html = `<div class="planning-workspace">
+      <div class="workspace-sidebar">
+        <div class="workspace-header">
+          <button class="action" onclick="newChat()" style="width:100%;margin-bottom:8px;">+ New Chat</button>
+          <div class="workspace-project-info">
+            <div class="workspace-project-name">${escapeHtml(project.name)}</div>
+            <div class="workspace-project-state">
+              <span class="pill ${project.state==='PLANNING'?'ok':project.state==='DISCUSSION'?'warn':''}">${escapeHtml(project.state||'—')}</span>
+            </div>
+            <div class="workspace-project-stats">
+              ${escapeHtml(project.message_count)} messages
+            </div>
+          </div>
+        </div>
+
+        <div class="workspace-projects-list">
+          <div class="workspace-section-header">Projects</div>
+          <div id="workspace-projects-list-content">
+            <!-- Projects will be populated here -->
+          </div>
+        </div>
+      </div>
+
+      <div class="workspace-main">
+        <div class="workspace-conversation-header">
+          <div>${escapeHtml(project.name)}</div>
+          <div class="workspace-conversation-status">
+            <span class="pill ${project.state==='PLANNING'?'ok':project.state==='DISCUSSION'?'warn':''}">${escapeHtml(project.state||'—')}</span>
+          </div>
+        </div>
+
+        <div class="workspace-conversation" id="workspace-conversation-messages">
+          <!-- Messages will be populated here -->
+        </div>
+
+        <div class="workspace-input-area">
+          <input id="planning-input" type="text" placeholder="Message AI-OS..."
+                 style="background:var(--bg);color:var(--text);border:1px solid var(--border);
+                        padding:12px;border-radius:4px;width:calc(100% - 80px);margin-right:8px;"
+                 onkeypress="if(event.key==='Enter'){event.preventDefault();submitPlanningMessage();}" />
+          <button class="action" onclick="submitPlanningMessage()">➤</button>
+        </div>
+      </div>
+    </div>`;
+
+    document.getElementById('page-planning_chat').innerHTML = html;
+
+    // Populate projects list
+    populateProjectsList();
+
+    // Populate messages
+    populateMessages(messages);
+  } else {
+    // Original planning chat mode (fallback)
+    const sl = p.self_loop || {};
+    let html = card("Self-Loop Engine (authoritative autonomous loop)",
+      kv("running", sl.running) + kv("paused", sl.paused) + kv("mock_mode", sl.mock_mode)
+      + kv("cycle_count", sl.cycle_count) + kv("current_cycle", sl.current_cycle||'-')
+      + kv("current_phase", sl.current_phase||'-'));
+    const gen = p.generator_config || {};
+    html += card("Self-Prompt Generator config",
+      kv("max_cycles", gen.max_cycles) + kv("max_depth", gen.max_depth) + kv("convergence_action", gen.convergence_action));
+    const ph = (p.phase_map||[]).map(x =>
+      `<div class="phase ${x.completed?'done':'pending'}">${x.phase}${x.completed?' ✓':''}</div>`).join('');
+    html += card("19-Phase Lifecycle", `<div class="phase-grid">${ph}</div>`);
+    const sp = p.last_self_prompt || {};
+    html += card("Last Self-Prompt (read-only)",
+      kv("action_type", sp.action_type||'-') + kv("target_systems", JSON.stringify(sp.target_systems||[]))
+      + kv("validation_status", sp.validation_status||'-'));
+
+    // Human message input for Planning Chat
+    html += `<div class="card"><h3>Planning Chat</h3>
+      <div class="note">Send a message to the AI-OS planning system (gated by SecurityManager)</div>
+      <input id="planning-input" type="text" placeholder="Enter your planning message..."
+             style="background:var(--bg);color:var(--text);border:1px solid var(--border);
+                    padding:8px;border-radius:4px;width:70%;margin-right:8px;" />
+      <button class="action" onclick="submitPlanningMessage()">Send</button>
+      <div class="note" style="margin-top:8px">Messages are routed through AI-OS authority architecture.</div></div>`;
+
+    document.getElementById('page-planning_chat').innerHTML = html
+      + `<div class="card"><h3>Authorized actions</h3>
+         <button class="action" onclick="act('self_loop.control',{op:'pause'})">Pause loop</button>
+         <button class="action" onclick="act('self_loop.control',{op:'resume'})">Resume loop</button>
+         <button class="action" onclick="act('self_loop.control',{op:'stop'})">Stop loop</button>
+         <div class="note" style="margin-top:8px">These are forwarded to AI-OS and gated by SecurityManager (fail-closed).</div></div>`;
+  }
+}
+
+// Helper function to populate projects list in sidebar
+function populateProjectsList() {
+  const projectsContainer = document.getElementById('workspace-projects-list-content');
+  if (!projectsContainer) return;
+
+  const projects = DATA.pages.project_workspace.projects || [];
+  const selectedProjectId = SELECTED_PROJECT_ID;
+
+  if (projects.length === 0) {
+    projectsContainer.innerHTML = `<div class="workspace-note">No projects available</div>`;
+    return;
+  }
+
+  let html = '';
+  projects.forEach(proj => {
+    const isSelected = proj.project_id === selectedProjectId;
+    html += `<div class="workspace-project-item ${isSelected?'workspace-project-selected':''}"
+               onclick="selectProject('${proj.project_id}')">
+               <div class="workspace-project-name">${escapeHtml(proj.name)}</div>
+               <div class="workspace-project-meta">
+                 ${escapeHtml(proj.state)} · ${proj.message_count} msgs
+               </div>
+             </div>`;
+  });
+
+  projectsContainer.innerHTML = html;
+}
+
+// Helper function to populate messages in conversation area
+function populateMessages(messages) {
+  const messagesContainer = document.getElementById('workspace-conversation-messages');
+  if (!messagesContainer) return;
+
+  if (messages.length === 0) {
+    messagesContainer.innerHTML = `<div class="workspace-empty-state">Start the conversation by sending a message above.</div>`;
+    return;
+  }
+
+  let html = '';
+  messages.forEach(msg => {
+    const isUser = msg.role === 'user';
+    html += `<div class="workspace-message ${isUser?'workspace-message-user':'workspace-message-aios'}">
+               <div class="workspace-message-content">${escapeHtml(msg.content)}</div>
+               <div class="workspace-message-meta">
+                 <span class="workspace-message-role">${escapeHtml(msg.role)}</span>
+                 <span class="workspace-message-time">${formatTimestamp(msg.created_at)}</span>
+               </div>
+             </div>`;
+  });
+
+  messagesContainer.innerHTML = html;
+  // Scroll to bottom to show latest message
+  messagesContainer.scrollTop = messagesContainer.scrollHeight;
+}
+
+// Helper function to format timestamps
+function formatTimestamp(timestampStr) {
+  if (!timestampStr) return '';
+  try {
+    const date = new Date(timestampStr);
+    return date.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
+  } catch (e) {
+    return timestampStr.substring(11, 16); // Fallback to HH:MM format
+  }
+}
+
+// Enhanced selectProject function to handle Planning Workspace mode
+async function selectProject(projectId) {
+  SELECTED_PROJECT_ID = projectId;
+  await loadPlanningWorkspace();
+}
+
+// Enhanced load function to handle Planning Workspace mode
+async function load() {
+  const res = await fetch(API_PAGES);
+  DATA = await res.json();
+
+  // If a project is selected, fetch its specific workspace data for planning
+  if (SELECTED_PROJECT_ID !== null) {
+    try {
+      const projectRes = await fetch(`/api/pages?project_id=${SELECTED_PROJECT_ID}`);
+      const projectData = await projectRes.json();
+      // Merge planning chat data with project-specific data
+      if (projectData.pages && projectData.pages.planning_chat) {
+        // Preserve other page data but replace planning chat with project-specific data
+        DATA.pages.planning_chat = projectData.pages.planning_chat;
+      }
+    } catch (err) {
+      // If fetching specific project fails, fall back to index view
+      console.warn("Failed to load project workspace, falling back to index:", err);
+      SELECTED_PROJECT_ID = null;
+    }
+  }
+
+  render();
+}
+
+// New function to load just the planning workspace data
+async function loadPlanningWorkspace() {
+  if (SELECTED_PROJECT_ID === null) {
+    // No project selected, load basic planning chat
+    const res = await fetch(API_PAGES);
+    DATA = await res.json();
+    renderPlanning();
+    return;
+  }
+
+  try {
+    const projectRes = await fetch(`/api/pages?project_id=${SELECTED_PROJECT_ID}`);
+    const projectData = await projectRes.json();
+    if (projectData.pages && projectData.pages.planning_chat) {
+      DATA.pages.planning_chat = projectData.pages.planning_chat;
+      renderPlanning();
+    }
+  } catch (err) {
+    console.warn("Failed to load planning workspace:", err);
+    // Fallback to basic planning chat
+    const res = await fetch(API_PAGES);
+    DATA = await res.json();
+    renderPlanning();
+  }
+}
+
+// New Chat function - UI reset only, does not delete persisted messages
+function newChat() {
+  // Clear project selection but preserve all persisted data
+  SELECTED_PROJECT_ID = null;
+  loadPlanningWorkspace();
+  toast("Started new chat. Persisted project history preserved.", true);
 }
 
 function renderOnboarding() {
